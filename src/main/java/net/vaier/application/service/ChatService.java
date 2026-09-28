@@ -26,6 +26,7 @@ import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatAvailability;
 import net.vaier.domain.ChatPrompt;
+import net.vaier.domain.ConfirmationWatch;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.Errand;
 import net.vaier.domain.ErrandReport;
@@ -63,6 +64,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.YearMonth;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,7 +78,8 @@ import java.util.function.Consumer;
  * what Vaier tells the model is {@link ChatPrompt}'s, which reads exist is {@link net.vaier.domain.ChatTool}'s,
  * which actions may be proposed is {@link ChatAction}'s, whether a card is still live is
  * {@link ActionProposal}'s, when a thread is long enough to shorten is {@link Conversation}'s, which addresses
- * are on the public internet is {@link WebAddress}'s, and holding the conversation is the
+ * are on the public internet is {@link WebAddress}'s, whether an answer claims a card nothing made is
+ * {@link ConfirmationWatch}'s, and holding the conversation is the
  * {@link ForConversing} adapter's.
  *
  * <p>Since the <b>errand</b> it also runs questions nobody asked: an errand's own run, with no history, the
@@ -203,21 +206,46 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
 
         Conversation conversation = get(operator);
         log.info("Chat: answering a question with {} tools offered", tools.size());
-        StringBuilder answer = new StringBuilder();
-        ModelUsage used = forConversing.converse(configured.getAnthropicApiKey(),
+        String answer = answer(configured.getAnthropicApiKey(),
             ChatPrompt.forFleet(configured.getDomain(), now(), forPersistingMemory.load(),
                 forPersistingErrands.load(), operator).text(),
-            conversation.forModel(), question, tools, text -> {
-                answer.append(text);
-                onText.accept(text);
-            });
-        count(used);
+            conversation.forModel(), question, tools, ConfirmationWatch.overCards(), onText);
 
-        Conversation kept = appendExchange(operator, question, answer.toString());
+        Conversation kept = appendExchange(operator, question, answer);
 
         if (kept.needsCompaction()) {
             compact(configured.getAnthropicApiKey(), kept);
         }
+    }
+
+    /**
+     * One answer, streamed to {@code onText} and returned whole. A <b>Phantom confirmation</b> in it is
+     * corrected once, with the same tools; the watch decides whether it is one and what Vaier adds after.
+     */
+    private String answer(String apiKey, String prompt, List<ConversationTurn> history, String question,
+                          List<ToolOffer> tools, ConfirmationWatch watch, Consumer<String> onText) {
+        StringBuilder answer = new StringBuilder();
+        Consumer<String> said = text -> {
+            answer.append(text);
+            onText.accept(text);
+        };
+        List<ToolOffer> watched = watch.watching(tools);
+        count(forConversing.converse(apiKey, prompt, history, question, watched, said));
+        if (!watch.needsCorrection(answer.toString())) {
+            return answer.toString();
+        }
+        log.info("Chat: phantom confirmation — the answer claimed one no tool made; asking once to correct it");
+        List<ConversationTurn> soFar = new ArrayList<>(history);
+        soFar.add(new ConversationTurn(Role.OPERATOR, question));
+        soFar.add(new ConversationTurn(Role.VAIER, answer.toString()));
+        said.accept("\n\n");
+        count(forConversing.converse(apiKey, prompt, soFar, watch.correction(), watched, said));
+        String note = watch.closingNote();
+        if (!note.isEmpty()) {
+            log.info("Chat: phantom confirmation still made nothing after the correction; noting it in the answer");
+            said.accept("\n\n" + note);
+        }
+        return answer.toString();
     }
 
     /**
@@ -312,11 +340,10 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         forPersistingConversations.forget(errand.operator());
         String outcome;
         try {
-            StringBuilder answer = new StringBuilder();
-            count(forConversing.converse(configured.getAnthropicApiKey(),
+            String answer = answer(configured.getAnthropicApiKey(),
                 ChatPrompt.forErrand(configured.getDomain(), now, forPersistingMemory.load(), errand).text(),
-                List.of(), errand.instruction(), tools, answer::append));
-            outcome = report(errand, answer.toString());
+                List.of(), errand.instruction(), tools, ConfirmationWatch.overMail(), text -> { });
+            outcome = report(errand, answer);
         } catch (RuntimeException e) {
             log.warn("Marvin could not run the errand {}: {}", errand.id(), e.toString());
             outcome = ErrandReport.FAILED;

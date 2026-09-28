@@ -24,6 +24,7 @@ public record Bundle(String id, MachineId machineId, String machineLabel, List<S
                      long lifetimeMs) {
 
     public static final Duration TTL = Duration.ofHours(1);
+    static final String OFFERED = "Offered to the operator as a download card: ";
 
     /** Mailed, the link must outlive the hour: the operator asked for it to fetch when convenient. */
     public static final Duration MAILED_TTL = Duration.ofHours(24);
@@ -153,7 +154,7 @@ public record Bundle(String id, MachineId machineId, String machineLabel, List<S
 
     /** What the model is told: offered, ready, nothing written anywhere — and, when large, to ask about mail. */
     public String toolResult() {
-        String result = "Offered to the operator as a download card: " + name + " (" + describe() + "). Tell them it "
+        String result = OFFERED + name + " (" + describe() + "). Tell them it "
             + "is ready to download; the card carries the link, which lives for an hour. Nothing was copied or "
             + "written anywhere. Its id is " + id + ".";
         if (isLarge()) {

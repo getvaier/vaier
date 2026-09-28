@@ -36,7 +36,9 @@ Unlike every other action, `call_service` has no Explorer button: the service's 
 
 Chat can also *act*, but never on its own say-so. It can propose letting a waiting phone in or refusing it, backing up a machine now, updating a container to a newer image, installing a machine's pending OS updates, lifting a block, or trusting an address — each a verb the Explorer already has a button for, and none of them a restart, since Vaier has no restart button at all. Proposing one puts a **Confirmation** card in the pane with a button that says exactly what it will do; nothing runs until you click it, and the card is gone in ten minutes either way.
 
-Every card is worded in two parts, so it reads without knowing Vaier's vocabulary: a plain **headline**, and small **details** under it holding the exact technical facts an expert would check. A few examples:
+A card exists only when Marvin calls an action tool; writing about one makes none. Twice he wrote "the card is up" without calling it, so Vaier now checks every finished answer itself. If the answer says a card is up, waiting, proposed or ready to click, and no action tool made one during that answer, it is a **phantom confirmation**. Vaier tells Marvin once, with his tools still offered, to call the tool or say plainly that there is no card. A real card from that second try arrives like any other. If that try makes none either, Vaier ends the answer with *"(Vaier: no card was made — ask again.)"*. There is only ever one retry, and each phantom is logged. An errand gets the same check against a claim that something was *mailed* for a yes. There the line reads *"(Vaier: no approval mail was sent — nothing is waiting for your yes.)"*.
+
+Every card is worded in two parts, so it reads without knowing Vaier's vocabulary: a plain **headline**, and the **details** under it holding the exact technical facts an expert would check. The details are small print, dimmed until you point at them, but still there to read, select and copy. A few examples:
 
 | Action | Headline | Details |
 |---|---|---|

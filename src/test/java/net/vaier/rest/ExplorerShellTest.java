@@ -351,7 +351,7 @@ class ExplorerShellTest {
      * entry inside one, every folder read so far — and a phone never had it at all, so the layout it was the
      * exception to is now the only one. What it alone used to carry (a machine's capabilities, its last
      * backup's outcome, containers wanting a pull) had already moved onto the fleet pane's cards. Drilling in
-     * is the pane, getting back is the crumb bar, going sideways is ⌘K.
+     * is the pane, getting back is the crumb bar.
      */
     @Test
     void theShell_hasNoFleetRail_andThePaneTakesTheWholeWidth() throws IOException {
@@ -586,7 +586,7 @@ class ExplorerShellTest {
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
         // a path's children are whatever the cache already holds — reading them can never start a read,
-        // so no repaint and no ⌘K index can trigger an SFTP walk of the fleet
+        // so no repaint can trigger an SFTP walk of the fleet
         assertThat(body).contains("S.dirs");
         assertThat(body).as("childrenOf must never reach for the network").doesNotContain("fetch(")
             .doesNotContain("readDir(").doesNotContain("await");
@@ -594,8 +594,7 @@ class ExplorerShellTest {
 
     @Test
     void onlyDirectories_becomeEntriesInTheAddressSpace() throws IOException {
-        // A directory is a place you can stand; a file is contents the Inspector lists. Growing an entry for
-        // every file would make ⌘K a list of the fleet's files rather than of the places in it.
+        // A directory is a place you can stand; a file is contents the Inspector lists.
         String js = read("explorer-shell.js");
         assertThat(js).contains(".filter((e) => e.directory)");
     }
@@ -615,7 +614,7 @@ class ExplorerShellTest {
     @Test
     void aMachineLeavingTheFleet_doesNotStrandItsCachedDirectories() throws IOException {
         // A fleet reshape (peers-updated) that dropped a machine while its directories stayed in the cache
-        // would leave ⌘K offering paths into a machine that no longer exists.
+        // would leave the cache holding paths into a machine that no longer exists.
         String js = read("explorer-shell.js");
         assertThat(js).contains("function pruneDirs(");
     }
@@ -651,20 +650,6 @@ class ExplorerShellTest {
         assertThat(js).contains("S.dirs.get(k) !== entry");
         // and no second race mechanism was rolled by hand
         assertThat(js).doesNotContain("inFlight");
-    }
-
-    @Test
-    void thePalette_findsExpandedDirectories_withoutCrawlingTheFleetOverSftp() throws IOException {
-        // Directories are entries now, so ⌘K must find them — but the index is built by walking childrenOf,
-        // which only ever reads the cache. The palette can therefore see every directory the operator has
-        // already opened, and cannot touch one they have not.
-        String js = read("explorer-shell.js");
-        int from = js.indexOf("function index(");
-        assertThat(from).isPositive();
-        String body = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(body).contains("childrenOf(");
-        assertThat(body).as("the palette must never reach for the network").doesNotContain("fetch(")
-            .doesNotContain("readDir(");
     }
 
     // --- 13. slice C: containers, services and disk are entries ----------------------------------------
@@ -1160,21 +1145,6 @@ class ExplorerShellTest {
         assertThat(rule).contains("line-clamp");
         assertThat(rule).contains("overflow: hidden");
         assertThat(rule).contains("overflow-wrap");
-    }
-
-    @Test
-    void thePalette_findsContainersAndServices_becauseTheyAreEntriesNow() throws IOException {
-        // ⌘K walks childrenOf, so anything that is an entry is findable by its path. Containers and services
-        // are entries now, which is the whole claim of the slice: one namespace, one search.
-        String js = read("explorer-shell.js");
-        int from = js.indexOf("function childrenOf(");
-        assertThat(from).isPositive();
-        String body = js.substring(from, js.indexOf("\n    }", from));
-
-        assertThat(body).contains("'container'");
-        assertThat(body).contains("'service'");
-        // and childrenOf still never reaches for the network — the palette cannot start a fleet-wide scrape
-        assertThat(body).doesNotContain("fetch(").doesNotContain("await");
     }
 
     @Test
@@ -3706,9 +3676,9 @@ class ExplorerShellTest {
     // amber and red are still spent on nothing but trouble, and a status dot is never given an identity hue.
 
     /**
-     * An entry's glyph says WHAT it is about. The map exists so the rule is written once and the two
-     * surfaces that draw an entry — the "Inside this machine" grid and the ⌘K palette — cannot drift into
-     * two vocabularies.
+     * An entry's glyph says WHAT it is about. The map exists so the rule is written once and every surface
+     * that draws an entry — the "Inside this machine" grid, the listing rows — cannot drift into two
+     * vocabularies.
      */
     @Test
     void anEntrysGlyph_wearsTheColourOfWhatItIsAbout() throws IOException {
@@ -3744,16 +3714,14 @@ class ExplorerShellTest {
     }
 
     /**
-     * One rule, applied at both call sites that draw an entry, rather than two copies of a conditional — so a
-     * third surface gets the colours by construction and none can be forgotten.
+     * One rule, applied where an entry is drawn rather than copied as a conditional — so another surface gets
+     * the colours by construction and none can be forgotten.
      */
     @Test
-    void bothEntrySurfaces_drawTheirGlyphThroughTheOneTintedSeam() throws IOException {
+    void theEntryCard_drawsItsGlyphThroughTheOneTintedSeam() throws IOException {
         String js = read("explorer-shell.js");
 
         assertThat(js).as("the Inside-this-machine card").contains("card(entryIco(kid.kind, kid.name),");
-        assertThat(js).as("the palette result")
-            .contains("item.innerHTML = entryIco(entry.kind, entry.path[entry.path.length - 1]);");
         assertThat(js).as("and the seam is the one place an entry glyph is built — no surface goes round it")
             .containsOnlyOnce("svg(iconFor(");
     }
@@ -4268,7 +4236,7 @@ class ExplorerShellTest {
     @Test
     void ask_isOfferedOnlyWhileAnAnthropicApiKeyIsStored() throws IOException {
         // Without a key there is nothing to ask, and an entry that opens onto "go to Settings first" is a
-        // door painted on a wall. The menu and the palette both ask the same one question.
+        // door painted on a wall. The menu asks the one question.
         String js = read("explorer-shell.js");
 
         int from = js.indexOf("function offered(g)");
@@ -4276,7 +4244,6 @@ class ExplorerShellTest {
         String body = js.substring(from, js.indexOf("\n    }", from));
         assertThat(body).contains("g.name !== 'chat' || S.chatAvailable");
         assertThat(js).contains("if (!offered(g)) return;");
-        assertThat(js).contains("GLOBALS.filter(offered)");
         assertThat(js).contains("fetch('/chat/availability'");
         // The menu is drawn on the first frame, before that read has answered — so it is drawn once more
         // after it has. The live bug: a stored key and no Chat in the menu until the key was saved again.

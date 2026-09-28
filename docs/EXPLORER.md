@@ -2,7 +2,7 @@
 
 Back to [README](../README.md).
 
-One address space spanning the whole fleet, at `/explorer.html` — the shape Vaier's UI is becoming. It is an address space, not a column: every entry has its own link, the address bar says where you are, and **⌘K** moves you sideways. This covers the address space itself, the web terminal, the credential vault behind it, and the smaller pieces of UI polish that live alongside it.
+One address space spanning the whole fleet, at `/explorer.html` — the shape Vaier's UI is becoming. It is an address space, not a column: every entry has its own link, and the address bar says where you are. This covers the address space itself, the web terminal, the credential vault behind it, and the smaller pieces of UI polish that live alongside it.
 
 ---
 
@@ -20,13 +20,13 @@ Every machine is an **entry** you can open, and it grows only the entries Vaier 
 
 ![The Explorer's fleet view](vaier-explorer.png)
 
-The **path** you're standing on is the **address bar**, the **Inspector** below it renders whatever you select (a machine shows its details, a directory shows its listing, a container shows what Vaier knows about it, a published service shows its route), and **⌘K** searches every entry in the fleet **by name** — including containers and published services, since they're entries in the same namespace now.
+The **path** you're standing on is the **address bar**, the **Inspector** below it renders whatever you select (a machine shows its details, a directory shows its listing, a container shows what Vaier knows about it, a published service shows its route). Containers and published services are entries in the same namespace, each with its own link. (A ⌘K "Search the fleet" palette used to sit in the top bar; it was removed on 2026-09-28 — the cards and the crumbs are the way around.)
 
 **Every location has its own link.** Where you're standing is the page's address (`#/fleet/<machine>/files/home/ubuntu`), and the archive you're scrubbed to travels with it — so a reload stays put, Back and Forward walk the path you actually took, and you can bookmark a folder or hand someone a link to one.
 
 ### One pane, at every width
 
-There is no tree column. The **Inspector** takes the whole width on every screen: you drill in through its cards and listings, come back up through the address bar's crumbs, and go sideways with **⌘K**. A rail down the left drew a second view of what the Inspector already lists, and a phone never had one at all — so what was the exception is now the only layout.
+There is no tree column. The **Inspector** takes the whole width on every screen: you drill in through its cards and listings and come back up through the address bar's crumbs. A rail down the left drew a second view of what the Inspector already lists, and a phone never had one at all — so what was the exception is now the only layout.
 
 Nothing about a machine goes quiet without it, because what it alone used to carry rides on the fleet's **machine cards** — its **machine marks**. Small **capability glyphs** — a relay mark when it's a relay peer routing a LAN behind it, a Docker mark when it runs Docker, and a safe when it's the fleet's backup server — so the fleet's shape reads at a glance: how a machine is reached, what it runs, what it keeps. Its **last backup's outcome**, as a tinted archive glyph (red for a failed *or* incomplete run, amber for a warning, the backup's own aqua when it got everything, grey when it has never run) — deliberately a glyph and not a second dot, because beside the status dot a bare coloured dot that might mean either is worse than none. **How its disks stand**, as a tinted disk glyph — the disk's own violet when every watched filesystem has room, amber when the worst one is closing on the threshold it's judged against, red when one is over it — carrying the percentage only when there's something to see and naming the filesystem, its fullness and its threshold on hover ("`/volume1` is 86% full — over its 85% threshold"). It's the worst filesystem *against its own threshold*, not the fullest one, so a partition you've muted or given a threshold of its own never crowds out the disk that matters. And a count of **containers wanting a newer image**. Marks stand down in the past, which has no "now" to report.
 
@@ -46,7 +46,7 @@ Infrastructure has moved into the Explorer wholesale — adding a machine, scann
 
 ### Files and the SFTP root
 
-**Directories are read one at a time over SFTP as you open them** — never eagerly, because the fleet is behind a VPN and walking it all at once is how a page hangs. The Inspector lists what's actually inside (files and directories both), and opening a folder from its listing is how you descend; only directories become entries in their own right, because a directory is a place you can stand and **⌘K** searches places. A directory is read once and remembered, so leaving it and coming back costs nothing, and one that can't be read says so on the spot, in the server's own words ("Not allowed to read /root as geir.") — it never pretends to be empty, and that holds right down to a machine whose SSH server has no **SFTP subsystem** at all (DietPi's Dropbear ships without one), which is named along with the way out: install `openssh-sftp-server` on it, or switch it to OpenSSH.
+**Directories are read one at a time over SFTP as you open them** — never eagerly, because the fleet is behind a VPN and walking it all at once is how a page hangs. The Inspector lists what's actually inside (files and directories both), and opening a folder from its listing is how you descend; only directories become entries in their own right, because a directory is a place you can stand. A directory is read once and remembered, so leaving it and coming back costs nothing, and one that can't be read says so on the spot, in the server's own words ("Not allowed to read /root as geir.") — it never pretends to be empty, and that holds right down to a machine whose SSH server has no **SFTP subsystem** at all (DietPi's Dropbear ships without one), which is named along with the way out: install `openssh-sftp-server` on it, or switch it to OpenSSH.
 
 Vaier reads a machine's filesystem over SFTP, authenticating server-side from the **credential vault** and trusting the host key by the same trust-on-first-use pin as the web terminal, so browsing a machine needs no new credentials and no new trust. When there *is* no stored credential for a machine, the browse says exactly that and names the machine so you can add one ("No SSH credential is stored for … — add one to browse its files"), rather than looking like an empty folder; and a credential the host rejects reads as a "check the credential" failure, never a generic error.
 

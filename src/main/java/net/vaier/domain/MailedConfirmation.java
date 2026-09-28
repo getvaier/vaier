@@ -21,6 +21,8 @@ public record MailedConfirmation(String tokenDigest, Operator operator, ActionPr
 
     public static final Duration TTL = Duration.ofHours(24);
 
+    static final String MAILED = "Mailed to the operator for a yes: ";
+
     private static final SecureRandom RANDOM = new SecureRandom();
 
     /** A new confirmation for {@code operator}, and the one token that opens it. */
@@ -52,7 +54,7 @@ public record MailedConfirmation(String tokenDigest, Operator operator, ActionPr
 
     /** What Marvin is told. The one lie this must prevent is "done". */
     public String toolResult() {
-        return "Mailed to the operator for a yes: \"" + proposal.wording().sentence() + "\" Nothing has happened yet, and "
+        return MAILED + "\"" + proposal.wording().sentence() + "\" Nothing has happened yet, and "
             + "nothing will unless they say yes from the mail. Say in your report that it is waiting for their "
             + "yes, and do not say it is done.";
     }

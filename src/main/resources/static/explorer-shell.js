@@ -3,7 +3,7 @@
 // Vaier's domain is already a namespace: a file has a coordinate (machine, path, point in time), and so does a
 // container, a published service, an archive. Vaier sits at the VPN hub and is the only machine with SSH to
 // every other, so it is the only place one address space spanning the fleet can exist. This is that space:
-// the address bar says where you are, ⌘K moves you sideways, and the pane is a renderer chosen by what the
+// the address bar says where you are, and the pane is a renderer chosen by what the
 // entry at that address *is*. Nothing else is navigation.
 //
 // Slice A builds the shell and moves the terminal dock into it. Machines, files, shells and backups are real
@@ -220,7 +220,6 @@
         // and re-read after every action: the standings are the distributor's own in-memory observation, so
         // they start empty on a fresh boot and an empty `machines` is "not checked yet", never "nowhere".
         credentials: { state: 'idle', list: [], error: '' },
-        palSel: 0,
         myDeviceMachineId: null,         // GET /vpn/peers/my-device — the ONE machine THIS browser's cookie
                                           //   claims, server-decided; never "some browser claims this machine"
     };
@@ -422,7 +421,7 @@
             const entry = S.dirs.get(dirKey(path[1], remotePath(path), S.at));
             if (!entry || entry.state !== 'ready') return [];
             // Only directories become entries: a directory is a place you can stand, a file is contents the
-            // Inspector lists. An entry per file would make ⌘K a list of the fleet's files, not of its places.
+            // Inspector lists.
             return entry.entries.filter((e) => e.directory).map((e) => ({ name: e.name, kind: 'dir' }));
         }
         return [];   // a shell, a bridge — leaves
@@ -503,9 +502,9 @@
     //
     // Three reads, three different shapes of truth, and none of them polled:
     //
-    //   containers — a fleet-wide Docker scrape. Read once at start (so ⌘K can find a container without the
-    //                operator having gone looking for it first) and re-read only when the backend says a
-    //                container changed state, on the stream it already publishes that on.
+    //   containers — a fleet-wide Docker scrape. Read once at start (so a machine's card can count its
+    //                updates without the operator having opened it first) and re-read only when the backend
+    //                says a container changed state, on the stream it already publishes that on.
     //   services   — the published routes. Read at start because a machine cannot be honest without them: the
     //                `services` entry exists only on a machine that actually has some.
     //   disk       — one machine, read when its disk entry is looked at. A fleet-wide df on page load would
@@ -800,8 +799,8 @@
                        containers: 'is-docker', container: 'is-docker' };
 
     // The one place an entry's glyph is built. Every surface that draws an entry — the machine pane's grid,
-    // the palette, the listing rows — goes through here, so the colours cannot drift into three vocabularies
-    // and a fourth surface gets them for free.
+    // the listing rows — goes through here, so the colours cannot drift into two vocabularies and a third
+    // surface gets them for free.
     const entryIco = (kind, segment) =>
         svg(iconFor(kind, segment), 'ex-ico' + (TINT_FOR[kind] ? ' ' + TINT_FOR[kind] : ''));
 
@@ -9842,101 +9841,6 @@
         });
     }
 
-    // --- ⌘K: one namespace, one search ------------------------------------------------------------------
-
-    // Directories are entries now, so ⌘K must find them — and it finds them by walking childrenOf, which only
-    // ever reads the cache. That is the whole trick: the palette can see every directory the operator has
-    // already opened, and is structurally incapable of touching one they have not. A palette that crawled the
-    // fleet over SFTP to build an index would hang the moment it met a sleeping machine.
-    // Every entry twice over: the path Vaier addresses it by, and the path a person reads it as. They differ at
-    // exactly one segment — a machine is addressed by identity and read by name — and that one segment was the
-    // whole bug. The index used to keep only the address, so the palette matched (and displayed)
-    // /fleet/7a6d0e35-25d9-420c-b7bc-1815ce7e0dc1/files, and typing a machine's name found nothing at all.
-    // Nobody noticed while a rail was there to carry you; ⌘K and the crumb bar are the way across now.
-    function index() {
-        const out = [];
-        (function walk(path, words) {
-            out.push({ path: path, kind: kindOf(path), label: '/' + words.join('/') });
-            childrenOf(path).forEach((kid) =>
-                walk(path.concat([kid.name]), words.concat([kid.label || kid.name])));
-        })(['fleet'], ['fleet']);
-        // Vaier's own entries are not of the fleet, so the walk above cannot reach them — and they are now
-        // behind a menu rather than standing in the fleet, which makes finding them here matter more, not less.
-        GLOBALS.filter(offered).forEach((g) => out.push({ path: [g.name], kind: kindOf([g.name]), label: '/' + g.label }));
-        return out;
-    }
-
-    function matches(query) {
-        const needle = query.trim().toLowerCase();
-        // Everything except the fleet root itself — "/fleet" is where the crumb bar's first segment already
-        // goes, and an entry for the place you can always reach in one click is a wasted row.
-        const all = index().filter((e) => e.label !== '/fleet');
-        if (!needle) return all.filter((e) => e.kind === 'machine').slice(0, 9);
-        return all.filter((e) => e.label.toLowerCase().includes(needle)).slice(0, 40);
-    }
-
-    function paintPalette(query) {
-        const list = $('exPalList');
-        list.textContent = '';
-        const found = matches(query);
-        if (!found.length) {
-            const empty = document.createElement('div');
-            empty.className = 'ex-pal-empty';
-            empty.textContent = 'Nothing in the fleet matches that.';
-            list.appendChild(empty);
-            return;
-        }
-        found.forEach((entry, i) => {
-            const item = document.createElement('button');
-            item.className = 'ex-pal-item' + (i === S.palSel ? ' is-on' : '');
-            // The last segment, exactly as every entry surface does it — a machine's icon reads off its identity and
-            // a global's off its own name, and both of those are the tail of the path. Reading path[1] instead
-            // gave every Vaier entry the fallback file glyph.
-            item.innerHTML = entryIco(entry.kind, entry.path[entry.path.length - 1]);
-
-            const pth = document.createElement('span');
-            pth.className = 'ex-pth';
-            highlight(pth, entry.label, query.trim());
-            item.appendChild(pth);
-
-            const kind = document.createElement('span');
-            kind.className = 'ex-kind';
-            kind.textContent = entry.kind;
-            item.appendChild(kind);
-
-            item.onclick = () => jump(entry.path);
-            list.appendChild(item);
-        });
-    }
-
-    // The match is lit inside the path, and the path is never markup — it carries a machine's name, which is
-    // the operator's own text.
-    function highlight(host, text, needle) {
-        if (!needle) return host.appendChild(document.createTextNode(text));
-        const at = text.toLowerCase().indexOf(needle.toLowerCase());
-        if (at < 0) return host.appendChild(document.createTextNode(text));
-        const mark = document.createElement('mark');
-        mark.textContent = text.slice(at, at + needle.length);
-        host.appendChild(document.createTextNode(text.slice(0, at)));
-        host.appendChild(mark);
-        host.appendChild(document.createTextNode(text.slice(at + needle.length)));
-    }
-
-    function openPalette() {
-        $('exScrim').classList.add('is-on');
-        $('exPalInput').value = '';
-        S.palSel = 0;
-        paintPalette('');
-        $('exPalInput').focus();
-    }
-
-    const closePalette = () => $('exScrim').classList.remove('is-on');
-
-    function jump(path) {
-        closePalette();
-        go(path);
-    }
-
     // --- the address ------------------------------------------------------------------------------------
     //
     // Where you are IS the URL. Reload, Back, Forward, bookmark and open-in-new-tab all work because the
@@ -10477,10 +10381,6 @@
 
     // --- wiring -----------------------------------------------------------------------------------------
 
-    $('exPalBtn').onclick = openPalette;
-
-    $('exScrim').onclick = (e) => { if (e.target === $('exScrim')) closePalette(); };
-
     // --- the Vaier menu ---------------------------------------------------------------------------------
     //
     // Settings, Users, Security and Concepts are Vaier's, not the fleet's — siblings of the fleet root rather
@@ -10550,26 +10450,7 @@
     // A click anywhere else closes it — the reflex every menu has.
     document.addEventListener('click', () => setVMenu(false));
     $('exVMenu').onclick = (e) => e.stopPropagation();
-    $('exPalInput').oninput = () => { S.palSel = 0; paintPalette($('exPalInput').value); };
-    $('exPalInput').onkeydown = (e) => {
-        const found = matches($('exPalInput').value);
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            S.palSel = Math.min(S.palSel + 1, found.length - 1);
-            paintPalette($('exPalInput').value);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            S.palSel = Math.max(S.palSel - 1, 0);
-            paintPalette($('exPalInput').value);
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (found[S.palSel]) jump(found[S.palSel].path);
-        } else if (e.key === 'Escape') {
-            closePalette();
-        }
-    };
     document.addEventListener('keydown', (e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openPalette(); }
         if (e.key === 'Escape') setVMenu(false);
     });
 
@@ -10624,8 +10505,7 @@
 
         // The containers are not awaited. The fleet-wide Docker scrape can take seconds against a sleeping
         // host, and no part of the first paint depends on it — the `containers` entry is decided by
-        // /machines' runsDocker, not by what the scrape finds. It fills itself in when it lands, which is
-        // also what lets ⌘K find a container the operator never went looking for.
+        // /machines' runsDocker, not by what the scrape finds. It fills itself in when it lands.
         loadContainers();
         // The fleet's disk pressure, read once here rather than on view — a machine card carries its disk
         // mark whether or not anyone opens that machine, and render() must never fetch. Not awaited: it is a

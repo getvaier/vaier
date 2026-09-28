@@ -6,6 +6,7 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ChatPrompt;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ChatUnavailableException;
+import net.vaier.domain.ConfirmationWatch;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.Errand;
 import net.vaier.domain.ErrandReport;
@@ -153,6 +154,42 @@ class ChatServiceTest {
             }
             return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
         }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
+    }
+
+    /** Each call to the model answers with the next of these, whole. */
+    private void answeringInTurn(String... answers) {
+        int[] call = {0};
+        doAnswer(invocation -> {
+            Consumer<String> onText = invocation.getArgument(5);
+            onText.accept(answers[call[0]++]);
+            return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
+        }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
+    }
+
+    /**
+     * A phantom confirmation: the model said a card was up and called no action tool. It is told so once,
+     * with the tools still offered, and when that makes no card either Vaier says so in the answer itself.
+     */
+    @Test
+    void ask_whoseAnswerClaimsACardNoToolMade_isCorrectedOnce_andNotedWhenStillNoCard() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
+        answeringInTurn("The card is up.", "Sorry, there is no card.");
+        List<String> received = new ArrayList<>();
+
+        service.ask(GEIR, "back up colina", TOOLS, received::add);
+
+        ConfirmationWatch watch = ConfirmationWatch.overCards();
+        verify(forConversing).converse(eq("sk-ant-api03-the-key"), anyString(),
+            eq(List.of(new ConversationTurn(Role.OPERATOR, "back up colina"),
+                new ConversationTurn(Role.VAIER, "The card is up."))),
+            eq(watch.correction()), eq(TOOLS), any());
+        verify(forConversing, times(2)).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
+        String answered = "The card is up.\n\nSorry, there is no card.\n\n" + watch.closingNote();
+        assertThat(String.join("", received)).isEqualTo(answered);
+        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
+        verify(forPersistingConversations).save(saved.capture());
+        assertThat(saved.getValue().turns()).extracting(ConversationTurn::text).containsExactly("back up colina", answered);
     }
 
     @Test
@@ -676,6 +713,21 @@ class ChatServiceTest {
         assertThat(saved.getValue().turns()).extracting(ConversationTurn::text)
             .containsExactly("Errand, Every day at 08:00: colina27 has 3 updates.");
         verify(forPublishingEvents).publish("chat", "errand-reported", "");
+    }
+
+    /** The errand's phantom is a mail claimed for a yes that no action tool sent. */
+    @Test
+    void run_whoseReportClaimsAMailNoToolSent_isCorrectedOnce_andTheReportSaysNothingWasMailed() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        Errand errand = due();
+        answeringInTurn("I mailed you the upgrade for a yes.", "Nothing was mailed.");
+
+        service.run(errand, TOOLS);
+
+        ConfirmationWatch watch = ConfirmationWatch.overMail();
+        verify(forConversing).converse(anyString(), anyString(), anyList(), eq(watch.correction()), eq(TOOLS), any());
+        verify(forSendingAdminNotification).sendTo(eq("geir@example.com"), anyString(),
+            contains("Nothing was mailed.\n\n" + watch.closingNote()), eq("errand " + errand.id()));
     }
 
     /** Notify only on trouble: the one word means no mail, no turn in the thread, and no nudge to the pane. */

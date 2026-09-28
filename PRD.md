@@ -1759,7 +1759,7 @@ Three things this buys that a set of pages structurally cannot:
   unprotected) is invisible to a separate Backups page. *(The backend for this landed in §6.20 slice 4:
   each browsed entry now carries a **backed up** / **contains backed up** flag, and a select-and-back-up
   call get-or-creates the machine's repository and job from a path selection.)*
-- **One search.** One address space means one ⌘K over the whole fleet.
+- ~~**One search.** One address space means one ⌘K over the whole fleet.~~ *(Removed 2026-09-28 — see "⌘K search removed" below.)*
 
 **Slices:**
 - [x] **A — The shell ✅.** `explorer.html` is the tree shell: tree rail (fleet root → machines → `files`,
@@ -2230,6 +2230,10 @@ Three things this buys that a set of pages structurally cannot:
   fleet's machine cards ✅" in §6.9. (The **disk-fill forecast** — **runway** and fill rate — is still not on a
   card or in the Inspector, but no longer for want of the sample *history*: that is persisted as a
   **disk-fill trend** now. It is simply unbuilt — the item above.)
+- **⌘K search removed ✅ (2026-09-28).** The "Search the fleet" palette — the top-bar button, its ⌘K/Ctrl+K
+  shortcut and its dialog — is gone. Navigation is the Inspector's cards and listings to drill in and the
+  **address bar**'s crumbs to come back up; every entry keeps its own link. It had no backend of its own (it
+  walked the shell's in-memory cache), so nothing server-side went with it.
 
 **Decided up front — where the tree does not fit:**
 - **Wizards.** Fleet backup is a guided flow; a tree cannot teach. It stays a flow, rendered as the Inspector
@@ -4385,3 +4389,5 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 **UI.** A separate **Block an address** control — address field, duration select defaulted to 4 hours, its own section below the trusted list — never a third verb on a threat row beside **Trust this address**: the two point opposite ways, and #349 exists precisely so a misclick can't confuse them.
 
 **Addendum ✅ (2026-09-28): Chat reads like a messenger.** The pane opens at the newest turn and the thread settles at its foot with the box pinned under it; a repaint keeps an operator who scrolled up where they were. Marvin's turns are grey bubbles on the left, the operator's accent-tinted on the right. "Start over" left the thread for the foot of the Marvin menu as **Start a new conversation**, behind one confirm. Fixed alongside: Marvin twice said a card was up without calling the tool — he copied the "Proposed: …" record lines as text. Those records now read "Card from an action tool: …", and the prompt says a card exists only when an action tool is called in the same answer.
+
+**Addendum ✅ (2026-09-28): Vaier catches a phantom confirmation itself.** The prompt rule was not enough on its own, so the check is now mechanical. When an answer finishes saying a card is up, but no action tool made one during that answer, Vaier asks Marvin once, with the tools still offered, to call the tool or say there is no card. If that makes none either, Vaier appends its own line. An errand gets the same check on a claim of having *mailed* something for a yes. The domain's `ConfirmationWatch` makes the decision; it is logged at INFO. In the same change, a card's **details** became near-invisible small print (11.5px, dim, 45% opacity) in the pane and on the approval page.

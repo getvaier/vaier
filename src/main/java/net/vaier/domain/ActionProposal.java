@@ -16,6 +16,7 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
                              long proposedAtEpochMs) {
 
     private static final String RECORD = "Card from an action tool: ";
+    static final String PROPOSED = "Proposed to the operator as a card: ";
 
     public static final Duration TTL = Duration.ofMinutes(10);
 
@@ -59,7 +60,7 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
 
     /** What the model is told. The one lie this must prevent is "done". */
     public String toolResult() {
-        return "Proposed to the operator as a card: \"" + wording.sentence() + "\" Nothing has happened yet, and nothing "
+        return PROPOSED + "\"" + wording.sentence() + "\" Nothing has happened yet, and nothing "
             + "will until they click it. Tell them it is waiting for their click, and do not say it is done.";
     }
 }

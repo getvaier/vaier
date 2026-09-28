@@ -1,6 +1,6 @@
 /* Explorer shell — the fleet as one tree (#323, slice A).
 
-   Page-scoped layout for the tree rail, the address bar, the Inspector and the ⌘K palette. Every colour and
+   Page-scoped layout for the tree rail, the address bar and the Inspector. Every colour and
    radius comes from the tokens in styles.css; the topbar itself is styles.css's, unchanged. Prefix: ex-,
    because styles.css already owns .btn and .card and this page is not the place to redefine them.
 
@@ -90,27 +90,6 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-crumb:hover { color: var(--accent); }
 .ex-crumb-sep { color: var(--text-dim); flex: none; }
 .ex-crumb-here { color: var(--text); font-weight: 600; padding: 3px 6px; white-space: nowrap; }
-
-.ex-kbd {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    height: 34px;
-    padding: 0 11px;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-1);
-    color: var(--text-muted);
-    font-family: inherit;
-    font-size: 14px;
-    cursor: pointer;
-}
-.ex-kbd:hover { color: var(--text-muted); border-color: var(--border-hi); }
-/* The magnifier only shows once the button loses its words on a phone; on a wide screen the label and the
-   ⌘K chip carry it, exactly as before. */
-.ex-kbd-ico { display: none; }
-.ex-kbd-chip { color: var(--text-dim); }
 
 /* --- the Vaier menu -------------------------------------------------------------------------------- */
 /* Settings, Users, Security, Concepts: Vaier's own, siblings of the fleet rather than things inside it, so
@@ -1081,7 +1060,7 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 }
 .ex-pane.is-bridged { overflow: hidden; }
 
-/* --- ⌘K: one namespace, one search ------------------------------------------------------------------ */
+/* --- the scrim every dialog sits on ----------------------------------------------------------------- */
 
 .ex-scrim {
     position: fixed; inset: 0;
@@ -1093,53 +1072,6 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
     z-index: 200;
 }
 .ex-scrim.is-on { display: flex; }
-
-.ex-pal {
-    width: min(560px, 92vw);
-    background: var(--bg-panel);
-    border: 1px solid var(--border-hi);
-    border-radius: var(--radius-2);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, .55);
-    overflow: hidden;
-}
-.ex-pal input {
-    width: 100%;
-    padding: 17px 20px;
-    border: 0;
-    border-bottom: 1px solid var(--border);
-    background: transparent;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 17px;
-    outline: none;
-}
-.ex-pal input::placeholder { color: var(--text-dim); }
-.ex-pal-list { max-height: 380px; overflow-y: auto; padding: 8px; }
-.ex-pal-item {
-    display: flex; align-items: center; gap: 11px;
-    width: 100%;
-    min-height: 38px;
-    padding: 8px 12px;
-    background: none;
-    border: 0;
-    border-radius: var(--radius-1);
-    text-align: left;
-    color: var(--text-muted);
-    font-family: inherit;
-    cursor: pointer;
-}
-.ex-pal-item.is-on { background: var(--bg-hover); color: var(--text); }
-.ex-pal-item .ex-pth {
-    flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 14.5px;
-}
-.ex-pal-item .ex-pth mark { background: none; color: var(--accent); }
-.ex-pal-item .ex-kind {
-    font-size: 13px;
-    color: var(--text-dim);
-}
-.ex-pal-empty { padding: 22px 16px; color: var(--text-dim); text-align: center; }
 
 /* --- the Clipboard tray + transfers, a toast, a dialog: the app-level overlay layer (#321 slice 2) ----
    The iframe that trapped every overlay in a section's viewport is gone, so the shell finally has a place
@@ -1656,11 +1588,14 @@ select.ex-input { cursor: pointer; }
 .ex-chat-card-sentence { font-size: 15px; line-height: 1.5; color: var(--text); }
 /* Under the plain headline, the exact facts: small and quiet, but always there, and a long path or body
    wraps rather than pushing the card wider than a phone. */
+/* The small print: almost invisible until looked at, still selectable. */
 .ex-chat-card-details {
     margin-top: 3px;
-    font-size: 13px; line-height: 1.45; color: var(--text-muted);
+    font-size: 11.5px; line-height: 1.45; color: var(--text-dim); opacity: .45;
     overflow-wrap: anywhere;
+    transition: opacity .15s;
 }
+.ex-chat-card-details:hover { opacity: .85; }
 .ex-chat-card-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .ex-chat-card-outcome { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
 .ex-chat-card.is-done { border-left-color: var(--accent); }
@@ -1835,12 +1770,9 @@ select.ex-input { cursor: pointer; }
 }
 
 @media (max-width: 760px) {
-    /* The chrome loses its words but not its actions: the address bar keeps the room, search and the Vaier
-       menu fall back to their glyphs. */
+    /* The chrome loses its words but not its actions: the address bar keeps the room, the Vaier menu falls
+       back to its glyph. */
     .ex-addressbar { margin: 0 6px; }
-    .ex-kbd-lbl, .ex-kbd-chip { display: none; }
-    .ex-kbd-ico { display: block; }
-    .ex-kbd { padding: 0 9px; }
     .ex-vmenu-lbl { display: none; }
     .ex-vmenu-btn { width: 32px; height: 32px; padding: 0; justify-content: center; }
 
@@ -1933,9 +1865,9 @@ select.ex-input { cursor: pointer; }
     /* Underlining a name on tap is a pointer idiom; a touch row says "pressed" with its whole surface. */
     button.ex-lname:hover .ex-nm, a.ex-lname:hover .ex-nm { color: inherit; text-decoration: none; }
     .ex-lrow:active { background: var(--bg-hover); }
-    /* 16px keeps iOS from zooming the layout the instant a field takes focus — the search field, and every
-       form input (Settings, Add machine, credentials). */
-    .ex-pal input, .ex-input { font-size: 16px; }
+    /* 16px keeps iOS from zooming the layout the instant a field takes focus — every form input (Settings,
+       Add machine, credentials). */
+    .ex-input { font-size: 16px; }
     /* Key/value detail stacks: a fixed label column starves a mono address on a phone, so the value gets
        its own line under its label instead. */
     .ex-kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
