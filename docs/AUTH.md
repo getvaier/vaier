@@ -110,7 +110,7 @@ Rules are keyed by the service's host, so path-scoped services that share one su
 
 ## Service credentials
 
-Some services keep a login of their own behind social login — openHAB's API, say. Rather than tell everyone its password, give the service a **service credential**: a username and password Vaier hands it for every person it lets in. In the **Explorer**, open the published service and fill in **Service credential** under Allowed groups. It is offered only in Social auth mode, because only there does Vaier's own check run on each request.
+Some services keep a login of their own behind social login — openHAB's API, say. Rather than tell everyone its password, give the service a **service credential**: a username and password Vaier hands it for every person it lets in. In the **Explorer**, open the published service and fill in **Service credential** under Allowed groups. It is offered only in Social auth mode, because only there does Vaier's own check run on each request. Marvin's reads of the service carry the same credential; the paths he may read without asking are the service's **free reads**, listed just below it on the same pane once you have granted any with **Always allow** (see [Chat](CHAT.md)).
 
 - The **shared** credential is used for everyone who has no credential of their own.
 - A **personal** credential is for one access entry — Turid gets her own openHAB user, and the service can tell her apart. Pick the person, then their username and password.

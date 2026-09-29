@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.AddErrandUseCase;
 import net.vaier.application.CancelErrandUseCase;
 import net.vaier.application.ChatUseCase;
+import net.vaier.application.FollowUpUseCase;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
@@ -26,6 +27,7 @@ import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatAvailability;
 import net.vaier.domain.ChatPrompt;
+import net.vaier.domain.ConfirmationRecord;
 import net.vaier.domain.ConfirmationWatch;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.Errand;
@@ -49,6 +51,7 @@ import net.vaier.domain.WebQuery;
 import net.vaier.domain.WebSearchResults;
 import net.vaier.domain.port.ForConversing;
 import net.vaier.domain.port.ForHoldingActionProposals;
+import net.vaier.domain.port.ForHoldingBundles;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingConversations;
 import net.vaier.domain.port.ForPersistingErrands;
@@ -62,6 +65,7 @@ import net.vaier.domain.port.ForSearchingTheWeb;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -89,7 +93,7 @@ import java.util.function.Consumer;
  */
 @Service
 @Slf4j
-public class ChatService implements ChatUseCase, IsChatAvailableUseCase, ProposeActionUseCase,
+public class ChatService implements ChatUseCase, FollowUpUseCase, IsChatAvailableUseCase, ProposeActionUseCase,
     TakeActionProposalUseCase, GetConversationUseCase, ForgetConversationUseCase,
     RememberActionOutcomeUseCase, RememberUseCase, ForgetUseCase, GetMemoryUseCase, GetSpendUseCase,
     ReadWebPageUseCase, SearchWebUseCase, AddErrandUseCase, CancelErrandUseCase, GetErrandsUseCase,
@@ -103,6 +107,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     private final ForPersistingAppConfiguration configPersistence;
     private final ForConversing forConversing;
     private final ForHoldingActionProposals forHoldingActionProposals;
+    private final ForHoldingBundles forHoldingBundles;
     private final ForPersistingConversations forPersistingConversations;
     private final ForPersistingMemory forPersistingMemory;
     private final ForPersistingSpend forPersistingSpend;
@@ -116,6 +121,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
 
     public ChatService(ForPersistingAppConfiguration configPersistence, ForConversing forConversing,
                       ForHoldingActionProposals forHoldingActionProposals,
+                      ForHoldingBundles forHoldingBundles,
                       ForPersistingConversations forPersistingConversations,
                       ForPersistingMemory forPersistingMemory,
                       ForPersistingSpend forPersistingSpend,
@@ -129,6 +135,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         this.configPersistence = configPersistence;
         this.forConversing = forConversing;
         this.forHoldingActionProposals = forHoldingActionProposals;
+        this.forHoldingBundles = forHoldingBundles;
         this.forPersistingConversations = forPersistingConversations;
         this.forPersistingMemory = forPersistingMemory;
         this.forPersistingSpend = forPersistingSpend;
@@ -198,24 +205,61 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
      */
     @Override
     public void ask(Operator operator, String question, List<ToolOffer> tools, Consumer<String> onText) {
-        // Re-decided on every question, never remembered from when the pane was opened: the operator may
-        // have cleared the key since.
-        Optional<VaierConfig> config = configPersistence.load();
-        ChatAvailability.of(config).requireAvailable();
-        VaierConfig configured = config.orElseThrow();
-
+        VaierConfig configured = configured();
         Conversation conversation = get(operator);
         log.info("Chat: answering a question with {} tools offered", tools.size());
-        String answer = answer(configured.getAnthropicApiKey(),
-            ChatPrompt.forFleet(configured.getDomain(), now(), forPersistingMemory.load(),
-                forPersistingErrands.load(), operator).text(),
-            conversation.forModel(), question, tools, ConfirmationWatch.overCards(), onText);
+        String answer = answer(configured.getAnthropicApiKey(), fleetPrompt(configured, operator),
+            conversation.forModel(), question, tools, cardWatch(operator), onText);
 
-        Conversation kept = appendExchange(operator, question, answer);
+        // Added to the thread as it stands now: an errand may have reported while the answer was made.
+        Conversation kept = forPersistingConversations.update(operator,
+            current -> current.withExchange(question, answer, clock.instant()));
 
         if (kept.needsCompaction()) {
             compact(configured.getAnthropicApiKey(), kept);
         }
+    }
+
+    /**
+     * A <b>follow-up</b>: the kept thread, ending on what came of the yes, with the domain's instruction in place
+     * of a question. Only the answer is kept. Whether one is owed at all is {@link Conversation}'s decision.
+     */
+    @Override
+    public boolean followUp(Operator operator, List<ToolOffer> tools, Consumer<String> onText) {
+        VaierConfig configured = configured();
+        Conversation conversation = get(operator);
+        Optional<String> instruction = conversation.followUp();
+        if (instruction.isEmpty()) {
+            return false;
+        }
+        log.info("Chat: following up a yes with {} tools offered", tools.size());
+        String answer = answer(configured.getAnthropicApiKey(), fleetPrompt(configured, operator),
+            conversation.forModel(), instruction.get(), tools, cardWatch(operator), onText);
+
+        Conversation kept = forPersistingConversations.update(operator,
+            current -> current.withAnswer(answer, clock.instant()));
+
+        if (kept.needsCompaction()) {
+            compact(configured.getAnthropicApiKey(), kept);
+        }
+        return true;
+    }
+
+    /** Re-decided on every answer, never remembered from when the pane was opened: the key may be gone since. */
+    private VaierConfig configured() {
+        Optional<VaierConfig> config = configPersistence.load();
+        ChatAvailability.of(config).requireAvailable();
+        return config.orElseThrow();
+    }
+
+    private String fleetPrompt(VaierConfig configured, Operator operator) {
+        return ChatPrompt.forFleet(configured.getDomain(), now(), forPersistingMemory.load(),
+            forPersistingErrands.load(), operator).text();
+    }
+
+    private ConfirmationWatch cardWatch(Operator operator) {
+        return ConfirmationWatch.overCards(forHoldingActionProposals.heldFor(operator),
+            forHoldingBundles.heldFor(operator), clock.instant().toEpochMilli());
     }
 
     /**
@@ -248,22 +292,6 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         return answer.toString();
     }
 
-    /**
-     * Every change to a kept conversation goes through one of these two, and both re-read before they write.
-     * An answer takes tens of seconds and an errand can report in the middle of one: saving the instance the
-     * question loaded would throw that turn away without a trace. {@code synchronized} because two writers
-     * reading the same file at the same moment is the same bug with better timing.
-     */
-    private synchronized Conversation appendExchange(Operator operator, String question, String answer) {
-        Conversation conversation = get(operator).withExchange(question, answer);
-        forPersistingConversations.save(conversation);
-        return conversation;
-    }
-
-    private synchronized void appendTurn(Operator operator, ConversationTurn turn) {
-        forPersistingConversations.save(get(operator).with(turn));
-    }
-
     private void compact(String apiKey, Conversation conversation) {
         StringBuilder summary = new StringBuilder();
         try {
@@ -273,10 +301,8 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
             log.warn("Chat could not shorten a long conversation; keeping it whole: {}", e.toString());
             return;
         }
-        Conversation compacted = conversation.compacted(summary.toString());
-        if (compacted != conversation) {
-            forPersistingConversations.save(compacted);
-        }
+        forPersistingConversations.update(conversation.operator(),
+            current -> current.compacted(summary.toString(), conversation));
     }
 
     @Override
@@ -290,8 +316,15 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     }
 
     @Override
+    public void remember(Operator operator, ConfirmationRecord record) {
+        forPersistingConversations.update(operator,
+            current -> current.with(ConversationTurn.recording(record, clock.instant())));
+    }
+
+    @Override
     public void remember(Operator operator, String outcome) {
-        appendTurn(operator, new ConversationTurn(Role.VAIER, outcome));
+        forPersistingConversations.update(operator,
+            current -> current.with(ConversationTurn.said(Role.VAIER, outcome, clock.instant())));
     }
 
     // --- errands: what Marvin is sent off to do later (#360 slice 2) ---------------------------------
@@ -321,28 +354,25 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     }
 
     /**
-     * One errand, run with nobody watching. It starts a new session: the operator's kept conversation is
-     * forgotten first, so the report opens a fresh thread rather than piling on yesterday's, and the model
-     * is given no history — what carries across runs is Memory, and that is in the prompt. The answer is
-     * mailed unless the report says there was nothing to say, kept as the new thread's first turn so the
-     * next question knows what was found, and the pane is nudged so it appears without being asked for.
+     * One errand, run with nobody watching. The model is given no history — what carries across runs is Memory,
+     * and that is in the prompt. The answer is mailed unless the report says there was nothing to say, kept in
+     * the operator's thread so the next question knows what was found (a fresh thread once they have been
+     * quiet a while, which is {@link Conversation}'s call), and the pane is nudged so it appears unasked.
      *
      * <p>An answer that could not be made moves the errand on all the same, marked "failed". Nobody is
      * watching: a retry here would be a retry storm against a paid API that nothing stops.
      */
     @Override
     public void run(Errand errand, List<ToolOffer> tools) {
-        Optional<VaierConfig> config = configPersistence.load();
-        ChatAvailability.of(config).requireAvailable();
-        VaierConfig configured = config.orElseThrow();
+        VaierConfig configured = configured();
 
         ZonedDateTime now = now();
-        forPersistingConversations.forget(errand.operator());
         String outcome;
         try {
             String answer = answer(configured.getAnthropicApiKey(),
                 ChatPrompt.forErrand(configured.getDomain(), now, forPersistingMemory.load(), errand).text(),
-                List.of(), errand.instruction(), tools, ConfirmationWatch.overMail(), text -> { });
+                List.of(), errand.instruction(), tools, ConfirmationWatch.overMail(forPersistingMailedConfirmations.load(),
+                    errand.operator(), clock.instant().toEpochMilli()), text -> { });
             outcome = report(errand, answer);
         } catch (RuntimeException e) {
             log.warn("Marvin could not run the errand {}: {}", errand.id(), e.toString());
@@ -352,8 +382,8 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     }
 
     /**
-     * The errand, moved on. Re-read and {@code synchronized} for the same reason every conversation mutation
-     * is: a run takes tens of seconds, and an errand added or cancelled while it ran must survive it.
+     * The errand, moved on. Re-read and {@code synchronized}: a run takes tens of seconds, and an errand added
+     * or cancelled while it ran must survive it.
      */
     private synchronized void afterRun(String id, ZonedDateTime now, String outcome) {
         forPersistingErrands.save(forPersistingErrands.load().afterRun(id, now, outcome));
@@ -365,7 +395,9 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         if (!report.isSilent()) {
             errand.operator().email().ifPresent(to -> forSendingAdminNotification
                 .sendTo(to, report.subject(), report.body(), "errand " + errand.id()));
-            appendTurn(errand.operator(), report.conversationTurn());
+            Instant at = clock.instant();
+            forPersistingConversations.update(errand.operator(),
+                current -> current.withErrandReport(report.conversationTurn(at), at));
             forPublishingEvents.publish(CHAT_TOPIC, ERRAND_REPORTED_EVENT, "");
         }
         return report.outcome();
@@ -373,9 +405,9 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
 
     /** A card, held. Whether it may be proposed at all is {@link ActionProposal}'s decision. */
     @Override
-    public ActionProposal propose(ChatAction action, Map<String, String> arguments) {
+    public ActionProposal propose(Operator operator, ChatAction action, Map<String, String> arguments) {
         ActionProposal proposal = ActionProposal.propose(action, arguments, System.currentTimeMillis());
-        forHoldingActionProposals.hold(proposal);
+        forHoldingActionProposals.hold(operator, proposal);
         return proposal;
     }
 

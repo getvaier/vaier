@@ -4266,7 +4266,12 @@ class ExplorerShellTest {
         assertThat(body).contains("fetch('/chat', {").contains("method: 'POST'");
         // Slice 3: the conversation is Vaier's to remember; the browser sends the question and nothing else.
         assertThat(body).doesNotContain("history");
-        assertThat(body).contains("readAnswerStream(res.body");
+        // A follow-up after a yes is the same stream with no question at all.
+        int follow = js.indexOf("async function followUp(");
+        assertThat(js.substring(follow, js.indexOf("\n    }", follow)))
+            .contains("fetch('/chat/follow-up', { method: 'POST' })");
+        int stream = js.indexOf("async function answerFrom(");
+        assertThat(js.substring(stream, js.indexOf("\n    }", stream))).contains("readAnswerStream(res.body");
         assertThat(js).doesNotContain("EventSource('/ask");
         int reader = js.indexOf("function readAnswerStream(");
         assertThat(reader).isPositive();
@@ -4319,12 +4324,12 @@ class ExplorerShellTest {
         // the only thing that runs it — the model never does. A declined card says so and runs nothing.
         String js = read("explorer-shell.js");
 
-        int ask = js.indexOf("async function askVaier(");
+        int ask = js.indexOf("async function answerFrom(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("name === 'confirm'");
         // The card goes before the answer being written, so the answer stays the last Vaier turn and the
         // streaming painter keeps writing into the right element.
-        assertThat(askBody).contains("S.chat.turns.splice(S.chat.turns.length - 1, 0,");
+        assertThat(askBody).contains("S.chat.turns.splice(S.chat.turns.indexOf(answer), 0,");
 
         int card = js.indexOf("function chatCard(");
         assertThat(card).isPositive();
@@ -4375,7 +4380,7 @@ class ExplorerShellTest {
         // shell: the browser follows the link and streams the zip to disk, as every Explorer download does.
         String js = read("explorer-shell.js");
 
-        int ask = js.indexOf("async function askVaier(");
+        int ask = js.indexOf("async function answerFrom(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("name === 'bundle'");
         int card = js.indexOf("function chatBundleCard(");
@@ -4411,7 +4416,7 @@ class ExplorerShellTest {
         String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
         assertThat(chatBody).doesNotContain("What Marvin remembers");
         // Re-read after every answer, because the answer may have remembered something.
-        int ask = js.indexOf("async function askVaier(");
+        int ask = js.indexOf("async function answerFrom(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("loadMemory()");
     }
@@ -4441,7 +4446,7 @@ class ExplorerShellTest {
         String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
         assertThat(chatBody).doesNotContain("errand");
         // Re-read after every answer, because the answer may have sent Marvin on one.
-        int ask = js.indexOf("async function askVaier(");
+        int ask = js.indexOf("async function answerFrom(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("loadErrands()");
     }
@@ -4499,7 +4504,7 @@ class ExplorerShellTest {
         assertThat(dialog).isPositive();
         String dialogBody = js.substring(dialog, js.indexOf("\n    }", dialog));
         assertThat(dialogBody).contains("s.figure + ' this month'").contains("The invoice wins if they differ.");
-        int ask = js.indexOf("async function askVaier(");
+        int ask = js.indexOf("async function answerFrom(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("loadSpend()");
         int init = js.indexOf("async function init(");
@@ -4543,7 +4548,7 @@ class ExplorerShellTest {
         // shows under the answer, and a `done` the pane insists on — ending without it is said, not hidden.
         String js = read("explorer-shell.js");
 
-        int ask = js.indexOf("async function askVaier(");
+        int ask = js.indexOf("async function answerFrom(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("name === 'working'").contains("name === 'ping'").contains("name === 'done'");
         assertThat(askBody).contains("if (!finished) {").contains("The connection dropped while Marvin was still working.");

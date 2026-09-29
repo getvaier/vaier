@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import net.vaier.domain.ConversationTurn.Role;
 
+import java.time.Instant;
+
 /**
  * What comes of an <b>errand</b> Marvin has run (#360): the mail to the operator who sent him, the turn in
  * their conversation, and the decision that keeps a watch from becoming noise.
@@ -58,8 +60,8 @@ public record ErrandReport(Errand errand, String answer) {
     }
 
     /** The report in the thread, so the next question knows what Marvin found while nobody was looking. */
-    public ConversationTurn conversationTurn() {
-        return new ConversationTurn(Role.VAIER, "Errand, " + errand.rhythm().describe() + ": " + said());
+    public ConversationTurn conversationTurn(Instant at) {
+        return ConversationTurn.said(Role.VAIER, "Errand, " + errand.rhythm().describe() + ": " + said(), at);
     }
 
     /** What the pane says about the last run, in words the operator reads rather than a status code. */

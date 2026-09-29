@@ -20,8 +20,23 @@ public record ServiceCallAnswer(int status, String contentType, byte[] body, boo
         return status >= 200 && status < 300;
     }
 
+    /**
+     * How much of a success the kept conversation holds. Far less than the model's own read, since the thread is
+     * re-sent with every later question; a longer answer wants a narrower path.
+     */
+    public static final int KEPT_CHARS = 2_000;
+
     /** What the model reads: text and JSON through, binary measured, a long body cut and saying so. */
     public String forModel(String service) {
+        return told(service, MAX_CHARS);
+    }
+
+    /** What came back, as the thread keeps it after a yes; nothing for a failure, whose start is in the details. */
+    public String cameBack(String service) {
+        return succeeded() ? told(service, KEPT_CHARS) : null;
+    }
+
+    private String told(String service, int maxChars) {
         String type = type();
         String head = service + " answered " + status + (type.isEmpty() ? "" : " (" + type + ")");
         if (body.length == 0 && !more) {
@@ -31,22 +46,20 @@ public record ServiceCallAnswer(int status, String contentType, byte[] body, boo
             return head + ": binary, " + (more ? "more than " : "") + body.length + " bytes.";
         }
         String text = text();
-        if (text.length() > MAX_CHARS) {
-            return head + ".\n\n" + text.substring(0, MAX_CHARS) + "\n\n(The body was cut after " + MAX_CHARS
+        if (text.length() > maxChars) {
+            return head + ".\n\n" + text.substring(0, maxChars) + "\n\n(The body was cut after " + maxChars
                 + " characters; the rest was not read.)";
         }
         return head + ".\n\n" + text + (more ? "\n\n(The body was cut; the rest was not read.)" : "");
     }
 
-    /** The outcome of a yes, in plain words; the status, and the start of what a failure said, are the details. */
+    /** The outcome of a yes, in plain words; the status, and the start of what the service said, are the details. */
     public ActionWording outcome(String service) {
-        String answered = "It answered " + status;
-        if (succeeded()) {
-            return new ActionWording("Done — " + service + " accepted it.", answered + ".");
-        }
         String snippet = isText() ? snippet() : "";
-        return new ActionWording("That did not work — " + service + " did not accept it.",
-            snippet.isEmpty() ? answered + "." : answered + ": " + snippet);
+        String details = "It answered " + status + (snippet.isEmpty() ? "." : ": " + snippet);
+        return succeeded()
+            ? new ActionWording("Done — " + service + " accepted it.", details)
+            : new ActionWording("That did not work — " + service + " did not accept it.", details);
     }
 
     private String snippet() {

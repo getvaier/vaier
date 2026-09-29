@@ -52,13 +52,29 @@ class ServiceCallAnswerTest {
     }
 
     /**
-     * A yes is done only when the service said so. The headline says so in plain words; the status, and on a
-     * failure the start of what the service said, are the details.
+     * What the kept conversation holds of a yes: a success's answer, cut much shorter than the model's own read
+     * because it is re-sent with every later question. A failure keeps nothing here; its start is in the details.
+     */
+    @Test
+    void whatCameBack_isASuccessCutToTheKeptLength_andNothingForAFailure() {
+        assertThat(answer(200, "application/json", "{\"state\":\"OFF\"}").cameBack(OPENHAB))
+            .isEqualTo("openhab on Colina 27 answered 200 (application/json).\n\n{\"state\":\"OFF\"}");
+        assertThat(answer(200, "text/plain", "x".repeat(ServiceCallAnswer.KEPT_CHARS + 5)).cameBack(OPENHAB))
+            .contains("x".repeat(ServiceCallAnswer.KEPT_CHARS)).doesNotContain("x".repeat(ServiceCallAnswer.KEPT_CHARS + 1))
+            .endsWith("(The body was cut after " + ServiceCallAnswer.KEPT_CHARS + " characters; the rest was not read.)");
+        assertThat(answer(404, "application/json", "{\"error\":\"no\"}").cameBack(OPENHAB)).isNull();
+    }
+
+    /**
+     * A yes is done only when the service said so. The headline says so in plain words; the status, and the
+     * start of what the service said, are the details — so a read's card, and its approval page, show it.
      */
     @Test
     void theOutcomeSaysPlainlyWhetherItWorked_withTheStatusAndAShortSnippetInTheDetails() {
         ActionWording done = answer(200, "application/json", "{\"a\":1}").outcome(OPENHAB);
-        assertThat(done).isEqualTo(new ActionWording("Done — openhab on Colina 27 accepted it.", "It answered 200."));
+        assertThat(done).isEqualTo(new ActionWording("Done — openhab on Colina 27 accepted it.",
+            "It answered 200: {\"a\":1}"));
+        assertThat(answer(200, null, "").outcome(OPENHAB).details()).isEqualTo("It answered 200.");
         assertThat(answer(200, null, "").succeeded()).isTrue();
 
         record Row(ServiceCallAnswer answer, String details) {}

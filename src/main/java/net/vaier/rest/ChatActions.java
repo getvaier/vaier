@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
@@ -41,6 +42,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Every <b>Chat action</b>, wired to the use case the Explorer's own button calls. A driving-side helper like
@@ -66,6 +68,7 @@ public class ChatActions {
     private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     private final GetPublishedServicesUseCase getPublishedServicesUseCase;
     private final CallServiceUseCase callServiceUseCase;
+    private final AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase;
 
     public ChatActions(GetMachinesUseCase getMachinesUseCase,
                        ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase,
@@ -81,7 +84,8 @@ public class ChatActions {
                        UpgradeOsUseCase upgradeOsUseCase,
                        RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
                        GetPublishedServicesUseCase getPublishedServicesUseCase,
-                       CallServiceUseCase callServiceUseCase) {
+                       CallServiceUseCase callServiceUseCase,
+                       AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase) {
         this.getMachinesUseCase = getMachinesUseCase;
         this.listEnrolmentRequestsUseCase = listEnrolmentRequestsUseCase;
         this.getBackupJobsUseCase = getBackupJobsUseCase;
@@ -97,10 +101,18 @@ public class ChatActions {
         this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
         this.getPublishedServicesUseCase = getPublishedServicesUseCase;
         this.callServiceUseCase = callServiceUseCase;
+        this.alwaysAllowServiceCallUseCase = alwaysAllowServiceCallUseCase;
     }
 
-    /** What became of a yes: whether it ran, and the wording to show either way. */
-    public record Outcome(boolean done, ActionWording wording) {}
+    /**
+     * What became of a yes: whether it ran, the wording to show either way, and — for a service call — what came
+     * back, as the thread keeps it.
+     */
+    public record Outcome(boolean done, ActionWording wording, String cameBack) {
+        public Outcome(boolean done, ActionWording wording) {
+            this(done, wording, null);
+        }
+    }
 
     /**
      * Resolve what the model named to what the confirmation must say and the yes must run — the machine's id
@@ -153,8 +165,27 @@ public class ChatActions {
      * settles later joins that operator's thread when it does.
      */
     public Outcome run(ActionProposal proposal, Operator operator) {
+        return guarded(proposal, () -> carryOut(proposal, operator));
+    }
+
+    /**
+     * <b>Always allow</b>: run a service call's GET as {@link #run} would, and save its path as one of the
+     * service's free reads. Anything else is refused, and nothing runs.
+     */
+    public Outcome alwaysAllow(ActionProposal proposal, Operator operator) {
+        return guarded(proposal, () -> {
+            Map<String, String> a = proposal.arguments();
+            ServiceCall call = proposal.alwaysAllowedCall();
+            ServiceCallAnswer answer = alwaysAllowServiceCallUseCase.alwaysAllow(operator, a.get("host"),
+                a.get("pathPrefix"), call);
+            return new Outcome(answer.succeeded(), call.alwaysAllowed(answer.outcome(a.get("service")), a.get("service")),
+                answer.cameBack(a.get("service")));
+        });
+    }
+
+    private Outcome guarded(ActionProposal proposal, Supplier<Outcome> work) {
         try {
-            return carryOut(proposal, operator);
+            return work.get();
         } catch (IllegalArgumentException | ConflictException | NotFoundException | NoHostCredentialException refused) {
             return new Outcome(false, new ActionWording(refused.getMessage(), null));
         } catch (RuntimeException e) {
@@ -187,8 +218,8 @@ public class ChatActions {
                 .thenAccept(settled -> rememberActionOutcomeUseCase.remember(operator, settled.sentence()));
             case CALL_SERVICE -> {
                 ServiceCallAnswer answer = callServiceUseCase.callService(operator, a.get("host"), a.get("pathPrefix"),
-                    ServiceCall.proposed(a.get("method"), a.get("path"), a.get("body")));
-                return new Outcome(answer.succeeded(), answer.outcome(a.get("service")));
+                    proposal.serviceCall());
+                return new Outcome(answer.succeeded(), answer.outcome(a.get("service")), answer.cameBack(a.get("service")));
             }
         }
         return new Outcome(true, proposal.action().started(a));

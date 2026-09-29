@@ -79,6 +79,7 @@ public class SpringAiConversationAdapter implements ForConversing {
     public ModelUsage converse(String apiKey, String systemPrompt, List<ConversationTurn> history, String question,
                                List<ToolOffer> tools, Consumer<String> onText) {
         UsageTally tally = new UsageTally();
+        Paragraphs paragraphs = new Paragraphs();
         try {
             ChatClient.create(chatModels.apply(apiKey))
                 .prompt()
@@ -89,7 +90,7 @@ public class SpringAiConversationAdapter implements ForConversing {
                 .stream()
                 .chatResponse()
                 .doOnNext(response -> {
-                    String text = textOf(response);
+                    String text = paragraphs.see(response, textOf(response));
                     if (!text.isEmpty()) {
                         onText.accept(text);
                     }
@@ -180,6 +181,31 @@ public class SpringAiConversationAdapter implements ForConversing {
 
         private static long orZero(Integer value) {
             return value == null ? 0 : value;
+        }
+    }
+
+    /**
+     * Words before a tool call and words after it come from two model calls, each its own message id; they are
+     * kept apart as paragraphs. Read off the stream itself, since the tool runs on another thread.
+     */
+    private static final class Paragraphs {
+        private String message;
+        private boolean spoke;
+        private boolean broken;
+
+        String see(ChatResponse response, String text) {
+            String id = response.getMetadata() == null ? null : response.getMetadata().getId();
+            if (id != null && !id.isBlank()) {
+                broken |= spoke && message != null && !id.equals(message);
+                message = id;
+            }
+            if (text.isEmpty()) {
+                return text;
+            }
+            String said = broken ? "\n\n" + text : text;
+            spoke = true;
+            broken = false;
+            return said;
         }
     }
 

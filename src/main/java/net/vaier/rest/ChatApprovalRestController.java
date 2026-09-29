@@ -3,6 +3,7 @@ package net.vaier.rest;
 import net.vaier.application.OpenMailedConfirmationUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.TakeMailedConfirmationUseCase;
+import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ActionWording;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.NotFoundException;
@@ -19,11 +20,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.HtmlUtils;
 
+import java.util.function.BiFunction;
+
 /**
  * The <b>approval link</b> a <b>Mailed confirmation</b> carries, behind the same sign-in as every other
- * {@code /chat} route. Looking runs nothing — mail scanners follow links — so the page's own "Do it" is the
- * only thing that runs the action, through {@link ChatActions#run}, the card's own dispatch. Whether the link
- * opens, and for whom, is the domain's decision.
+ * {@code /chat} route. Looking runs nothing — mail scanners follow links — so the page's own "Do it" (or, for
+ * a service's GET, "Always allow") is the only thing that runs the action, through the card's own dispatch.
+ * Whether the link opens, and for whom, is the domain's decision.
  */
 @RestController
 @RequestMapping("/chat/approvals")
@@ -56,9 +59,14 @@ public class ChatApprovalRestController {
             return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
         String action = "/chat/approvals/" + HtmlUtils.htmlEscape(token);
+        String always = confirmation.proposal().mayBeAlwaysAllowed()
+            ? "<form method=\"post\" action=\"" + action + "/always-allow\"><button>Always allow "
+                + HtmlUtils.htmlEscape(confirmation.proposal().allowance()) + "</button></form>"
+            : "";
         return page(HttpStatus.OK, confirmation.proposal().wording(),
             "<div class=\"answers\">"
                 + "<form method=\"post\" action=\"" + action + "\"><button class=\"yes\">Do it</button></form>"
+                + always
                 + "<form method=\"post\" action=\"" + action + "/decline\"><button>No</button></form>"
                 + "</div>");
     }
@@ -66,6 +74,18 @@ public class ChatApprovalRestController {
     @PostMapping("/{token}")
     public ResponseEntity<String> approve(@RequestHeader(value = EMAIL_HEADER, required = false) String email,
                                           @PathVariable String token) {
+        return answered(email, token, chatActions::run);
+    }
+
+    /** "Always allow": Do it, and the service call's path saved as a free read. Only ever a GET. */
+    @PostMapping("/{token}/always-allow")
+    public ResponseEntity<String> alwaysAllow(@RequestHeader(value = EMAIL_HEADER, required = false) String email,
+                                              @PathVariable String token) {
+        return answered(email, token, chatActions::alwaysAllow);
+    }
+
+    private ResponseEntity<String> answered(String email, String token,
+                                            BiFunction<ActionProposal, Operator, ChatActions.Outcome> yes) {
         Operator operator = Operator.of(email);
         MailedConfirmation confirmation;
         try {
@@ -73,9 +93,9 @@ public class ChatApprovalRestController {
         } catch (NotFoundException gone) {
             return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
-        ChatActions.Outcome outcome = chatActions.run(confirmation.proposal(), operator);
+        ChatActions.Outcome outcome = yes.apply(confirmation.proposal(), operator);
         rememberActionOutcomeUseCase.remember(operator,
-            confirmation.proposal().outcomeSentence(outcome.done(), outcome.wording()));
+            confirmation.proposal().record(outcome.done(), outcome.wording(), outcome.cameBack()));
         return page(HttpStatus.OK, outcome.wording(), "");
     }
 
@@ -89,7 +109,7 @@ public class ChatApprovalRestController {
         } catch (NotFoundException gone) {
             return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
-        rememberActionOutcomeUseCase.remember(operator, confirmation.proposal().declinedSentence());
+        rememberActionOutcomeUseCase.remember(operator, confirmation.proposal().declined());
         return page(HttpStatus.OK, new ActionWording("Not done.", null), "");
     }
 
@@ -108,7 +128,7 @@ public class ChatApprovalRestController {
             + "letter-spacing:.06em}p{margin:0}.headline{font-size:1.15rem}"
             + ".details{margin-top:6px;font-size:11.5px;line-height:1.45;color:#8f959e;opacity:.45;"
             + "overflow-wrap:anywhere;transition:opacity .15s}.details:hover{opacity:.85}"
-            + ".answers{display:flex;gap:8px;margin-top:20px}form{margin:0}"
+            + ".answers{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}form{margin:0}"
             + "button{font:inherit;padding:8px 18px;border-radius:8px;border:1px solid #3a4049;"
             + "background:transparent;color:#e9eaec;cursor:pointer}"
             + "button.yes{background:#4cc9e6;border-color:#4cc9e6;color:#15171b;font-weight:600}"

@@ -3,6 +3,7 @@ package net.vaier.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.GetOwnSignInsUseCase;
 import net.vaier.application.MarkMeantToBePublicUseCase;
+import net.vaier.application.RemoveFreeReadUseCase;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.OwnSignIn;
 import net.vaier.domain.ServiceOwnSignIn;
@@ -53,6 +54,7 @@ class PublishedServiceRestControllerTest {
     @Mock ForSubscribingToEvents forSubscribingToEvents;
     @Mock GetOwnSignInsUseCase getOwnSignInsUseCase;
     @Mock MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
+    @Mock RemoveFreeReadUseCase removeFreeReadUseCase;
 
     @InjectMocks
     PublishedServiceRestController controller;
@@ -77,6 +79,14 @@ class PublishedServiceRestControllerTest {
         controller.meantToBePublic("rack.example.com", "/ui", new PublishedServiceRestController.MeantToBePublicRequest(true));
 
         verify(markMeantToBePublicUseCase).markMeantToBePublic("rack.example.com", "/ui", true);
+    }
+
+    @Test
+    void removingAFreeRead_handsTheServiceAndThePathToTheUseCase() {
+        assertThat(controller.removeFreeRead("example.com", "/paperless", "/api/documents/").getStatusCode().value())
+            .isEqualTo(204);
+
+        verify(removeFreeReadUseCase).removeFreeRead("example.com", "/paperless", "/api/documents/");
     }
 
     @Test

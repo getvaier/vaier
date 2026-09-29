@@ -441,7 +441,7 @@ class NotificationServiceTest {
 
         assertThat(to).isEqualTo("geir@example.com");
         ArgumentCaptor<Bundle> kept = ArgumentCaptor.forClass(Bundle.class);
-        verify(forHoldingBundles).hold(kept.capture());
+        verify(forHoldingBundles).hold(eq(Operator.of("Geir@Example.com")), kept.capture());
         assertThat(kept.getValue().id()).isEqualTo(bundle.id());
         assertThat(kept.getValue().expired(System.currentTimeMillis() + Bundle.TTL.toMillis() + 1)).isFalse();
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);

@@ -2,11 +2,12 @@ package net.vaier.application;
 
 import net.vaier.domain.Bundle;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.Operator;
 
 import java.util.List;
 
 /**
- * Offer files on one machine as a <b>Bundle</b> — a download card in Chat (#360). Every path is stat'd
+ * Offer files on one machine to the operator as a <b>Bundle</b> — a download card in Chat (#360). Every path is stat'd
  * now, so a path that is not there is refused now and never at download time; nothing is copied or written.
  *
  * <p>Throws {@code IllegalArgumentException} when a path is not absolute or climbs, {@code NotFoundException}
@@ -15,5 +16,5 @@ import java.util.List;
  */
 public interface OfferBundleUseCase {
 
-    Bundle offer(MachineId machineId, String machineLabel, List<String> paths, String name);
+    Bundle offer(Operator operator, MachineId machineId, String machineLabel, List<String> paths, String name);
 }

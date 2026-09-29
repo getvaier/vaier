@@ -1052,13 +1052,13 @@ class ReverseProxyRouteTest {
 
         versionRoute(null, null).call(caller, ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON"),
             Optional.of(credential));
-        versionRoute(null, null).call(caller, ServiceCall.read("/rest/items"), Optional.empty());
+        versionRoute(null, null).call(caller, ServiceCall.proposed("GET", "/rest/items", null), Optional.empty());
 
         assertThat(seen).containsExactly(
             "POST http://192.168.3.50:9000/rest/items/PoolPump " + credential.authorizationHeader(),
             "GET http://192.168.3.50:9000/rest/items null");
         ReverseProxyRoute stream = versionRoute(null, null).toBuilder().stream(true).build();
-        assertThatThrownBy(() -> stream.call(caller, ServiceCall.read("/rest"), Optional.empty()))
+        assertThatThrownBy(() -> stream.call(caller, ServiceCall.proposed("GET", "/rest", null), Optional.empty()))
             .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("stream");
         assertThat(seen).hasSize(2);
     }

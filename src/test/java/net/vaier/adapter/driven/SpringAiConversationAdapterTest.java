@@ -216,6 +216,32 @@ class SpringAiConversationAdapterTest {
     }
 
     /**
+     * Words the model wrote before a tool call and words after it are two paragraphs: glued, the pane read
+     * "…waiting for your click:I can't just peek". Each call is its own message, and the stream says which.
+     * A call that said nothing before its tool adds no break of its own.
+     */
+    @Test
+    void wordsOnEitherSideOfAToolCall_areKeptApartByAParagraphBreak() {
+        record Row(List<ChatResponse> stream, String told) {}
+        for (Row row : new Row[] {
+            new Row(List.of(said("msg_1", "A card is waiting for your click:"), said("msg_2", ""),
+                said("msg_2", "I can't peek."), said("msg_2", " Sorry.")),
+                "A card is waiting for your click:\n\nI can't peek. Sorry."),
+            new Row(List.of(said("msg_1", ""), said("msg_2", "I can't peek."), said("msg_2", " Sorry.")),
+                "I can't peek. Sorry."),
+        }) {
+            model.responses = row.stream();
+
+            assertThat(String.join("", converse(List.of(), List.of()))).as(row.told()).isEqualTo(row.told());
+        }
+    }
+
+    private static ChatResponse said(String message, String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))),
+            ChatResponseMetadata.builder().id(message).build());
+    }
+
+    /**
      * The options are pinned here and nowhere else: the model id, the answer budget, and what is cached.
      * The whole conversation is cached, not only the system prompt and tools: an answer makes several
      * calls and every call re-sends everything before it, so the history and the tool results were the

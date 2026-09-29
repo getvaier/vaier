@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
 import net.vaier.application.AddErrandUseCase;
+import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.CancelErrandUseCase;
 import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.ChatUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.ForgetConversationUseCase;
+import net.vaier.application.FollowUpUseCase;
 import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
 import net.vaier.application.GetErrandsUseCase;
@@ -43,6 +45,7 @@ import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.Bundle;
+import net.vaier.domain.ConfirmationRecord;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ConversationTurn.Role;
@@ -59,6 +62,8 @@ import net.vaier.domain.ModelUsage;
 import net.vaier.domain.Spend;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
+import net.vaier.domain.ServiceCall;
+import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
@@ -96,6 +101,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -111,6 +117,7 @@ import static org.mockito.Mockito.when;
 class ChatRestControllerTest {
 
     @Mock ChatUseCase chatUseCase;
+    @Mock FollowUpUseCase followUpUseCase;
     @Mock IsChatAvailableUseCase isChatAvailableUseCase;
     @Mock GetMachinesUseCase getMachinesUseCase;
     @Mock ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase;
@@ -140,6 +147,7 @@ class ChatRestControllerTest {
 
     /** The reads Marvin may make alone live in their own component now; {@code ChatReadsTest} covers them. */
     @Mock ChatReads chatReads;
+    @Mock AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase;
 
     private ChatRestController controller;
 
@@ -154,8 +162,8 @@ class ChatRestControllerTest {
             getBackupJobsUseCase, getBackupRepositoriesUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase,
             runBackupJobUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
             mock(MailConfirmationUseCase.class), mock(UpgradeOsUseCase.class), rememberActionOutcomeUseCase,
-            mock(GetPublishedServicesUseCase.class), mock(CallServiceUseCase.class));
-        controller = new ChatRestController(chatUseCase, isChatAvailableUseCase, getMachinesUseCase,
+            mock(GetPublishedServicesUseCase.class), mock(CallServiceUseCase.class), alwaysAllowServiceCallUseCase);
+        controller = new ChatRestController(chatUseCase, followUpUseCase, isChatAvailableUseCase, getMachinesUseCase,
             proposeActionUseCase, takeActionProposalUseCase, getConversationUseCase, forgetConversationUseCase,
             rememberActionOutcomeUseCase, offerBundleUseCase, openBundleUseCase, forgetUseCase, getMemoryUseCase,
             getSpendUseCase, emailBundleUseCase, addErrandUseCase, cancelErrandUseCase, getErrandsUseCase,
@@ -222,6 +230,22 @@ class ChatRestControllerTest {
         verify(emitter).complete();
     }
 
+    /**
+     * A pane that closed mid-answer is written to once and then left alone: every later piece used to try
+     * again and log again, twenty lines a second.
+     */
+    @Test
+    void answer_toAPaneThatClosed_stopsSendingAfterTheFirstFailure() throws IOException {
+        answering("Colina", " is", " red.");
+        SseEmitter emitter = mock(SseEmitter.class);
+        doThrow(new IllegalStateException("ResponseBodyEmitter has already completed"))
+            .when(emitter).send(any(SseEventBuilder.class));
+
+        controller.answer(emitter, GEIR, "which machine is red?");
+
+        verify(emitter, times(1)).send(any(SseEventBuilder.class));
+    }
+
     // --- the tools ------------------------------------------------------------------------------------
 
     @Test
@@ -233,6 +257,33 @@ class ChatRestControllerTest {
         List<String> expected = new ArrayList<>(List.of(ChatTool.values()).stream().map(ChatTool::toolName).toList());
         expected.addAll(List.of(ChatAction.values()).stream().map(ChatAction::toolName).toList());
         assertThat(offeredTools()).extracting(offer -> offer.tool().toolName()).containsExactlyElementsOf(expected);
+    }
+
+    /**
+     * The <b>follow-up</b> after a yes streams exactly as an answer does. When none was owed, silence is a quiet
+     * done; one that was owed and said nothing is the same error an unanswered question gets.
+     */
+    @Test
+    void followUp_streamsLikeAnAnswer_andSilenceIsQuietOnlyWhenNoneWasOwed() throws IOException {
+        record Row(boolean owed, List<String> said, List<String> events) {}
+        for (Row row : new Row[] {
+            new Row(true, List.of("No,", " it is off."),
+                List.of("event:text\ndata:No,\n\n", "event:text\ndata: it is off.\n\n", "event:done\ndata:\n\n")),
+            new Row(false, List.of(), List.of("event:done\ndata:\n\n")),
+            new Row(true, List.of(), List.of("event:error\ndata:" + ChatRestController.NOTHING_SAID + "\n\n")),
+        }) {
+            doAnswer(invocation -> {
+                Consumer<String> onText = invocation.getArgument(2);
+                row.said().forEach(onText);
+                return row.owed();
+            }).when(followUpUseCase).followUp(eq(GEIR), anyList(), any());
+            SseEmitter emitter = mock(SseEmitter.class);
+
+            controller.followUp(emitter, GEIR);
+
+            assertThat(sentEvents(emitter)).as(row.toString()).containsExactlyElementsOf(row.events());
+            verify(emitter).complete();
+        }
     }
 
     /** A turn that ends without a word is said as an error, never as a silent done. */
@@ -290,8 +341,8 @@ class ChatRestControllerTest {
 
     /** The propose use case, answered by the domain so the test reads a real proposal back. */
     private void proposing() {
-        when(proposeActionUseCase.propose(any(), any())).thenAnswer(invocation ->
-            ActionProposal.propose(invocation.getArgument(0), invocation.getArgument(1), NOW));
+        when(proposeActionUseCase.propose(any(), any(), any())).thenAnswer(invocation ->
+            ActionProposal.propose(invocation.getArgument(1), invocation.getArgument(2), NOW));
     }
 
     @Test
@@ -318,13 +369,14 @@ class ChatRestControllerTest {
         String told = read(emitter, ChatAction.RUN_BACKUP, Map.of("machine", "colina 27"));
 
         ArgumentCaptor<Map<String, String>> arguments = ArgumentCaptor.forClass(Map.class);
-        verify(proposeActionUseCase).propose(eq(ChatAction.RUN_BACKUP), arguments.capture());
+        verify(proposeActionUseCase).propose(eq(GEIR), eq(ChatAction.RUN_BACKUP), arguments.capture());
         assertThat(arguments.getValue()).containsEntry("machine", "Colina 27")
             .containsEntry("machineId", COLINA.value());
         assertThat(sentEvents(emitter)).anySatisfy(event ->
             assertThat(event).startsWith("event:confirm\ndata:")
                 .contains("\"headline\":\"Back up Colina 27 now.\"")
-                .contains("\"details\":\"With the backup job it already has.\""));
+                .contains("\"details\":\"With the backup job it already has.\"")
+                .contains("\"alwaysAllow\":false"));
         assertThat(told).contains("Nothing has happened yet");
         verifyNoInteractions(runBackupJobUseCase);
     }
@@ -443,19 +495,70 @@ class ChatRestControllerTest {
         assertThat(failed).isEqualTo(new ChatRestController.ActionOutcome(false, "Vaier could not do that.", null));
     }
 
-    // --- the kept conversation (#360 slice 3) --------------------------------------------------------
+    // --- Always allow: a service call's GET, run and saved as a free read --------------------------------
+
+    private static ActionProposal readingDocuments() {
+        return ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service", "paperless on Apalveien 5",
+            "host", "paperless.example.com", "method", "GET", "path", "/api/documents/?query=x",
+            "headline", "Search the documents."), NOW);
+    }
+
+    /** The card offers Always allow exactly when the domain says the proposal may be always allowed. */
+    @Test
+    void proposingAServicesGet_sendsACardThatOffersAlwaysAllow() throws IOException {
+        answering("ok");
+        when(proposeActionUseCase.propose(any(), any(), any())).thenReturn(readingDocuments());
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        read(emitter, ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"));
+
+        assertThat(sentEvents(emitter)).anySatisfy(event ->
+            assertThat(event).startsWith("event:confirm\ndata:").contains("\"alwaysAllow\":true")
+                .contains("\"allowance\":\"/api/\""));
+    }
 
     @Test
+    void alwaysAllowing_takesTheCard_runsAndSavesTheRead_andRemembersWhatCameOfIt() {
+        ActionProposal get = readingDocuments();
+        when(takeActionProposalUseCase.take("get")).thenReturn(get);
+        ServiceCall read = ServiceCall.proposed("GET", "/api/documents/?query=x", null);
+        ServiceCallAnswer ok = new ServiceCallAnswer(200, null, new byte[0], false);
+        when(alwaysAllowServiceCallUseCase.alwaysAllow(GEIR, "paperless.example.com", null, read)).thenReturn(ok);
+        ActionWording said = read.alwaysAllowed(ok.outcome("paperless on Apalveien 5"), "paperless on Apalveien 5");
+
+        ChatRestController.ActionOutcome outcome = controller.alwaysAllow(EMAIL, "get").getBody();
+
+        assertThat(outcome).isEqualTo(new ChatRestController.ActionOutcome(true, said.headline(), said.details()));
+        verify(rememberActionOutcomeUseCase).remember(GEIR,
+            get.record(true, said, ok.cameBack("paperless on Apalveien 5")));
+    }
+
+    // --- the kept conversation (#360 slice 3) --------------------------------------------------------
+
+    /** A card record is drawn as the answered card; what came back is the model's, never the pane's. */
+    @Test
     void conversation_isTheOperatorsOwn_withItsSummaryAndTurns() {
+        ConfirmationRecord read = new ConfirmationRecord(new ActionWording("Read the batteries.", "GET /rest/items"),
+            ConfirmationRecord.Outcome.DONE, new ActionWording("Done — openHAB answered.", null), "[{\"name\":\"x\"}]");
         when(getConversationUseCase.get(GEIR)).thenReturn(new Conversation(GEIR, "the gist", List.of(
             new ConversationTurn(Role.OPERATOR, "is the nas up?"),
-            new ConversationTurn(Role.VAIER, "yes."))));
+            new ConversationTurn(Role.VAIER, "yes."),
+            ConversationTurn.recording(read, null),
+            ConversationTurn.recording(ConfirmationRecord.declined(new ActionWording("Back up NAS now.", null)), null),
+            ConversationTurn.recording(new ConfirmationRecord(new ActionWording("Back up NAS now.", null),
+                ConfirmationRecord.Outcome.NOT_DONE, null, null), null))));
 
         ChatRestController.ConversationResponse response = controller.conversation(EMAIL).getBody();
 
         assertThat(response.summary()).isEqualTo("the gist");
         assertThat(response.turns()).extracting(ChatRestController.TurnResponse::role, ChatRestController.TurnResponse::text)
-            .containsExactly(tuple("OPERATOR", "is the nas up?"), tuple("VAIER", "yes."));
+            .containsExactly(tuple("OPERATOR", "is the nas up?"), tuple("VAIER", "yes."),
+                tuple("VAIER", null), tuple("VAIER", null), tuple("VAIER", null));
+        assertThat(response.turns()).extracting(ChatRestController.TurnResponse::card).containsExactly(null, null,
+            new ChatRestController.CardResponse("done", "Read the batteries.", "GET /rest/items",
+                "Done — openHAB answered.", null),
+            new ChatRestController.CardResponse("declined", "Back up NAS now.", null, "Not done.", null),
+            new ChatRestController.CardResponse("failed", "Back up NAS now.", null, null, null));
     }
 
     @Test
@@ -474,7 +577,7 @@ class ChatRestControllerTest {
         controller.confirm(EMAIL, "lift");
 
         verify(rememberActionOutcomeUseCase).remember(GEIR,
-            lift.outcomeSentence(true, ChatAction.LIFT_BLOCK.started(lift.arguments())));
+            lift.record(true, ChatAction.LIFT_BLOCK.started(lift.arguments()), null));
     }
 
     /** "Not now" takes the card too — it can never run afterwards — and is remembered as declined. */
@@ -487,7 +590,7 @@ class ChatRestControllerTest {
 
         assertThat(outcome).isEqualTo(new ChatRestController.ActionOutcome(false, "Not done.", null));
         verifyNoInteractions(liftBlockUseCase);
-        verify(rememberActionOutcomeUseCase).remember(GEIR, lift.declinedSentence());
+        verify(rememberActionOutcomeUseCase).remember(GEIR, lift.declined());
     }
 
     @Test
@@ -506,7 +609,7 @@ class ChatRestControllerTest {
         fleetOf();
         Bundle bundle = Bundle.offer(COLINA, "Colina 27", List.of("/home/geir/a.jpg", "/home/geir/b.jpg"),
             "pictures-2025-09-10", NOW).sized(List.of(new RemoteStat(false, 1_000_000), new RemoteStat(false, 1_000_000)));
-        when(offerBundleUseCase.offer(COLINA, "Colina 27", List.of("/home/geir/a.jpg", "/home/geir/b.jpg"),
+        when(offerBundleUseCase.offer(GEIR, COLINA, "Colina 27", List.of("/home/geir/a.jpg", "/home/geir/b.jpg"),
             "pictures-2025-09-10")).thenReturn(bundle);
         SseEmitter emitter = mock(SseEmitter.class);
 
@@ -523,7 +626,7 @@ class ChatRestControllerTest {
     void bundlingFiles_thatAreNotThere_isRefusedInWords_andNoCardIsSent() throws IOException {
         answering("ok");
         fleetOf();
-        when(offerBundleUseCase.offer(any(), anyString(), anyList(), any()))
+        when(offerBundleUseCase.offer(any(), any(), anyString(), anyList(), any()))
             .thenThrow(new NotFoundException("/home/geir/gone.jpg is not on Colina 27."));
         SseEmitter emitter = mock(SseEmitter.class);
 

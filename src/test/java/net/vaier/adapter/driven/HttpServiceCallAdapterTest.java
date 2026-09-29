@@ -46,7 +46,7 @@ class HttpServiceCallAdapterTest {
 
             ServiceCallAnswer answer = adapter.call(url, ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON"),
                 "Basic dmFpZXI6czNjcmV0");
-            adapter.call(url, ServiceCall.read("/rest/items/PoolPump"), null);
+            adapter.call(url, ServiceCall.proposed("GET", "/rest/items/PoolPump", null), null);
 
             assertThat(seen).containsExactly(
                 "POST /rest/items/PoolPump?x=1 text/plain; charset=utf-8 Basic dmFpZXI6czNjcmV0 ON",
@@ -62,7 +62,7 @@ class HttpServiceCallAdapterTest {
 
     @Test
     void aServiceThatDoesNotAnswer_failsWithoutItsOwnWords() {
-        assertThatThrownBy(() -> adapter.call("http://127.0.0.1:1/", ServiceCall.read("/rest"), "Basic c2VjcmV0"))
+        assertThatThrownBy(() -> adapter.call("http://127.0.0.1:1/", ServiceCall.proposed("GET", "/rest", null), "Basic c2VjcmV0"))
             .isInstanceOf(IllegalStateException.class)
             .hasMessage("The service did not answer.");
     }

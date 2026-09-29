@@ -2,6 +2,7 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +59,30 @@ class ActionProposalTest {
             .isEqualTo(ServiceCall.proposed("DELETE", "/api/tags/7", null).details("paperless on Apalveien 5"));
     }
 
+    /** Always allow is offered for a service call's GET and nothing else: a write waits for a yes every time. */
+    @Test
+    void onlyAServiceCallsGetMayBeAlwaysAllowed() {
+        record Row(ChatAction action, Map<String, String> arguments, boolean alwaysAllow, String allowance) {}
+        Map<String, String> call = Map.of("service", "paperless on Apalveien 5", "host", "paperless.example.com",
+            "path", "/api/documents/", "headline", "Read the documents.");
+        for (Row row : new Row[] {
+            new Row(ChatAction.CALL_SERVICE, with(call, "method", "GET"), true, "/api/"),
+            new Row(ChatAction.CALL_SERVICE, with(call, "method", "POST"), false, null),
+            new Row(ChatAction.CALL_SERVICE, with(call, "method", "DELETE"), false, null),
+            new Row(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), false, null),
+        }) {
+            ActionProposal proposal = ActionProposal.propose(row.action(), row.arguments(), NOW);
+            assertThat(proposal.mayBeAlwaysAllowed()).as(row.toString()).isEqualTo(row.alwaysAllow());
+            assertThat(proposal.allowance()).as(row.toString()).isEqualTo(row.allowance());
+        }
+    }
+
+    private static Map<String, String> with(Map<String, String> arguments, String name, String value) {
+        Map<String, String> more = new HashMap<>(arguments);
+        more.put(name, value);
+        return more;
+    }
+
     @Test
     void aProposalLivesTenMinutes() {
         ActionProposal proposal = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
@@ -70,18 +95,16 @@ class ActionProposalTest {
             .hasMessage("That card has expired; ask again.");
     }
 
-    /** What Vaier remembers of a card, both parts of each wording, in the words the next question reads back. */
+    /** What Vaier remembers of a card is a record of its wording and what became of it; its shape is the record's. */
     @Test
-    void whatBecameOfTheCardIsSaidInOneShape() {
+    void whatBecameOfTheCardIsKeptAsItsRecord() {
         ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), NOW);
-        String proposed = proposal.wording().headline() + " " + proposal.wording().details();
+        ActionWording done = new ActionWording("Done.", null);
 
-        assertThat(proposal.outcomeSentence(true, new ActionWording("Backing up.", "See the Backups pane.")))
-            .isEqualTo("Card from an action tool: " + proposed + " (done: Backing up. See the Backups pane.)");
-        assertThat(proposal.outcomeSentence(false, new ActionWording("Vaier could not do that.", null)))
-            .isEqualTo("Card from an action tool: " + proposed + " (could not be done: Vaier could not do that.)");
-        assertThat(proposal.declinedSentence())
-            .isEqualTo("Card from an action tool: " + proposed + " (the operator declined)");
+        assertThat(proposal.record(true, done, "openhab answered 200.\n\nOFF")).isEqualTo(new ConfirmationRecord(
+            proposal.wording(), ConfirmationRecord.Outcome.DONE, done, "openhab answered 200.\n\nOFF"));
+        assertThat(proposal.record(false, done, null).outcome()).isEqualTo(ConfirmationRecord.Outcome.NOT_DONE);
+        assertThat(proposal.declined()).isEqualTo(ConfirmationRecord.declined(proposal.wording()));
     }
 
     /** What the model is told: it proposed, and nothing happened. The one lie this must prevent is "done". */

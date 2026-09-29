@@ -41,7 +41,9 @@ public record ChatPrompt(String text) {
         + "operator: use it to learn a service's state. Propose call_service only for what the operator asked "
         + "for or what an errand clearly calls for; a GET that read_service refuses goes through call_service "
         + "too. The operator may not be technical: say in its headline, in everyday words, what the call really "
-        + "does, and never make it sound gentler than it is.\n";
+        + "does, and never make it sound gentler than it is. A service's API may ignore a query parameter it does not "
+        + "know and answer with everything, so check that what came back actually answers the question before "
+        + "relying on it, and say so when it does not.\n";
 
     public static ChatPrompt forFleet(String domain, ZonedDateTime now, Memory memory, Errands errands,
                                       Operator operator) {

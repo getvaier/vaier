@@ -25,14 +25,21 @@ public record MailedConfirmations(List<MailedConfirmation> held) {
 
     /** One more, with the expired ones swept out; refused once the operator already has enough waiting. */
     public MailedConfirmations with(MailedConfirmation confirmation, long nowEpochMs) {
-        List<MailedConfirmation> live = new ArrayList<>(held.stream().filter(c -> !c.expired(nowEpochMs)).toList());
-        long waiting = live.stream().filter(c -> c.operator().equals(confirmation.operator())).count();
-        if (waiting >= MOST_WAITING) {
+        if (waitingFor(confirmation.operator(), nowEpochMs) >= MOST_WAITING) {
             throw new IllegalArgumentException(MOST_WAITING + " proposals are already waiting for the operator's "
                 + "yes; nothing more is mailed until they answer.");
         }
+        List<MailedConfirmation> live = new ArrayList<>(held.stream().filter(c -> !c.expired(nowEpochMs)).toList());
         live.add(confirmation);
         return new MailedConfirmations(live);
+    }
+
+    public boolean anyWaitingFor(Operator operator, long nowEpochMs) {
+        return waitingFor(operator, nowEpochMs) > 0;
+    }
+
+    private long waitingFor(Operator operator, long nowEpochMs) {
+        return held.stream().filter(c -> !c.expired(nowEpochMs) && c.operator().equals(operator)).count();
     }
 
     /** The live confirmation this token opens for this operator; anything else is {@link #GONE}. */

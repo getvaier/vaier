@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
@@ -62,6 +63,7 @@ class ChatActionsTest {
     @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     @Mock GetPublishedServicesUseCase getPublishedServicesUseCase;
     @Mock CallServiceUseCase callServiceUseCase;
+    @Mock AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase;
 
     @InjectMocks ChatActions chatActions;
 
@@ -146,10 +148,11 @@ class ChatActionsTest {
      */
     @Test
     void callingAService_resolvesItByName_carriesTheWholeBody_andIsDoneOnlyOnSuccess() {
-        when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(new PublishedServiceUco(
-            "openhab @ Colina 27", "openhab", COLINA.value(), "Colina 27", null, ServiceLocation.PEER_SERVER, true,
-            "openhab.colina27.example.com", "10.13.13.3", 8080, State.OK, true, null, false, false, null, false,
-            null, null, null, null, null, "social", false, null)));
+        when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(PublishedServiceUco.builder()
+            .name("openhab @ Colina 27").shortName("openhab").machineId(COLINA.value()).hostName("Colina 27")
+            .serviceLocation(ServiceLocation.PEER_SERVER).healthy(true).dnsAddress("openhab.colina27.example.com")
+            .hostAddress("10.13.13.3").hostPort(8080).state(State.OK).authenticated(true).authMode("social")
+            .build()));
         Map<String, String> canonical = chatActions.canonical(ChatAction.CALL_SERVICE, Map.of(
             "service", "openHAB Colina 27", "method", "post", "path", "rest/items/PoolPump", "body", "ON",
             "headline", "Turn on the pool pump at Colina 27."));
@@ -166,11 +169,41 @@ class ChatActionsTest {
         when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
             .thenReturn(ok);
         assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
-            new ChatActions.Outcome(true, ok.outcome("openhab on Colina 27")));
+            new ChatActions.Outcome(true, ok.outcome("openhab on Colina 27"), ok.cameBack("openhab on Colina 27")));
 
         when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
             .thenReturn(missing);
         assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
-            new ChatActions.Outcome(false, missing.outcome("openhab on Colina 27")));
+            new ChatActions.Outcome(false, missing.outcome("openhab on Colina 27"), null));
+    }
+
+    /**
+     * Always allow runs the read as Do it would, through the use case that also saves it, and says it is
+     * saved. Anything but a service call's GET is refused and runs nothing, whatever the page sent.
+     */
+    @Test
+    void alwaysAllow_runsTheGetThroughTheUseCaseThatSavesIt_andRefusesEverythingElse() {
+        ServiceCall read = ServiceCall.proposed("GET", "/api/documents/?query=x", null);
+        ActionProposal get = ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service",
+            "paperless on Apalveien 5", "host", "paperless.example.com", "method", "GET",
+            "path", "/api/documents/?query=x", "headline", "Search the documents."), 0);
+        ServiceCallAnswer ok = new ServiceCallAnswer(200, null, new byte[0], false);
+        when(alwaysAllowServiceCallUseCase.alwaysAllow(GEIR, "paperless.example.com", null, read)).thenReturn(ok);
+
+        assertThat(chatActions.alwaysAllow(get, GEIR)).isEqualTo(new ChatActions.Outcome(true,
+            read.alwaysAllowed(ok.outcome("paperless on Apalveien 5"), "paperless on Apalveien 5"),
+            ok.cameBack("paperless on Apalveien 5")));
+
+        for (ActionProposal refused : new ActionProposal[] {
+            ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service", "paperless on Apalveien 5",
+                "host", "paperless.example.com", "method", "DELETE", "path", "/api/documents/7/",
+                "headline", "Delete document 7."), 0),
+            ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27",
+                "machineId", COLINA.value()), 0),
+        }) {
+            assertThat(chatActions.alwaysAllow(refused, GEIR).done()).as(refused.action().toString()).isFalse();
+        }
+        verify(alwaysAllowServiceCallUseCase).alwaysAllow(any(), any(), any(), any());
+        verifyNoInteractions(runBackupJobUseCase, callServiceUseCase);
     }
 }

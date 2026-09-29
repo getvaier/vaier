@@ -3,6 +3,8 @@ package net.vaier.domain;
 import net.vaier.domain.ConversationTurn.Role;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
@@ -76,9 +78,11 @@ class ErrandReportTest {
     /** The report lands in the thread too, so the next question knows what Marvin found while away. */
     @Test
     void itBecomesATurnInTheOperatorsOwnConversation() {
-        ConversationTurn turn = report("Colina 27 has 3 updates waiting.").conversationTurn();
+        Instant at = Instant.parse("2026-09-29T08:00:00Z");
+        ConversationTurn turn = report("Colina 27 has 3 updates waiting.").conversationTurn(at);
 
         assertThat(turn.role()).isEqualTo(Role.VAIER);
+        assertThat(turn.at()).isEqualTo(at);
         assertThat(turn.text()).isEqualTo("Errand, Every day at 08:00: Colina 27 has 3 updates waiting.");
     }
 

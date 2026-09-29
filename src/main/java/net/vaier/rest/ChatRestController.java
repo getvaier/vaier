@@ -8,6 +8,7 @@ import net.vaier.application.CancelErrandUseCase;
 import net.vaier.application.ChatUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.EmailBundleUseCase;
+import net.vaier.application.FollowUpUseCase;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
@@ -22,11 +23,13 @@ import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatCapability;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ChatAvailability;
 import net.vaier.domain.ChatUnavailableException;
+import net.vaier.domain.ConfirmationRecord;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
@@ -63,11 +66,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -111,6 +118,7 @@ public class ChatRestController {
     private static final long ANSWER_TIMEOUT_MS = 300_000L;
 
     private final ChatUseCase chatUseCase;
+    private final FollowUpUseCase followUpUseCase;
     private final IsChatAvailableUseCase isChatAvailableUseCase;
     private final GetMachinesUseCase getMachinesUseCase;
     private final ProposeActionUseCase proposeActionUseCase;
@@ -132,6 +140,9 @@ public class ChatRestController {
     private final ChatActions chatActions;
     private final ObjectMapper objectMapper;
 
+    /** Streams whose pane went away mid-answer: written to no more, and said so once. */
+    private final Set<SseEmitter> closed = ConcurrentHashMap.newKeySet();
+
     /**
      * One thread, because a question is answered start to finish on it and Vaier answers one at a time.
      * The request thread must not be the one that waits: the answer takes tens of seconds.
@@ -152,6 +163,7 @@ public class ChatRestController {
     });
 
     public ChatRestController(ChatUseCase chatUseCase,
+                             FollowUpUseCase followUpUseCase,
                              IsChatAvailableUseCase isChatAvailableUseCase,
                              GetMachinesUseCase getMachinesUseCase,
                              ProposeActionUseCase proposeActionUseCase,
@@ -173,6 +185,7 @@ public class ChatRestController {
                              ChatActions chatActions,
                              ObjectMapper objectMapper) {
         this.chatUseCase = chatUseCase;
+        this.followUpUseCase = followUpUseCase;
         this.isChatAvailableUseCase = isChatAvailableUseCase;
         this.getMachinesUseCase = getMachinesUseCase;
         this.proposeActionUseCase = proposeActionUseCase;
@@ -240,13 +253,41 @@ public class ChatRestController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * The <b>follow-up</b> after a yes: streamed exactly as an answer is, with no question — the pane opens it
+     * once the card's outcome is painted. Whether one is owed is the domain's to say.
+     */
+    @PostMapping(value = "/follow-up", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter followUp(@RequestHeader(value = "X-Auth-Request-Email", required = false) String email) {
+        new ChatAvailability(isChatAvailableUseCase.isAvailable()).requireAvailable();
+        Operator operator = Operator.of(email);
+        SseEmitter emitter = new SseEmitter(ANSWER_TIMEOUT_MS);
+        answers.submit(() -> followUp(emitter, operator));
+        return emitter;
+    }
+
     /** The whole of one answer, start to finish. Package-private so a test can drive it without a thread. */
     void answer(SseEmitter emitter, Operator operator, String question) {
+        stream(emitter, (tools, onText) -> {
+            chatUseCase.ask(operator, question, tools, onText);
+            return true;
+        }, toolOffers(emitter, operator));
+    }
+
+    /** As {@link #answer}; when nothing was owed, silence is a quiet done rather than an error. */
+    void followUp(SseEmitter emitter, Operator operator) {
+        stream(emitter, (tools, onText) -> followUpUseCase.followUp(operator, tools, onText),
+            toolOffers(emitter, operator));
+    }
+
+    /** {@code speak} answers whether anything was owed; an owed answer with no word in it is an error. */
+    private void stream(SseEmitter emitter, BiFunction<List<ToolOffer>, Consumer<String>, Boolean> speak,
+                        List<ToolOffer> tools) {
         ScheduledFuture<?> beat = pulse.scheduleAtFixedRate(() -> send(emitter, "ping", ""),
             heartbeatMs, heartbeatMs, TimeUnit.MILLISECONDS);
         StringBuilder said = new StringBuilder();
         try {
-            chatUseCase.ask(operator, question, toolOffers(emitter, operator), text -> {
+            boolean owed = speak.apply(tools, text -> {
                 said.append(text);
                 send(emitter, "text", text);
             });
@@ -254,7 +295,7 @@ public class ChatRestController {
             // An answer without a word is not an answer. It happens when the model's turn was cut off
             // before it spoke — a tool call too long for the room it has — and a blank thread would leave
             // the operator guessing.
-            if (said.toString().isBlank()) {
+            if (said.toString().isBlank() && owed) {
                 send(emitter, "error", NOTHING_SAID);
             } else {
                 send(emitter, "done", "");
@@ -265,6 +306,7 @@ public class ChatRestController {
             send(emitter, "error", messageFor(e));
         }
         emitter.complete();
+        closed.remove(emitter);
     }
 
     /**
@@ -281,15 +323,29 @@ public class ChatRestController {
     public ResponseEntity<ActionOutcome> confirm(
             @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
             @PathVariable String id) {
+        return answered(email, id, chatActions::run);
+    }
+
+    /** "Always allow": the click, and the service call's path saved as a free read. Only ever a GET. */
+    @PostMapping("/actions/{id}/always-allow")
+    public ResponseEntity<ActionOutcome> alwaysAllow(
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
+            @PathVariable String id) {
+        return answered(email, id, chatActions::alwaysAllow);
+    }
+
+    private ResponseEntity<ActionOutcome> answered(String email, String id,
+                                                   BiFunction<ActionProposal, Operator, ChatActions.Outcome> yes) {
         ActionProposal proposal;
         try {
             proposal = takeActionProposalUseCase.take(id);
         } catch (NotFoundException | IllegalArgumentException refused) {
             return ResponseEntity.ok(new ActionOutcome(false, refused.getMessage(), null));
         }
-        ChatActions.Outcome ran = chatActions.run(proposal, Operator.of(email));
+        ChatActions.Outcome ran = yes.apply(proposal, Operator.of(email));
         // Remembered either way, so the next question knows what was started — or what was not.
-        rememberActionOutcomeUseCase.remember(Operator.of(email), proposal.outcomeSentence(ran.done(), ran.wording()));
+        rememberActionOutcomeUseCase.remember(Operator.of(email),
+            proposal.record(ran.done(), ran.wording(), ran.cameBack()));
         return ResponseEntity.ok(new ActionOutcome(ran.done(), ran.wording().headline(), ran.wording().details()));
     }
 
@@ -300,7 +356,7 @@ public class ChatRestController {
             @PathVariable String id) {
         try {
             ActionProposal proposal = takeActionProposalUseCase.take(id);
-            rememberActionOutcomeUseCase.remember(Operator.of(email), proposal.declinedSentence());
+            rememberActionOutcomeUseCase.remember(Operator.of(email), proposal.declined());
         } catch (NotFoundException | IllegalArgumentException gone) {
             // Already gone: nothing could run anyway, and there is nothing to remember about it.
         }
@@ -315,13 +371,16 @@ public class ChatRestController {
     }
 
     private void send(SseEmitter emitter, String event, String data) {
+        if (closed.contains(emitter)) {
+            return;
+        }
         try {
             emitter.send(SseEmitter.event().name(event).data(data));
         } catch (IOException | IllegalStateException e) {
-            // The pane closed mid-answer, or the connection to it did. Nothing to recover — the answer is
-            // still made and kept — but worth a line, since the operator will have watched the box come
-            // back before Marvin was done.
-            log.info("Chat: the stream to the pane closed before the answer finished ({})", e.toString());
+            // The pane closed mid-answer. The answer is still made and kept; one line says so.
+            if (closed.add(emitter)) {
+                log.info("Chat: the stream to the pane closed before the answer finished ({})", e.toString());
+            }
         }
     }
 
@@ -339,7 +398,7 @@ public class ChatRestController {
         for (ToolOffer offer : chatReads.offers(operator)) {
             reads.put(offer.tool(), offer.read());
         }
-        reads.put(ChatTool.BUNDLE_FILES, arguments -> offerBundle(arguments, emitter));
+        reads.put(ChatTool.BUNDLE_FILES, arguments -> offerBundle(arguments, operator, emitter));
         reads.put(ChatTool.EMAIL_BUNDLE, arguments -> emailBundle(arguments, operator));
         reads.put(ChatTool.ADD_ERRAND, arguments -> addErrand(arguments, operator));
         reads.put(ChatTool.CANCEL_ERRAND, arguments -> cancelErrand(arguments, operator));
@@ -354,7 +413,7 @@ public class ChatRestController {
             }
         }
         for (ChatAction action : ChatAction.values()) {
-            offers.add(new ToolOffer(action, announced(action, arguments -> propose(action, arguments, emitter), emitter)));
+            offers.add(new ToolOffer(action, announced(action, arguments -> propose(action, arguments, operator, emitter), emitter)));
         }
         return offers;
     }
@@ -381,11 +440,12 @@ public class ChatRestController {
      * beside its name, the phone's name beside its code — hold the proposal, hand the pane the card, and
      * tell the model it is waiting. A name nothing has is refused in words, and no card is sent.
      */
-    private String propose(ChatAction action, Map<String, String> arguments, SseEmitter emitter) {
+    private String propose(ChatAction action, Map<String, String> arguments, Operator operator, SseEmitter emitter) {
         try {
-            ActionProposal proposal = proposeActionUseCase.propose(action, chatActions.canonical(action, arguments));
+            ActionProposal proposal = proposeActionUseCase.propose(operator, action,
+                chatActions.canonical(action, arguments));
             send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.wording().headline(),
-                proposal.wording().details())));
+                proposal.wording().details(), proposal.mayBeAlwaysAllowed(), proposal.allowance())));
             return proposal.toolResult();
         } catch (IllegalArgumentException refused) {
             return refused.getMessage();
@@ -397,7 +457,7 @@ public class ChatRestController {
      * and the model is told it is ready. A path that is not there, or a machine Vaier cannot reach, is a
      * sentence back to the model and no card.
      */
-    private String offerBundle(Map<String, String> arguments, SseEmitter emitter) {
+    private String offerBundle(Map<String, String> arguments, Operator operator, SseEmitter emitter) {
         Machine machine;
         try {
             machine = new MachineReference(arguments.get("machine")).resolve(getMachinesUseCase.getAllMachines());
@@ -405,7 +465,7 @@ public class ChatRestController {
             return refused.getMessage();
         }
         try {
-            Bundle bundle = offerBundleUseCase.offer(machine.id(), machine.name(),
+            Bundle bundle = offerBundleUseCase.offer(operator, machine.id(), machine.name(),
                 Bundle.pathsOf(arguments.get("paths")), arguments.get("name"));
             send(emitter, "bundle", asJson(BundleEvent.of(bundle)));
             return bundle.toolResult();
@@ -532,7 +592,7 @@ public class ChatRestController {
     record AvailabilityResponse(boolean available) {}
 
     /** The card, as the answer stream carries it: enough to draw it and to click it. */
-    record ConfirmationEvent(String id, String headline, String details) {}
+    record ConfirmationEvent(String id, String headline, String details, boolean alwaysAllow, String allowance) {}
 
     /** The download card: the zip's name, what it holds, and where the click goes. */
     record BundleEvent(String id, String name, String size, String url) {
@@ -577,9 +637,26 @@ public class ChatRestController {
         }
     }
 
-    record TurnResponse(String role, String text) {
+    /** A card record carries its card instead of its text, which holds what came back for the model. */
+    record TurnResponse(String role, String text, CardResponse card) {
         static TurnResponse of(ConversationTurn turn) {
-            return new TurnResponse(turn.role().name(), turn.text());
+            return turn.card()
+                .map(card -> new TurnResponse(turn.role().name(), null, CardResponse.of(card)))
+                .orElseGet(() -> new TurnResponse(turn.role().name(), turn.text(), null));
+        }
+    }
+
+    /** An answered card, in the pane's own states: {@code done}, {@code failed} or {@code declined}. */
+    record CardResponse(String state, String headline, String details, String outcome, String outcomeDetails) {
+        static CardResponse of(ConfirmationRecord card) {
+            String state = switch (card.outcome()) {
+                case DONE -> "done";
+                case NOT_DONE -> "failed";
+                case DECLINED -> "declined";
+            };
+            ActionWording result = card.result();
+            return new CardResponse(state, card.proposed().headline(), card.proposed().details(),
+                result == null ? null : result.headline(), result == null ? null : result.details());
         }
     }
 

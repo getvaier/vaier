@@ -1,5 +1,6 @@
 package net.vaier.application;
 
+import net.vaier.domain.ConfirmationRecord;
 import net.vaier.domain.Operator;
 
 /**
@@ -8,5 +9,9 @@ import net.vaier.domain.Operator;
  */
 public interface RememberActionOutcomeUseCase {
 
+    /** What became of a card, as its <b>Confirmation record</b>. */
+    void remember(Operator operator, ConfirmationRecord record);
+
+    /** Later news of it in Vaier's words, such as an OS upgrade settling. */
     void remember(Operator operator, String outcome);
 }

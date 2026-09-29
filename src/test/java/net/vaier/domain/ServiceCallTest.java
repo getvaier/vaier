@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A <b>Service call</b>: one request to a published service's own API. The path stays inside the service,
- * a read is a GET and a write is anything else, and the details are what the operator says yes to.
+ * and the details are what the operator says yes to.
  */
 class ServiceCallTest {
 
@@ -26,24 +26,6 @@ class ServiceCallTest {
             "/" + "a".repeat(ServiceCall.MAX_PATH_CHARS) }) {
             assertThatThrownBy(() -> ServiceCall.proposed("GET", bad, null)).as(String.valueOf(bad))
                 .isInstanceOf(IllegalArgumentException.class);
-        }
-    }
-
-    /**
-     * A <b>free read</b> is a GET Vaier knows changes nothing: openHAB's REST reads and OpenSprinkler's status
-     * pages. Any other GET might - OpenSprinkler switches a station on with one - so it waits for a yes.
-     */
-    @Test
-    void onlyAGetOnTheFreeReadListIsFree_andAnyOtherIsSentToCallService() {
-        for (String free : new String[] { "/rest", "/rest/items/PoolPump/state", "rest/things?summary=true",
-            "/jc", "/jo?pw=x", "/js", "/jp", "/jn?pw=a&b=1" }) {
-            assertThat(ServiceCall.read(free).method()).as(free).isEqualTo("GET");
-        }
-        for (String unlisted : new String[] { "/", "/restart", "/api/documents/", "/cm?sid=1&en=1", "/jcx",
-            "/jc/extra", "/cv?rsn=1" }) {
-            assertThatThrownBy(() -> ServiceCall.read(unlisted)).as(unlisted)
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("propose it with call_service");
         }
     }
 
@@ -102,5 +84,33 @@ class ServiceCallTest {
             .startsWith("Sends PUT /p to opensprinkler on Colina 27, with \"{\"program\"")
             .contains("… (" + longBody.length() + " characters)")
             .hasSizeLessThan(ServiceCall.DETAILS_BODY_CHARS + 120);
+    }
+
+    /** An Always allow says, under the service's own answer, which folder is now free. */
+    @Test
+    void anAlwaysAllowedOutcomeSaysTheFolderSaved_underTheServicesAnswer() {
+        ServiceCall read = ServiceCall.proposed("GET", "/api/documents/?query=x", null);
+
+        assertThat(read.alwaysAllowed(new ActionWording("Done — paperless accepted it.", "It answered 200."),
+            "paperless on Apalveien 5")).isEqualTo(new ActionWording("Done — paperless accepted it.",
+            "It answered 200. Marvin reads everything under /api/ on paperless on Apalveien 5 without asking "
+                + "from now on."));
+    }
+
+    /** What Always allow saves: the call's parent folder, or the call itself when it sits right under the root. */
+    @Test
+    void theAllowanceIsTheParentFolder_neverTheWholeService() {
+        record Row(String path, String allowance) {}
+        for (Row row : new Row[] {
+            new Row("/rest/items/Gardenlights_Terrace_Switch", "/rest/items/"),
+            new Row("/rest/items/X/state?x=1", "/rest/items/X/"),
+            new Row("/api/documents/?query=x", "/api/"),
+            new Row("/rest/items", "/rest/"),
+            new Row("/jc", "/jc"),
+            new Row("/", "/"),
+        }) {
+            assertThat(ServiceCall.proposed("GET", row.path(), null).allowance()).as(row.path())
+                .isEqualTo(row.allowance());
+        }
     }
 }

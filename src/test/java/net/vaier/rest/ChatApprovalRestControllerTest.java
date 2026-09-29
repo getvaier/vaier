@@ -70,7 +70,8 @@ class ChatApprovalRestControllerTest {
             .contains("<p class=\"details\">It is blocked right now.")
             .doesNotContain("<b>203.0.113.9</b>")
             .contains("<form method=\"post\" action=\"/chat/approvals/" + TOKEN + "\">")
-            .contains("<form method=\"post\" action=\"/chat/approvals/" + TOKEN + "/decline\">");
+            .contains("<form method=\"post\" action=\"/chat/approvals/" + TOKEN + "/decline\">")
+            .doesNotContain("always-allow");
         verifyNoInteractions(takeMailedConfirmationUseCase, chatActions, rememberActionOutcomeUseCase);
     }
 
@@ -83,7 +84,8 @@ class ChatApprovalRestControllerTest {
         Map<String, Supplier<ResponseEntity<String>>> routes = Map.of(
             "look", () -> controller.look(EMAIL, TOKEN),
             "yes", () -> controller.approve(EMAIL, TOKEN),
-            "no", () -> controller.decline(EMAIL, TOKEN));
+            "no", () -> controller.decline(EMAIL, TOKEN),
+            "always", () -> controller.alwaysAllow(EMAIL, TOKEN));
         routes.forEach((route, call) -> {
             ResponseEntity<String> page = call.get();
             assertThat(page.getStatusCode().value()).as(route).isEqualTo(404);
@@ -102,11 +104,31 @@ class ChatApprovalRestControllerTest {
 
         assertThat(controller.approve(EMAIL, TOKEN).getBody())
             .contains("<p class=\"headline\">Lifted.</p>").contains("<p class=\"details\">Once.</p>");
-        verify(rememberActionOutcomeUseCase).remember(GEIR, confirmation.proposal().outcomeSentence(true, lifted));
+        verify(rememberActionOutcomeUseCase).remember(GEIR, confirmation.proposal().record(true, lifted, null));
 
         reset(chatActions, rememberActionOutcomeUseCase);
         assertThat(controller.decline(EMAIL, TOKEN).getBody()).contains("Not done.");
         verifyNoInteractions(chatActions);
-        verify(rememberActionOutcomeUseCase).remember(GEIR, confirmation.proposal().declinedSentence());
+        verify(rememberActionOutcomeUseCase).remember(GEIR, confirmation.proposal().declined());
+    }
+
+    /** A service call's GET offers Always allow as a third answer, which runs through the card's own dispatch. */
+    @Test
+    void aServicesGet_offersAlwaysAllow_whichRunsThroughTheCardsDispatch_andIsRemembered() {
+        MailedConfirmation confirmation = MailedConfirmation.mint(ActionProposal.propose(ChatAction.CALL_SERVICE,
+            Map.of("service", "paperless on Apalveien 5", "host", "paperless.example.com", "method", "GET",
+                "path", "/api/documents/", "headline", "Read the documents."), 0), GEIR, 0).confirmation();
+        when(openMailedConfirmationUseCase.open(TOKEN, GEIR)).thenReturn(confirmation);
+        when(takeMailedConfirmationUseCase.take(TOKEN, GEIR)).thenReturn(confirmation);
+        ActionWording saved = new ActionWording("Done.", "Marvin reads it without asking from now on.");
+        when(chatActions.alwaysAllow(confirmation.proposal(), GEIR)).thenReturn(
+            new ChatActions.Outcome(true, saved, "paperless answered 200.\n\n[]"));
+
+        assertThat(controller.look(EMAIL, TOKEN).getBody())
+            .contains("<form method=\"post\" action=\"/chat/approvals/" + TOKEN + "/always-allow\">"
+                + "<button>Always allow /api/</button></form>");
+        assertThat(controller.alwaysAllow(EMAIL, TOKEN).getBody()).contains("<p class=\"headline\">Done.</p>");
+        verify(rememberActionOutcomeUseCase).remember(GEIR,
+            confirmation.proposal().record(true, saved, "paperless answered 200.\n\n[]"));
     }
 }

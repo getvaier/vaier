@@ -15,8 +15,17 @@ import java.util.UUID;
 public record ActionProposal(String id, ChatAction action, Map<String, String> arguments, ActionWording wording,
                              long proposedAtEpochMs) {
 
-    private static final String RECORD = "Card from an action tool: ";
     static final String PROPOSED = "Proposed to the operator as a card: ";
+
+    /**
+     * What the model is told in place of a question when a yes is followed up. Vaier's words, not the
+     * operator's; it steers clear of talking about "the card", which reads as a phantom confirmation.
+     */
+    public static final String FOLLOW_UP = "(Vaier, not the operator.) The operator just said yes, and Vaier's "
+        + "record above says what became of it and, for a read, what came back. Carry on as if you had never "
+        + "stopped: answer what they asked from what came back, or say in a sentence or two what it means and "
+        + "whether anything comes next. When what came back does not hold the answer, say so plainly; never "
+        + "fill the gap. Be brief, do not repeat the record, and do not ask for the yes again.";
 
     public static final Duration TTL = Duration.ofMinutes(10);
 
@@ -34,6 +43,33 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
             action.wording(arguments), nowEpochMs);
     }
 
+    /** Whether the card offers <b>Always allow</b>: a service call's GET, and nothing else. */
+    public boolean mayBeAlwaysAllowed() {
+        return action == ChatAction.CALL_SERVICE && serviceCall().mayBeAlwaysAllowed();
+    }
+
+    /** The call a yes runs, when this is a service call. */
+    public ServiceCall serviceCall() {
+        if (action != ChatAction.CALL_SERVICE) {
+            throw new IllegalArgumentException("That is not a service call.");
+        }
+        return ServiceCall.proposed(arguments.get("method"), arguments.get("path"), arguments.get("body"));
+    }
+
+    /** The folder Always allow would free, named on its button; none when the card cannot be always allowed. */
+    public String allowance() {
+        return mayBeAlwaysAllowed() ? serviceCall().allowance() : null;
+    }
+
+    /** The GET that Always allow runs and saves; anything else waits for a yes every time. */
+    public ServiceCall alwaysAllowedCall() {
+        if (!mayBeAlwaysAllowed()) {
+            throw new IllegalArgumentException("Only a service call's GET can be always allowed; this one waits "
+                + "for a yes every time.");
+        }
+        return serviceCall();
+    }
+
     public boolean expired(long nowEpochMs) {
         return nowEpochMs - proposedAtEpochMs >= TTL.toMillis();
     }
@@ -45,17 +81,14 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
         return this;
     }
 
-    /**
-     * What Vaier remembers of the card once clicked. Named as Vaier's record, not as prose, because the model
-     * copied a bare "Proposed: …" line as text instead of calling the tool.
-     */
-    public String outcomeSentence(boolean done, ActionWording outcome) {
-        return RECORD + wording.sentence() + " (" + (done ? "done: " : "could not be done: ")
-            + outcome.sentence() + ")";
+    /** What Vaier remembers of the card once a yes has run. */
+    public ConfirmationRecord record(boolean done, ActionWording outcome, String cameBack) {
+        return new ConfirmationRecord(wording, done ? ConfirmationRecord.Outcome.DONE : ConfirmationRecord.Outcome.NOT_DONE,
+            outcome, cameBack);
     }
 
-    public String declinedSentence() {
-        return RECORD + wording.sentence() + " (the operator declined)";
+    public ConfirmationRecord declined() {
+        return ConfirmationRecord.declined(wording);
     }
 
     /** What the model is told. The one lie this must prevent is "done". */

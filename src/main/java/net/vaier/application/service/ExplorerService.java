@@ -14,6 +14,7 @@ import net.vaier.application.ViewFileUseCase.View;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.Operator;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PermissionDeniedException;
@@ -282,7 +283,7 @@ public class ExplorerService
      * naming it, never at download time — then held for its hour. Nothing is copied or written anywhere.
      */
     @Override
-    public Bundle offer(MachineId machineId, String machineLabel, List<String> paths, String name) {
+    public Bundle offer(Operator operator, MachineId machineId, String machineLabel, List<String> paths, String name) {
         Bundle bundle = Bundle.offer(machineId, machineLabel, paths, name, System.currentTimeMillis());
         // One connection for every path: a bundle of a hundred photos was a hundred SSH sessions once, and
         // the operator waited on every one of them before the card appeared.
@@ -290,7 +291,7 @@ public class ExplorerService
         SftpRoot root = forResolvingSftpRoots.rootFor(target);
         List<String> jailed = bundle.paths().stream().map(path -> root.toJailPath(FileEntry.normalisePath(path))).toList();
         Bundle sized = bundle.sizedFrom(jailed, forBrowsingRemoteFiles.stats(target, jailed));
-        forHoldingBundles.hold(sized);
+        forHoldingBundles.hold(operator, sized);
         return sized;
     }
 

@@ -1,16 +1,20 @@
 package net.vaier.application.service;
 
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
+import net.vaier.domain.Bundle;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ChatPrompt;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ChatUnavailableException;
 import net.vaier.domain.ConfirmationWatch;
+import net.vaier.domain.ConfirmationRecord;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.Errand;
 import net.vaier.domain.ErrandReport;
 import net.vaier.domain.Errands;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.MailedConfirmations;
 import net.vaier.domain.Operator;
@@ -37,6 +41,7 @@ import net.vaier.domain.port.ForPersistingSpend;
 import net.vaier.domain.port.ForReadingWebPages;
 import net.vaier.domain.port.ForSearchingTheWeb;
 import net.vaier.domain.port.ForHoldingActionProposals;
+import net.vaier.domain.port.ForHoldingBundles;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,18 +50,22 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -69,6 +78,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -80,7 +90,8 @@ class ChatServiceTest {
     @Mock ForPersistingAppConfiguration configPersistence;
     @Mock ForConversing forConversing;
     @Mock ForHoldingActionProposals forHoldingActionProposals;
-    @Mock ForPersistingConversations forPersistingConversations;
+    @Mock ForHoldingBundles forHoldingBundles;
+    @Spy KeptConversations forPersistingConversations = new KeptConversations();
     @Mock ForPersistingMemory forPersistingMemory;
     @Mock ForPersistingSpend forPersistingSpend;
     @Mock ForReadingWebPages forReadingWebPages;
@@ -101,6 +112,37 @@ class ChatServiceTest {
 
     @InjectMocks ChatService service;
 
+    /** The conversation store as a map; a change is one step, as the adapter's is. */
+    static class KeptConversations implements ForPersistingConversations {
+        private final Map<Operator, Conversation> kept = new HashMap<>();
+
+        @Override
+        public Optional<Conversation> load(Operator operator) {
+            return Optional.ofNullable(kept.get(operator));
+        }
+
+        @Override
+        public synchronized Conversation update(Operator operator, UnaryOperator<Conversation> change) {
+            Conversation after = change.apply(load(operator).orElseGet(() -> Conversation.empty(operator)));
+            kept.put(operator, after);
+            return after;
+        }
+
+        @Override
+        public void forget(Operator operator) {
+            kept.remove(operator);
+        }
+
+        /** Kept before the test starts, without counting as a change the service made. */
+        void seed(Conversation conversation) {
+            kept.put(conversation.operator(), conversation);
+        }
+
+        Conversation of(Operator operator) {
+            return load(operator).orElseThrow();
+        }
+    }
+
     private static final List<ToolOffer> TOOLS =
         List.of(new ToolOffer(ChatTool.FLEET, () -> "colina27 connected"));
 
@@ -109,6 +151,7 @@ class ChatServiceTest {
         lenient().when(forPersistingMemory.load()).thenReturn(Memory.empty());
         lenient().when(forPersistingSpend.load()).thenReturn(Spend.empty());
         lenient().when(forPersistingErrands.load()).thenReturn(Errands.empty());
+        lenient().when(forPersistingMailedConfirmations.load()).thenReturn(MailedConfirmations.empty());
         lenient().when(clock.instant()).thenReturn(NOW.toInstant());
         lenient().when(clock.getZone()).thenReturn(OSLO);
     }
@@ -173,13 +216,12 @@ class ChatServiceTest {
     @Test
     void ask_whoseAnswerClaimsACardNoToolMade_isCorrectedOnce_andNotedWhenStillNoCard() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         answeringInTurn("The card is up.", "Sorry, there is no card.");
         List<String> received = new ArrayList<>();
 
         service.ask(GEIR, "back up colina", TOOLS, received::add);
 
-        ConfirmationWatch watch = ConfirmationWatch.overCards();
+        ConfirmationWatch watch = ConfirmationWatch.overCards(List.of(), List.of(), 0);
         verify(forConversing).converse(eq("sk-ant-api03-the-key"), anyString(),
             eq(List.of(new ConversationTurn(Role.OPERATOR, "back up colina"),
                 new ConversationTurn(Role.VAIER, "The card is up."))),
@@ -187,9 +229,50 @@ class ChatServiceTest {
         verify(forConversing, times(2)).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
         String answered = "The card is up.\n\nSorry, there is no card.\n\n" + watch.closingNote();
         assertThat(String.join("", received)).isEqualTo(answered);
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations).save(saved.capture());
-        assertThat(saved.getValue().turns()).extracting(ConversationTurn::text).containsExactly("back up colina", answered);
+        assertThat(forPersistingConversations.of(GEIR).turns()).extracting(ConversationTurn::text)
+            .containsExactly("back up colina", answered);
+    }
+
+    /**
+     * The claim may be about a card from an earlier answer. While the operator still has one open, it is
+     * not a phantom: the live retry made a second, identical download card.
+     */
+    @Test
+    void ask_whoseAnswerRefersToACardStillOpen_isNotRetried() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        long now = NOW.toInstant().toEpochMilli();
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), now);
+        Bundle bundle = Bundle.offer(MachineId.of("41a14c07-b2b9-4e6f-bb48-3991a11bb862"), "NAS", List.of("/a"),
+            "photos", now);
+        for (boolean aBundle : new boolean[] { false, true }) {
+            reset(forConversing);
+            when(forHoldingActionProposals.heldFor(GEIR)).thenReturn(aBundle ? List.of() : List.of(proposal));
+            when(forHoldingBundles.heldFor(GEIR)).thenReturn(aBundle ? List.of(bundle) : List.of());
+            answering("The card above is waiting for your click.");
+            List<String> received = new ArrayList<>();
+
+            service.ask(GEIR, "and how full is the NAS?", TOOLS, received::add);
+
+            verify(forConversing, times(1).description(aBundle ? "a bundle" : "a proposal"))
+                .converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
+            assertThat(String.join("", received)).isEqualTo("The card above is waiting for your click.");
+        }
+    }
+
+    /** An errand's report may mean a mail it sent on an earlier run, still waiting for the operator's yes. */
+    @Test
+    void run_whoseReportRefersToAMailStillWaiting_isNotRetried() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        Errand errand = due();
+        long now = errand.nextDue().toEpochMilli();
+        when(forPersistingMailedConfirmations.load()).thenReturn(MailedConfirmations.empty().with(
+            MailedConfirmation.mint(ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), now),
+                GEIR, now).confirmation(), now));
+        answering("I mailed you the backup for a yes yesterday; it is still waiting.");
+
+        service.run(errand, TOOLS);
+
+        verify(forConversing, times(1)).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
     }
 
     @Test
@@ -197,7 +280,7 @@ class ChatServiceTest {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
         Conversation kept = Conversation.empty(GEIR).with(new ConversationTurn(Role.OPERATOR, "hello"))
             .with(new ConversationTurn(Role.VAIER, "hi."));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(kept));
+        forPersistingConversations.seed(kept);
         answering("Colina.");
         List<String> received = new ArrayList<>();
 
@@ -209,35 +292,67 @@ class ChatServiceTest {
         assertThat(received).containsExactly("Colina.");
     }
 
+    /**
+     * A <b>follow-up</b>: after a yes, the model gets the kept thread — ending on Vaier's record of the card and
+     * what came back — with the domain's instruction in place of a question. Only the answer is kept, so the
+     * thread never shows the operator saying something they did not type.
+     */
+    @Test
+    void followUp_asksWithTheInstructionInPlaceOfAQuestion_andKeepsOnlyTheAnswer() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        ActionProposal card = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), 0);
+        Conversation kept = Conversation.empty(GEIR).with(ConversationTurn.recording(
+            card.record(true, new ActionWording("Backing up.", null), null), NOW.toInstant()));
+        forPersistingConversations.seed(kept);
+        answering("It is running", "; I will say when it lands.");
+        List<String> received = new ArrayList<>();
+
+        assertThat(service.followUp(GEIR, TOOLS, received::add)).isTrue();
+
+        verify(forConversing).converse(eq("sk-ant-api03-the-key"),
+            eq(ChatPrompt.forFleet("example.com", NOW, Memory.empty(), Errands.empty(), GEIR).text()),
+            eq(kept.forModel()), eq(ActionProposal.FOLLOW_UP), eq(TOOLS), any());
+        assertThat(received).containsExactly("It is running", "; I will say when it lands.");
+        assertThat(forPersistingConversations.of(GEIR))
+            .isEqualTo(kept.withAnswer("It is running; I will say when it lands.", NOW.toInstant()));
+    }
+
+    /** Nothing owed — "Not now", or already answered — costs nothing: no call to the model, nothing kept. */
+    @Test
+    void followUp_withNoYesToFollow_asksTheModelNothing() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        forPersistingConversations.seed(Conversation.empty(GEIR)
+            .with(new ConversationTurn(Role.VAIER, "Colina is green.")));
+
+        assertThat(service.followUp(GEIR, TOOLS, text -> { })).isFalse();
+
+        verifyNoInteractions(forConversing);
+        verify(forPersistingConversations, never()).update(any(), any());
+    }
+
     /** Slice 3: the question and the whole answer are kept, in order, under the operator who asked. */
     @Test
     void ask_remembersTheQuestionAndTheAnswer() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         answering("Colina", " is red.");
 
         service.ask(GEIR, "which machine is red?", TOOLS, text -> { });
 
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations).save(saved.capture());
-        assertThat(saved.getValue().operator()).isEqualTo(GEIR);
-        assertThat(saved.getValue().turns()).containsExactly(
-            new ConversationTurn(Role.OPERATOR, "which machine is red?"),
-            new ConversationTurn(Role.VAIER, "Colina is red."));
+        assertThat(forPersistingConversations.of(GEIR).turns()).containsExactly(
+            ConversationTurn.said(Role.OPERATOR, "which machine is red?", NOW.toInstant()),
+            ConversationTurn.said(Role.VAIER, "Colina is red.", NOW.toInstant()));
     }
 
     /** An answer that never came is not a turn; the question alone is kept, so the thread stays honest. */
     @Test
     void ask_keepsTheQuestionEvenWhenTheAnswerWasEmpty() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         answering();
 
         service.ask(GEIR, "anything?", TOOLS, text -> { });
 
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations).save(saved.capture());
-        assertThat(saved.getValue().turns()).containsExactly(new ConversationTurn(Role.OPERATOR, "anything?"));
+        assertThat(forPersistingConversations.of(GEIR).turns()).extracting(ConversationTurn::text)
+            .containsExactly("anything?");
     }
 
     /**
@@ -252,23 +367,27 @@ class ChatServiceTest {
         for (int i = 0; i < Conversation.MAX_TURNS; i++) {
             longOne = longOne.with(new ConversationTurn(i % 2 == 0 ? Role.OPERATOR : Role.VAIER, "turn " + i));
         }
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(longOne));
+        forPersistingConversations.seed(longOne);
+        // An errand reports while the summary is being made; its turn outlives the compaction.
+        ConversationTurn meanwhile = new ConversationTurn(Role.VAIER, "Errand, Every day at 08:00: all well.");
         doAnswer(invocation -> {
             Consumer<String> onText = invocation.getArgument(5);
             String prompt = invocation.getArgument(1);
-            onText.accept(prompt.equals(ChatPrompt.forCompaction().text()) ? "the gist" : "the answer");
+            boolean summarising = prompt.equals(ChatPrompt.forCompaction().text());
+            if (summarising) {
+                forPersistingConversations.update(GEIR, c -> c.with(meanwhile));
+            }
+            onText.accept(summarising ? "the gist" : "the answer");
             return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
         }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
 
         service.ask(GEIR, "one more?", TOOLS, text -> { });
 
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations, times(2)).save(saved.capture());
-        Conversation compacted = saved.getAllValues().get(1);
+        Conversation compacted = forPersistingConversations.of(GEIR);
         assertThat(compacted.summary()).isEqualTo("the gist");
-        assertThat(compacted.turns()).hasSize(Conversation.KEEP_VERBATIM);
-        assertThat(compacted.turns().get(compacted.turns().size() - 1))
-            .isEqualTo(new ConversationTurn(Role.VAIER, "the answer"));
+        assertThat(compacted.turns()).hasSize(Conversation.KEEP_VERBATIM + 1);
+        assertThat(compacted.turns().get(compacted.turns().size() - 2).text()).isEqualTo("the answer");
+        assertThat(compacted.turns()).endsWith(meanwhile);
         verify(forConversing).converse(eq("sk-ant-api03-the-key"), eq(ChatPrompt.forCompaction().text()),
             anyList(), anyString(), eq(List.of()), any());
     }
@@ -281,7 +400,7 @@ class ChatServiceTest {
         for (int i = 0; i < Conversation.MAX_TURNS; i++) {
             longOne = longOne.with(new ConversationTurn(i % 2 == 0 ? Role.OPERATOR : Role.VAIER, "turn " + i));
         }
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(longOne));
+        forPersistingConversations.seed(longOne);
         doAnswer(invocation -> {
             String prompt = invocation.getArgument(1);
             if (prompt.equals(ChatPrompt.forCompaction().text())) {
@@ -294,17 +413,14 @@ class ChatServiceTest {
 
         service.ask(GEIR, "one more?", TOOLS, text -> { });
 
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations, times(1)).save(saved.capture());
-        assertThat(saved.getValue().summary()).isNull();
-        assertThat(saved.getValue().turns()).hasSize(Conversation.MAX_TURNS + 2);
+        assertThat(forPersistingConversations.of(GEIR).summary()).isNull();
+        assertThat(forPersistingConversations.of(GEIR).turns()).hasSize(Conversation.MAX_TURNS + 2);
     }
 
     /** The prompt is the domain's, built from the fleet's own base domain. */
     @Test
     void ask_buildsTheSystemPromptForThisFleet() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
 
         service.ask(GEIR, "anything?", TOOLS, text -> { });
 
@@ -328,7 +444,7 @@ class ChatServiceTest {
             .hasMessageContaining("Add one in Settings");
 
         verify(forConversing, never()).converse(any(), any(), any(), any(), any(), any());
-        verify(forPersistingConversations, never()).save(any());
+        verify(forPersistingConversations, never()).update(any(), any());
     }
 
     // --- the kept conversation (#360 slice 3) --------------------------------------------------------
@@ -336,11 +452,10 @@ class ChatServiceTest {
     @Test
     void get_isTheKeptConversation_orAnEmptyOne() {
         Conversation kept = Conversation.empty(GEIR).with(new ConversationTurn(Role.OPERATOR, "hello"));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(kept));
-        assertThat(service.get(GEIR)).isEqualTo(kept);
-
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         assertThat(service.get(GEIR)).isEqualTo(Conversation.empty(GEIR));
+
+        forPersistingConversations.seed(kept);
+        assertThat(service.get(GEIR)).isEqualTo(kept);
     }
 
     @Test
@@ -350,28 +465,32 @@ class ChatServiceTest {
         verify(forPersistingConversations).forget(GEIR);
     }
 
-    /** What became of a card is a turn in Vaier's voice, so the next question knows it. */
+    /**
+     * What became of a card is a turn in Vaier's voice, so the next question knows it: a record in its own
+     * shape, and later news (an OS upgrade settling) as words.
+     */
     @Test
     void remember_appendsWhatBecameOfACardAsVaiersOwnTurn() {
         Conversation kept = Conversation.empty(GEIR).with(new ConversationTurn(Role.OPERATOR, "back up colina"));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(kept));
+        forPersistingConversations.seed(kept);
+        ConfirmationRecord record = ConfirmationRecord.declined(new ActionWording("Back up Colina 27 now.", null));
 
-        service.remember(GEIR, "Proposed: Back up Colina 27 now. (done: Backing up Colina 27 now.)");
+        service.remember(GEIR, record);
+        service.remember(GEIR, "The system updates on Colina 27 are installed.");
 
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations).save(saved.capture());
-        assertThat(saved.getValue().turns()).extracting(ConversationTurn::text)
-            .containsExactly("back up colina", "Proposed: Back up Colina 27 now. (done: Backing up Colina 27 now.)");
+        assertThat(forPersistingConversations.of(GEIR)).isEqualTo(kept
+            .with(ConversationTurn.recording(record, NOW.toInstant()))
+            .with(ConversationTurn.said(Role.VAIER, "The system updates on Colina 27 are installed.", NOW.toInstant())));
     }
 
     // --- proposing and taking (#360 slice 2) ---------------------------------------------------------
 
     @Test
     void propose_buildsTheProposalAndHoldsIt() {
-        ActionProposal proposal = service.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"));
+        ActionProposal proposal = service.propose(GEIR, ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"));
 
         assertThat(proposal.wording()).isEqualTo(ChatAction.RUN_BACKUP.wording(Map.of("machine", "Colina 27")));
-        verify(forHoldingActionProposals).hold(proposal);
+        verify(forHoldingActionProposals).hold(GEIR, proposal);
     }
 
     @Test
@@ -458,7 +577,6 @@ class ChatServiceTest {
     @Test
     void ask_putsVaiersMemoryInThePrompt() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         Memory memory = Memory.empty().remember("Photos live under /volume1/photo.", 1L);
         when(forPersistingMemory.load()).thenReturn(memory);
 
@@ -507,7 +625,6 @@ class ChatServiceTest {
     @Test
     void ask_recordsWhatTheAnswerUsedAsThisMonthsSpend() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         answering("Colina.");
 
         service.ask(GEIR, "which machine is red?", TOOLS, text -> { });
@@ -668,33 +785,28 @@ class ChatServiceTest {
     }
 
     /**
-     * An errand starts a new session: the operator's kept conversation is forgotten before Marvin sets off,
-     * so the report opens a fresh thread instead of piling on yesterday's. Forgotten before, not after — the
-     * forgetting is the start of the run, whatever the run then finds.
+     * An errand's report joins a conversation the operator is still in, and starts a fresh one after three
+     * quiet hours — decided when the report lands, so a question asked while Marvin ran is never wiped.
      */
     @Test
-    void run_startsANewSession_forgettingTheKeptConversationBeforeItRuns() {
+    void run_startsAFreshThreadOnlyAfterThreeQuietHours() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
         Errand errand = due();
-        answering("colina27 has 3 updates.");
+        Instant ran = errand.nextDue();
+        for (Duration since : new Duration[] { Duration.ofMinutes(5), Conversation.QUIET }) {
+            Conversation talking = Conversation.empty(GEIR)
+                .withExchange("is colina up?", "It is.", ran.minus(since));
+            forPersistingConversations.seed(talking);
+            answering("colina27 has 3 updates.");
 
-        service.run(errand, TOOLS);
+            service.run(errand, TOOLS);
 
-        InOrder inOrder = inOrder(forPersistingConversations, forConversing);
-        inOrder.verify(forPersistingConversations).forget(GEIR);
-        inOrder.verify(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
-    }
-
-    /** A watch that finds nothing still started afresh: the new session is the run's, not the report's. */
-    @Test
-    void run_thatFoundNothingToReport_stillStartedANewSession() {
-        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        Errand errand = due();
-        answering(ErrandReport.NOTHING_TO_REPORT);
-
-        service.run(errand, TOOLS);
-
-        verify(forPersistingConversations).forget(GEIR);
+            assertThat(forPersistingConversations.of(GEIR)).as(since.toString())
+                .isEqualTo(talking.withErrandReport(new ErrandReport(errand, "colina27 has 3 updates.")
+                    .conversationTurn(ran), ran));
+            reset(forConversing);
+        }
+        verify(forPersistingConversations, never()).forget(any());
     }
 
     @Test
@@ -708,9 +820,7 @@ class ChatServiceTest {
         verify(forSendingAdminNotification).sendTo(eq("geir@example.com"),
             eq("Marvin: Tell me only if a machine has updates."),
             contains("colina27 has 3 updates."), eq("errand " + errand.id()));
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations).save(saved.capture());
-        assertThat(saved.getValue().turns()).extracting(ConversationTurn::text)
+        assertThat(forPersistingConversations.of(GEIR).turns()).extracting(ConversationTurn::text)
             .containsExactly("Errand, Every day at 08:00: colina27 has 3 updates.");
         verify(forPublishingEvents).publish("chat", "errand-reported", "");
     }
@@ -724,7 +834,7 @@ class ChatServiceTest {
 
         service.run(errand, TOOLS);
 
-        ConfirmationWatch watch = ConfirmationWatch.overMail();
+        ConfirmationWatch watch = ConfirmationWatch.overMail(MailedConfirmations.empty(), GEIR, 0);
         verify(forConversing).converse(anyString(), anyString(), anyList(), eq(watch.correction()), eq(TOOLS), any());
         verify(forSendingAdminNotification).sendTo(eq("geir@example.com"), anyString(),
             contains("Nothing was mailed.\n\n" + watch.closingNote()), eq("errand " + errand.id()));
@@ -740,7 +850,7 @@ class ChatServiceTest {
         service.run(errand, TOOLS);
 
         verifyNoInteractions(forSendingAdminNotification, forPublishingEvents);
-        verify(forPersistingConversations, never()).save(any());
+        verify(forPersistingConversations, never()).update(any(), any());
     }
 
     /** It still moves on, and the pane says why there was no mail. */
@@ -805,7 +915,7 @@ class ChatServiceTest {
         service.run(kept.errands().get(0), TOOLS);
 
         verifyNoInteractions(forSendingAdminNotification);
-        verify(forPersistingConversations).save(any());
+        assertThat(forPersistingConversations.load(nobody)).isPresent();
         verify(forPublishingEvents).publish("chat", "errand-reported", "");
     }
 
@@ -824,7 +934,6 @@ class ChatServiceTest {
     @Test
     void ask_putsThisOperatorsErrandsInThePrompt() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
         when(forPersistingErrands.load()).thenReturn(oneErrandOf(GEIR));
 
         service.ask(GEIR, "anything?", TOOLS, text -> { });
@@ -837,22 +946,23 @@ class ChatServiceTest {
 
     /**
      * The lost update an errand makes possible: a question takes tens of seconds, and an errand that reports
-     * while it is in flight appends a turn of its own. Saving the instance the question loaded would throw
-     * that turn away, so every mutation re-reads first.
+     * while it is in flight appends a turn of its own. The answer is added to the conversation as it stands
+     * when the answer is done, never to the one the question loaded.
      */
     @Test
     void ask_keepsATurnThatLandedWhileTheAnswerWasBeingMade() {
         when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
-        Conversation before = Conversation.empty(GEIR);
-        Conversation withErrandTurn = before.with(new ConversationTurn(Role.VAIER, "Errand, Every day at 08:00: all well."));
-        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(before), Optional.of(withErrandTurn));
-        answering("the answer");
+        ConversationTurn errandTurn = new ConversationTurn(Role.VAIER, "Errand, Every day at 08:00: all well.");
+        doAnswer(invocation -> {
+            forPersistingConversations.update(GEIR, c -> c.with(errandTurn));
+            Consumer<String> onText = invocation.getArgument(5);
+            onText.accept("the answer");
+            return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
+        }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
 
         service.ask(GEIR, "which machine is red?", TOOLS, text -> { });
 
-        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
-        verify(forPersistingConversations).save(saved.capture());
-        assertThat(saved.getValue().turns()).extracting(ConversationTurn::text).containsExactly(
+        assertThat(forPersistingConversations.of(GEIR).turns()).extracting(ConversationTurn::text).containsExactly(
             "Errand, Every day at 08:00: all well.", "which machine is red?", "the answer");
     }
 }

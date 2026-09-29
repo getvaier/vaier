@@ -397,10 +397,10 @@ public class ChatReads {
         }
     }
 
-    record ServiceFact(String name, String machine, String address, boolean reachable) {
+    record ServiceFact(String name, String machine, String address, boolean reachable, List<String> freeReads) {
         static ServiceFact of(PublishedServiceUco service) {
             return new ServiceFact(service.shortName(), service.hostName(), service.dnsAddress(),
-                service.healthy());
+                service.healthy(), service.freeReads());
         }
     }
 

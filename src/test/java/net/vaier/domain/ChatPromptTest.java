@@ -159,7 +159,10 @@ class ChatPromptTest {
                 .contains("only for what the operator asked for or what an errand clearly calls for")
                 .contains("a GET that read_service refuses goes through call_service too")
                 .contains("say in its headline, in everyday words, what the call really does")
-                .contains("never make it sound gentler than it is");
+                .contains("never make it sound gentler than it is")
+                // openHAB answered every item to a filter it does not have, and Marvin trusted it.
+                .contains("may ignore a query parameter it does not know")
+                .contains("check that what came back actually answers the question");
         }
     }
 

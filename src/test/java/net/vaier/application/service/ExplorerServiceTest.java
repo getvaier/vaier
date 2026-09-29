@@ -10,6 +10,7 @@ import net.vaier.domain.FileEntry;
 import net.vaier.domain.Upload;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.Operator;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.SshTarget;
@@ -954,6 +955,7 @@ class ExplorerServiceTest {
     // --- a bundle, offered and opened (#360) ---------------------------------------------------------
 
     private static final MachineId NAS = MachineId.of("41a14c07-b2b9-4e6f-bb48-3991a11bb862");
+    private static final Operator GEIR = Operator.of("geir@example.com");
 
     /** Every path is stat'd before the offer, so a path that is not there is refused now, not at download. */
     @Test
@@ -966,13 +968,13 @@ class ExplorerServiceTest {
         stats.put("/volume1/photo/b.jpg", new RemoteStat(false, 2_000_000));
         when(forBrowsingRemoteFiles.stats(target, List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"))).thenReturn(stats);
 
-        Bundle bundle = service.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"), "pictures");
+        Bundle bundle = service.offer(GEIR, NAS, "NAS", List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"), "pictures");
 
         assertThat(bundle.name()).isEqualTo("pictures.zip");
         assertThat(bundle.describe()).isEqualTo("2 files, 3.0 MB");
         // One connection for all of them: a bundle of a hundred photos must not be a hundred SSH sessions.
         verify(forBrowsingRemoteFiles, never()).stat(any(), any());
-        verify(forHoldingBundles).hold(bundle);
+        verify(forHoldingBundles).hold(GEIR, bundle);
     }
 
     @Test
@@ -982,10 +984,10 @@ class ExplorerServiceTest {
         when(forResolvingSftpRoots.rootFor(target)).thenReturn(SftpRoot.NONE);
         when(forBrowsingRemoteFiles.stats(target, List.of("/volume1/photo/gone.jpg"))).thenReturn(Map.of());
 
-        assertThatThrownBy(() -> service.offer(NAS, "NAS", List.of("/volume1/photo/gone.jpg"), "x"))
+        assertThatThrownBy(() -> service.offer(GEIR, NAS, "NAS", List.of("/volume1/photo/gone.jpg"), "x"))
             .isInstanceOf(NotFoundException.class)
             .hasMessage("/volume1/photo/gone.jpg is not on NAS.");
-        verify(forHoldingBundles, never()).hold(any());
+        verify(forHoldingBundles, never()).hold(any(), any());
     }
 
     /**

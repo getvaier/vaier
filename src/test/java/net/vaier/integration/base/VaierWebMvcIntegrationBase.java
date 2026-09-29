@@ -214,6 +214,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
 
     @MockBean
+    protected RemoveFreeReadUseCase removeFreeReadUseCase;
+
+    @MockBean
     protected DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @MockBean
@@ -256,6 +259,9 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- Chat (#360) ---
     @MockBean
     protected ChatUseCase chatUseCase;
+
+    @MockBean
+    protected FollowUpUseCase followUpUseCase;
 
     @MockBean
     protected IsChatAvailableUseCase isChatAvailableUseCase;

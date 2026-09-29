@@ -248,7 +248,7 @@ public class NotificationService implements
             .orElseThrow(() -> new NotFoundException("That download is gone; ask again."))
             .requireLive(now)
             .keptForADay(now);
-        forHoldingBundles.hold(bundle);
+        forHoldingBundles.hold(operator, bundle);
         BundleMailNotice notice = BundleMailNotice.of(bundle, configResolver.getDomain());
         if (!adminNotifier.sendTo(to, notice.subject(), notice.body(), "bundle " + bundle.id())) {
             throw new IllegalArgumentException("Vaier could not send mail; check the SMTP settings.");

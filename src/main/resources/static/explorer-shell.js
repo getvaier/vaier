@@ -4558,7 +4558,7 @@
     }
     function credentialLine(who, username, actionText, onAction) {
         const row = el('div', 'ex-svccred-row');
-        const t = el('span', 'ex-svccred-who'); t.textContent = who + ' → ' + username;
+        const t = el('span', 'ex-svccred-who'); t.textContent = username == null ? who : who + ' → ' + username;
         const b = el('button', 'ex-btn'); b.textContent = actionText; b.onclick = onAction;
         row.append(t, b);
         return row;
@@ -4606,6 +4606,22 @@
 
         wrap.appendChild(hint('Vaier signs people in to the service with this login, so they never need its '
             + 'password. The service sees one account per credential: give someone their own to tell them apart.'));
+        return wrap;
+    }
+
+    // The paths Marvin may read here without asking, each granted by an Always allow. Absent when there are
+    // none, so the pane never shows an empty list; removing one sends Marvin back to asking.
+    function freeReadsEditor(s) {
+        const paths = s.freeReads || [];
+        if (!paths.length) return null;
+        const wrap = el('div', 'ex-field');
+        const l = el('label'); l.textContent = 'Free reads'; wrap.appendChild(l);
+        paths.forEach((path) => wrap.appendChild(credentialLine(path, null, 'Remove', () => sendServiceCredential(
+            '/published-services/' + encodeURIComponent(s.dnsAddress) + '/free-reads?path=' + encodeURIComponent(path)
+                + (s.pathPrefix ? '&pathPrefix=' + encodeURIComponent(s.pathPrefix) : ''),
+            'DELETE', null, 'Could not remove ' + path + '.'))));
+        wrap.appendChild(hint('Marvin reads these paths on this service without asking. Remove one and he asks '
+            + 'again next time.'));
         return wrap;
     }
 
@@ -4711,6 +4727,8 @@
                 body.appendChild(allowedGroupsEditor(s));
                 body.appendChild(serviceCredentialEditor(s));
             }
+            const freeReads = freeReadsEditor(s);
+            if (freeReads) body.appendChild(freeReads);
         }
 
         // The launchpad is a wall of links, and a stream has no link — so it has no tile and no name for one.
@@ -7413,7 +7431,11 @@
             const res = await fetch('/chat/conversation', { cache: 'no-store' });
             if (!res.ok) return;
             const c = await res.json();
-            S.chat.turns = (c.turns || []).map((t) => ({ role: t.role, text: t.text }));
+            // A kept card record comes back as the answered card it was, never as its text.
+            S.chat.turns = (c.turns || []).map((t) => t.card
+                ? { kind: 'card', state: t.card.state, headline: t.card.headline, details: t.card.details,
+                    outcome: t.card.outcome, outcomeDetails: t.card.outcomeDetails }
+                : { role: t.role, text: t.text });
             S.chat.summary = c.summary || null;
             loadMemory();
             loadErrands();
@@ -7666,25 +7688,35 @@
             const yes = el('button', 'ex-btn is-accent');
             yes.textContent = t.headline.replace(/\.$/, '');
             yes.onclick = () => confirmAction(t);
+            row.appendChild(yes);
+            // Only on a service's GET, as the server decides: the same yes, and the folder it names saved as a
+            // free read — named on the button, so the operator sees how far the yes reaches.
+            if (t.alwaysAllow) {
+                const always = el('button', 'ex-btn');
+                always.textContent = t.allowance ? 'Always allow ' + t.allowance : 'Always allow';
+                always.onclick = () => confirmAction(t, '/always-allow');
+                row.appendChild(always);
+            }
             const no = el('button', 'ex-btn'); no.textContent = 'Not now';
             no.onclick = () => declineAction(t);
-            row.append(yes, no);
+            row.appendChild(no);
             card.appendChild(row);
-        } else {
-            card.appendChild(t.state === 'working'
-                ? chatWording('ex-chat-card-outcome', 'Doing it…')
-                : chatWording('ex-chat-card-outcome', t.outcome, t.outcomeDetails));
+        } else if (t.state === 'working') {
+            card.appendChild(chatWording('ex-chat-card-outcome', 'Doing it…'));
+        } else if (t.outcome) {
+            // An old record kept no outcome wording; its edge alone says how it went.
+            card.appendChild(chatWording('ex-chat-card-outcome', t.outcome, t.outcomeDetails));
         }
         return card;
     }
 
     // The click. The card is taken once on the server, so a second click cannot run it twice; what came of
     // it is written into the card either way.
-    async function confirmAction(t) {
+    async function confirmAction(t, how = '') {
         if (t.state !== 'proposed') return;
         t.state = 'working'; render();
         try {
-            const res = await fetch(`/chat/actions/${encodeURIComponent(t.id)}`, { method: 'POST' });
+            const res = await fetch(`/chat/actions/${encodeURIComponent(t.id)}${how}`, { method: 'POST' });
             const body = await res.json().catch(() => ({}));
             t.state = res.ok && body.done ? 'done' : 'failed';
             t.outcome = body.headline || 'Vaier could not do that.';
@@ -7693,6 +7725,7 @@
             t.state = 'failed'; t.outcome = 'Vaier could not do that.';
         }
         render();
+        followUp();
     }
 
     // Files handed over, as a card whose button is the download. The browser follows the link and streams
@@ -7723,21 +7756,34 @@
         }
     }
 
-    // One question: append it, open a Vaier turn, then fill that turn as the stream arrives. The
-    // conversation so far is Vaier's to remember, so only the question is sent.
+    // One question: append it, then let Marvin answer it. The conversation so far is Vaier's to remember, so
+    // only the question is sent.
     async function askVaier(question) {
         if (S.chat.busy) return;
         S.chat.turns.push({ role: 'OPERATOR', text: question });
+        await answerFrom(() => fetch('/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: question }),
+        }), false);
+    }
+
+    // After a yes, Marvin carries on in a bubble of his own — no question typed, none shown. The server says
+    // whether one is owed; saying nothing is fine, and leaves no empty bubble. A click during an answer waits
+    // for it to finish.
+    async function followUp() {
+        if (S.chat.busy) { S.chat.followUpPending = true; return; }
+        await answerFrom(() => fetch('/chat/follow-up', { method: 'POST' }), true);
+    }
+
+    // Open a Vaier turn, then fill it as the stream arrives.
+    async function answerFrom(ask, silenceIsFine) {
         const answer = { role: 'VAIER', text: '' };
         S.chat.turns.push(answer);
         S.chat.busy = true; S.chat.error = null;
         render();
         let finished = false;
         try {
-            const res = await fetch('/chat', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question }),
-            });
+            const res = await ask();
             if (!res.ok) {
                 const e = await res.json().catch(() => ({}));
                 throw new Error(e.message || 'Vaier could not answer.');
@@ -7749,7 +7795,7 @@
                 else if (name === 'ping') { /* the pulse that keeps a quiet stream open; nothing to show */ }
                 else if (name === 'bundle') {
                     const b = JSON.parse(data);
-                    S.chat.turns.splice(S.chat.turns.length - 1, 0,
+                    S.chat.turns.splice(S.chat.turns.indexOf(answer), 0,
                         { role: 'VAIER', kind: 'bundle', id: b.id, name: b.name, size: b.size, url: b.url });
                     render();
                 }
@@ -7757,9 +7803,9 @@
                     // The card goes before the answer being written, so the answer stays the last Vaier
                     // turn and the streaming painter keeps writing into the right element.
                     const c = JSON.parse(data);
-                    S.chat.turns.splice(S.chat.turns.length - 1, 0,
+                    S.chat.turns.splice(S.chat.turns.indexOf(answer), 0,
                         { role: 'VAIER', kind: 'card', id: c.id, headline: c.headline, details: c.details,
-                          state: 'proposed' });
+                          alwaysAllow: c.alwaysAllow, allowance: c.allowance, state: 'proposed' });
                     render();
                 }
                 else if (name === 'error') throw new Error(data || 'Vaier could not answer.');
@@ -7772,14 +7818,16 @@
                     + 'the thread when he finishes; reload to see it.';
             }
         } catch (e) {
-            if (!answer.text) S.chat.turns.pop();
             S.chat.error = e.message || 'Vaier could not answer.';
         }
+        const at = S.chat.turns.indexOf(answer);
+        if (!answer.text && at >= 0 && (silenceIsFine || S.chat.error)) S.chat.turns.splice(at, 1);
         S.chat.busy = false;
         render();
         loadMemory();
         loadErrands();
         loadSpend();
+        if (S.chat.followUpPending) { S.chat.followUpPending = false; followUp(); }
     }
 
     // What Marvin is doing right now, under the answer being written — so a long wait says what it waits

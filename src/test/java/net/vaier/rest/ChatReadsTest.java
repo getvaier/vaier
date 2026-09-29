@@ -260,16 +260,17 @@ class ChatReadsTest {
         assertThat(security).contains("203.0.113.7").contains("crowdsecurity/ssh-bf");
     }
 
+    /** Each service's free reads ride along, so Marvin knows what he may read without asking. */
     @Test
-    void thePublishedServicesReadSaysWhereEachServiceRunsAndWhetherItIsReachable() {
+    void thePublishedServicesReadSaysWhereEachServiceRunsWhetherItIsReachable_andItsFreeReads() {
         when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(
-            new PublishedServiceUco("Grafana @ Colina 27", "Grafana", COLINA.value(), "Colina 27", null,
-                ServiceLocation.PEER_SERVER, true, "grafana.example.com", "10.13.13.3", 3000, State.OK, true,
-                null, false, false, null, false, null, null, null, null, null, "social", false, null)));
+            publishedService("Grafana", "Colina 27", "grafana.example.com").toBuilder()
+                .machineId(COLINA.value()).freeReads(List.of("/api/health")).build()));
 
         String services = read(ChatTool.PUBLISHED_SERVICES);
 
-        assertThat(services).contains("Grafana").contains("Colina 27").contains("grafana.example.com");
+        assertThat(services).contains("Grafana").contains("Colina 27").contains("grafana.example.com")
+            .contains("\"freeReads\":[\"/api/health\"]");
     }
 
     /**
@@ -473,9 +474,10 @@ class ChatReadsTest {
     }
 
     private static PublishedServiceUco publishedService(String name, String machine, String address) {
-        return new PublishedServiceUco(name + " @ " + machine, name, null, machine, null,
-            ServiceLocation.PEER_SERVER, true, address, "10.13.13.3", 8080, State.OK, true,
-            null, false, false, null, false, null, null, null, null, null, "social", false, null);
+        return PublishedServiceUco.builder().name(name + " @ " + machine).shortName(name).hostName(machine)
+            .serviceLocation(ServiceLocation.PEER_SERVER).healthy(true).dnsAddress(address)
+            .hostAddress("10.13.13.3").hostPort(8080).state(State.OK).authenticated(true).authMode("social")
+            .freeReads(List.of()).build();
     }
 
     // --- memory: what Vaier keeps across conversations (#360) --------------------------------------------

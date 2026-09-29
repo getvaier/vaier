@@ -31,7 +31,8 @@ public enum ChatTool implements ChatCapability {
             + "showing and how many minutes it has left."),
 
     PUBLISHED_SERVICES("published_services",
-        "Every service Vaier publishes, the machine it runs on and whether it is reachable."),
+        "Every service Vaier publishes, the machine it runs on, whether it is reachable, and its free reads: "
+            + "the paths on it read_service may read without asking."),
 
     BACKUPS("backups",
         "The fleet's backup jobs, and how the last run of each one turned out."),
@@ -104,9 +105,10 @@ public enum ChatTool implements ChatCapability {
         "Read a published service's own API: one GET of a path on it, at its backend, with the service "
             + "credential Vaier holds for the operator, and read back its status and body - text and JSON as "
             + "they came, a long body cut, anything binary only measured. Use it to learn a service's state: "
-            + "an openHAB item, a sprinkler's programs. Only reads Vaier knows change nothing are allowed "
-            + "(openHAB's /rest, OpenSprinkler's /jc /jo /js /jp /jn); any other path, and anything that "
-            + "changes something, is proposed with call_service.",
+            + "an openHAB item, a sprinkler's programs. Only the service's free reads, as published_services "
+            + "lists them, with any query; the operator grants each one with Always allow. Any other path is "
+            + "proposed with call_service, method GET, and anything that changes something is proposed with "
+            + "call_service too.",
         new ToolParameter("service", "The published service: its name and machine as published_services "
             + "gives them (openhab on Colina 27), or its address."),
         new ToolParameter("path", "The path inside the service, with any query, for example "

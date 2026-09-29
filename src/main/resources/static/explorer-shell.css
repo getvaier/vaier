@@ -1597,6 +1597,8 @@ select.ex-input { cursor: pointer; }
 }
 .ex-chat-card-details:hover { opacity: .85; }
 .ex-chat-card-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* "Always allow /rest/items/" names a path, and a long one breaks rather than widening a phone's card. */
+.ex-chat-card-row .ex-btn { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
 .ex-chat-card-outcome { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
 .ex-chat-card.is-done { border-left-color: var(--accent); }
 .ex-chat-card.is-done .ex-chat-card-outcome { color: var(--text); }

@@ -1,7 +1,9 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.CallServiceUseCase;
+import net.vaier.application.RemoveFreeReadUseCase;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DetectOwnSignInsUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
@@ -40,6 +42,7 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ReverseProxyRoute.RouteSetting;
 import net.vaier.domain.Server;
+import net.vaier.domain.FreeReads;
 import net.vaier.domain.ServiceCall;
 import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.ServiceCredentials;
@@ -47,6 +50,7 @@ import net.vaier.domain.ServiceOwnSignIn;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForCallingServices;
+import net.vaier.domain.port.ForPersistingFreeReads;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForPersistingOpenServiceState;
@@ -99,7 +103,9 @@ public class PublishingService implements
     JudgeOpenServicesUseCase,
     MarkMeantToBePublicUseCase,
     ReadServiceUseCase,
-    CallServiceUseCase {
+    CallServiceUseCase,
+    AlwaysAllowServiceCallUseCase,
+    RemoveFreeReadUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
@@ -123,6 +129,7 @@ public class PublishingService implements
     // by searching for it. Needed to attribute a hub route to the machine it actually runs on.
     private final ForResolvingVaierServerIdentity vaierServerIdentity;
     private final ForPersistingServiceCredentials forPersistingServiceCredentials;
+    private final ForPersistingFreeReads forPersistingFreeReads;
     private final ForProbingServiceSignIn forProbingServiceSignIn;
     private final ForPersistingOpenServiceState forPersistingOpenServiceState;
     private final ForCallingServices forCallingServices;
@@ -163,6 +170,7 @@ public class PublishingService implements
                              ForProbingServiceSignIn forProbingServiceSignIn,
                              ForPersistingOpenServiceState forPersistingOpenServiceState,
                              ForCallingServices forCallingServices,
+                             ForPersistingFreeReads forPersistingFreeReads,
                              Clock clock) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
@@ -187,6 +195,7 @@ public class PublishingService implements
         this.forProbingServiceSignIn = forProbingServiceSignIn;
         this.forPersistingOpenServiceState = forPersistingOpenServiceState;
         this.forCallingServices = forCallingServices;
+        this.forPersistingFreeReads = forPersistingFreeReads;
         // The domain owns the port call; on disk, so a redeploy never mails about the same hole twice.
         this.openServiceTracker = new OpenServiceTracker(forPersistingOpenServiceState);
         this.clock = clock;
@@ -213,12 +222,13 @@ public class PublishingService implements
         // overrides the container's version (#245).
         ContainerImageSnapshot images = currentContainerImages();
         Map<String, String> probedVersions = launchpadVersions;
+        FreeReads freeReads = forPersistingFreeReads.read();
 
         cache = routes.stream()
             .filter(r -> !isInfrastructureRouter(r))
             .filter(r -> !r.isOauth2EndpointsRouter())
             .map(r -> toUco(r, vpnClients, localServices, serverLanCidr, lanReachabilities,
-                images, probedVersions))
+                images, probedVersions, freeReads))
             .toList();
         return cache;
     }
@@ -371,17 +381,47 @@ public class PublishingService implements
 
     @Override
     public ServiceCallAnswer readService(Operator operator, String host, String pathPrefix, String path) {
-        return callService(operator, host, pathPrefix, ServiceCall.read(path));
+        ReverseProxyRoute route = publishedAt(host, pathPrefix);
+        return call(route, operator, forPersistingFreeReads.read().read(host, pathPrefix, path));
     }
 
     /** With the credential {@code /authz/verify} would hand the service for this operator. */
     @Override
     public ServiceCallAnswer callService(Operator operator, String host, String pathPrefix, ServiceCall call) {
-        ReverseProxyRoute route = ReverseProxyRoute.findByFqdnAndPath(
-                forPersistingReverseProxyRoutes.getReverseProxyRoutes(), host, pathPrefix)
+        return call(publishedAt(host, pathPrefix), operator, call);
+    }
+
+    // --- AlwaysAllowServiceCallUseCase / RemoveFreeReadUseCase ---
+
+    /** Saved first, so a write is refused before anything is sent, and a read that fails stays allowed. */
+    @Override
+    public ServiceCallAnswer alwaysAllow(Operator operator, String host, String pathPrefix, ServiceCall call) {
+        ReverseProxyRoute route = publishedAt(host, pathPrefix);
+        forPersistingFreeReads.update(reads -> reads.alwaysAllowing(host, pathPrefix, call));
+        freeReadsChanged(host);
+        return call(route, operator, call);
+    }
+
+    @Override
+    public void removeFreeRead(String host, String pathPrefix, String path) {
+        forPersistingFreeReads.update(reads -> reads.without(host, pathPrefix, path));
+        freeReadsChanged(host);
+    }
+
+    private void freeReadsChanged(String host) {
+        invalidatePublishedServicesCache();
+        forPublishingEvents.publish("published-services", "service-updated", host);
+    }
+
+    private ReverseProxyRoute publishedAt(String host, String pathPrefix) {
+        return ReverseProxyRoute.findByFqdnAndPath(forPersistingReverseProxyRoutes.getReverseProxyRoutes(), host,
+                pathPrefix)
             .orElseThrow(() -> new NotFoundException("Vaier publishes nothing at " + host + "."));
-        return route.call(forCallingServices, call,
-            forPersistingServiceCredentials.read().credentialFor(host, operator.email().orElse(null)));
+    }
+
+    private ServiceCallAnswer call(ReverseProxyRoute route, Operator operator, ServiceCall call) {
+        return route.call(forCallingServices, call, forPersistingServiceCredentials.read()
+            .credentialFor(route.getDomainName(), operator.email().orElse(null)));
     }
 
     // --- JudgeOpenServicesUseCase / MarkMeantToBePublicUseCase ---
@@ -405,7 +445,8 @@ public class PublishingService implements
     private PublishedServiceUco toUco(ReverseProxyRoute route,
                                     List<VpnClient> vpnClients, List<DockerService> localServices,
                                     String serverLanCidr, Map<String, Reachability> lanReachabilities,
-                                    ContainerImageSnapshot images, Map<String, String> probedVersions) {
+                                    ContainerImageSnapshot images, Map<String, String> probedVersions,
+                                    FreeReads freeReads) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
         var lanServers = forPersistingLanServers.getAll();
         Server.State hostState = route.hostState(localServices, vpnClients, peers, serverLanCidr, lanReachabilities);
@@ -413,36 +454,37 @@ public class PublishingService implements
         DockerService backing = route.backingContainer(images.vaierServerContainers(),
             images.peerContainersByVpnIp(), images.lanServerContainersByAddress()).orElse(null);
         String probedVersion = route.hasVersionEndpoint() ? probedVersions.get(route.getName()) : null;
-        return new PublishedServiceUco(
-            route.displayName(baseDomain, localServices, vpnClients, forResolvingPeerIds, peers),
-            route.shortName(baseDomain, vpnClients, forResolvingPeerIds, peers),
+        return PublishedServiceUco.builder()
+            .name(route.displayName(baseDomain, localServices, vpnClients, forResolvingPeerIds, peers))
+            .shortName(route.shortName(baseDomain, vpnClients, forResolvingPeerIds, peers))
             // Whose machine this service is on, as an identity. The browser used to work it out from the
             // display name, which put a service under the wrong machine card whenever two names agreed.
-            route.hostMachineId(peers, lanServers, vaierServerIdentity.identity())
-                .map(MachineId::value).orElse(null),
-            route.hostDisplayName(vpnClients, forResolvingPeerIds, peers),
-            route.lanServerName(lanServers).orElse(null),
-            route.serviceLocation(vpnClients, forResolvingPeerIds, peers),
-            hostState == Server.State.OK,
-            route.getDomainName(),
-            route.getAddress(),
-            route.getPort(),
-            hostState,
-            route.getAuthInfo() != null,
-            route.getRootRedirectPath(),
-            route.isDirectUrlDisabled(),
-            route.isLanService(),
-            route.getPathPrefix(),
-            route.isHiddenFromLaunchpad(),
-            route.getLaunchpadAlias(),
-            route.getVersionEndpoint(),
-            route.getVersionProperty(),
-            backing == null ? null : backing.image(),
-            probedVersion != null ? probedVersion : (backing == null ? null : backing.version()),
-            route.authMode().wireValue(),
-            route.isStream(),
-            route.connectAddress()
-        );
+            .machineId(route.hostMachineId(peers, lanServers, vaierServerIdentity.identity())
+                .map(MachineId::value).orElse(null))
+            .hostName(route.hostDisplayName(vpnClients, forResolvingPeerIds, peers))
+            .lanServerName(route.lanServerName(lanServers).orElse(null))
+            .serviceLocation(route.serviceLocation(vpnClients, forResolvingPeerIds, peers))
+            .healthy(hostState == Server.State.OK)
+            .dnsAddress(route.getDomainName())
+            .hostAddress(route.getAddress())
+            .hostPort(route.getPort())
+            .state(hostState)
+            .authenticated(route.getAuthInfo() != null)
+            .rootRedirectPath(route.getRootRedirectPath())
+            .directUrlDisabled(route.isDirectUrlDisabled())
+            .isLanService(route.isLanService())
+            .pathPrefix(route.getPathPrefix())
+            .hiddenFromLaunchpad(route.isHiddenFromLaunchpad())
+            .launchpadAlias(route.getLaunchpadAlias())
+            .versionEndpoint(route.getVersionEndpoint())
+            .versionProperty(route.getVersionProperty())
+            .image(backing == null ? null : backing.image())
+            .version(probedVersion != null ? probedVersion : (backing == null ? null : backing.version()))
+            .authMode(route.authMode().wireValue())
+            .stream(route.isStream())
+            .connectAddress(route.connectAddress())
+            .freeReads(freeReads.of(route.getDomainName(), route.getPathPrefix()))
+            .build();
     }
 
     // --- PublishPeerServiceUseCase ---
@@ -764,6 +806,7 @@ public class PublishingService implements
 
         List<ReverseProxyRoute> remaining = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         forPersistingServiceCredentials.update(credentials -> credentials.afterUnpublishing(fqdn, remaining));
+        forPersistingFreeReads.update(reads -> reads.afterUnpublishing(fqdn, remaining));
 
         // Nothing else to undo: unpublishing removes the Traefik route and stops there. The name goes
         // on resolving under the operator's wildcard record, which is theirs and not Vaier's (#331).
