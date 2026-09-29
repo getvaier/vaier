@@ -13,18 +13,21 @@ import java.util.function.UnaryOperator;
 /**
  * Every service credential Vaier holds, keyed by the published service's host — the key its access rule
  * uses — and, for a personal one, by the person's email. Immutable: each change returns a new set.
+ *
+ * <p>Marvin's service credential is a field of its own, not a key among the people, so no email that
+ * reaches {@link #credentialFor} can ever name it.
  */
 @Value
 public class ServiceCredentials {
 
-    /** One service's credentials: the shared one (or null), and the personal ones by email. */
-    public record Entry(ServiceCredential shared, Map<String, ServiceCredential> personal) {
+    /** One service's credentials: the shared one, Marvin's (either may be null), and the personal ones by email. */
+    public record Entry(ServiceCredential shared, ServiceCredential marvins, Map<String, ServiceCredential> personal) {
         public Entry {
             personal = Collections.unmodifiableMap(new TreeMap<>(personal));
         }
 
         boolean isEmpty() {
-            return shared == null && personal.isEmpty();
+            return shared == null && marvins == null && personal.isEmpty();
         }
     }
 
@@ -57,18 +60,48 @@ public class ServiceCredentials {
         return Optional.ofNullable(personal != null ? personal : entry.shared());
     }
 
-    /** Whether the service at {@code host} carries any credential, shared or personal. */
+    /** Whether the service at {@code host} carries any credential a browser is handed, shared or personal. */
     public boolean hasAnyFor(String host) {
-        return host != null && byService.containsKey(normalise(host));
+        Entry entry = host == null ? null : byService.get(normalise(host));
+        return entry != null && (entry.shared() != null || !entry.personal().isEmpty());
+    }
+
+    /** What a Marvin <b>service call</b> carries: his own credential, and nothing else ever. */
+    public ServiceCredential marvinsFor(String host) {
+        requireMarvinsFor(host);
+        return byService.get(normalise(host)).marvins();
+    }
+
+    public boolean hasMarvinsFor(String host) {
+        Entry entry = host == null ? null : byService.get(normalise(host));
+        return entry != null && entry.marvins() != null;
+    }
+
+    /** No login of his own, no call: refused before anything is sent. */
+    public void requireMarvinsFor(String host) {
+        if (!hasMarvinsFor(host)) {
+            throw new IllegalArgumentException(host + " has no login for Marvin, so he cannot use it. The operator "
+                + "can add one on the service's pane under Service credential, after switching it to Social "
+                + "sign-in if it is not already.");
+        }
     }
 
     public ServiceCredentials withShared(String host, ServiceCredential credential, List<ReverseProxyRoute> routes) {
         requireSocialService(host, routes);
-        return changed(host, entry -> new Entry(credential, entry.personal()));
+        return changed(host, entry -> new Entry(credential, entry.marvins(), entry.personal()));
     }
 
     public ServiceCredentials withoutShared(String host) {
-        return changed(host, entry -> new Entry(null, entry.personal()));
+        return changed(host, entry -> new Entry(null, entry.marvins(), entry.personal()));
+    }
+
+    public ServiceCredentials withMarvins(String host, ServiceCredential credential, List<ReverseProxyRoute> routes) {
+        requireSocialService(host, routes);
+        return changed(host, entry -> new Entry(entry.shared(), credential, entry.personal()));
+    }
+
+    public ServiceCredentials withoutMarvins(String host) {
+        return changed(host, entry -> new Entry(entry.shared(), null, entry.personal()));
     }
 
     public ServiceCredentials withPersonal(String host, String email, ServiceCredential credential,
@@ -81,7 +114,7 @@ public class ServiceCredentials {
         return changed(host, entry -> {
             Map<String, ServiceCredential> personal = new TreeMap<>(entry.personal());
             personal.put(person, credential);
-            return new Entry(entry.shared(), personal);
+            return new Entry(entry.shared(), entry.marvins(), personal);
         });
     }
 
@@ -105,7 +138,7 @@ public class ServiceCredentials {
         boolean stillPublished = remainingRoutes.stream()
             .filter(r -> !r.isOauth2EndpointsRouter())
             .anyMatch(r -> r.getDomainName() != null && key.equals(normalise(r.getDomainName())));
-        return stillPublished ? this : changed(host, entry -> new Entry(null, Map.of()));
+        return stillPublished ? this : changed(host, entry -> new Entry(null, null, Map.of()));
     }
 
     /** Only a route behind social login runs Vaier's check, so only there is anyone to hand a credential for. */
@@ -124,7 +157,7 @@ public class ServiceCredentials {
     private static Entry withoutPersonIn(Entry entry, String person) {
         Map<String, ServiceCredential> personal = new TreeMap<>(entry.personal());
         personal.remove(person);
-        return new Entry(entry.shared(), personal);
+        return new Entry(entry.shared(), entry.marvins(), personal);
     }
 
     private ServiceCredentials changed(String host, UnaryOperator<Entry> change) {
@@ -132,7 +165,7 @@ public class ServiceCredentials {
             throw new IllegalArgumentException("host must not be blank");
         }
         String key = normalise(host);
-        Entry after = change.apply(byService.getOrDefault(key, new Entry(null, Map.of())));
+        Entry after = change.apply(byService.getOrDefault(key, new Entry(null, null, Map.of())));
         Map<String, Entry> next = new TreeMap<>(byService);
         if (after.isEmpty()) {
             next.remove(key);

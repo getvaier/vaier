@@ -7,8 +7,8 @@ import java.util.regex.Pattern;
 
 /**
  * A <b>Service call</b>: one request Marvin makes to a published service's own API. The path is judged here
- * so that it can only name something inside the service, never another host. Whether a GET is a
- * <b>free read</b> is the service's own list's decision ({@link FreeReads}).
+ * so that it can only name something inside the service, never another host. Whether a GET needs a yes
+ * is the route's decision ({@link ReverseProxyRoute#read}).
  */
 public record ServiceCall(String method, String path, String body) {
 
@@ -37,34 +37,6 @@ public record ServiceCall(String method, String path, String body) {
                 + " characters, which is more than one yes should cover.");
         }
         return new ServiceCall(verb, requireInside(path), kept);
-    }
-
-    /** The path without its query: what <b>Always allow</b> saves, and what a free read is matched on. */
-    public String route() {
-        int query = path.indexOf('?');
-        return query < 0 ? path : path.substring(0, query);
-    }
-
-    /**
-     * What Always allow saves: the folder the call reads in, so one yes covers its siblings. A call right under
-     * the root keeps its own path instead, because the root's folder would be the whole service.
-     */
-    public String allowance() {
-        String route = route();
-        String trimmed = route.length() > 1 && route.endsWith("/") ? route.substring(0, route.length() - 1) : route;
-        String parent = trimmed.substring(0, trimmed.lastIndexOf('/') + 1);
-        return parent.equals("/") ? route : parent;
-    }
-
-    /** Only a read may be allowed forever; a write waits for a yes every time. */
-    public boolean mayBeAlwaysAllowed() {
-        return method.equals("GET");
-    }
-
-    /** The service's own answer, and under it the path now read without asking. */
-    public ActionWording alwaysAllowed(ActionWording outcome, String service) {
-        String saved = "Marvin reads everything under " + allowance() + " on " + service + " without asking from now on.";
-        return new ActionWording(outcome.headline(), outcome.details() == null ? saved : outcome.details() + " " + saved);
     }
 
     /** JSON when the body is shaped like it, plain text otherwise, and nothing without a body. */

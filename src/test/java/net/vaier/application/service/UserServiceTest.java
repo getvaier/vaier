@@ -447,6 +447,15 @@ class UserServiceTest {
         assertThat(changed(withBoth)).isEqualTo(withShared);
 
         reset(forPersistingServiceCredentials);
+        service.setMarvinsServiceCredential("openhab.example.com", "marvin", "marvins-pw");
+        ServiceCredentials withMarvins = changed(withShared);
+        assertThat(withMarvins.marvinsFor("openhab.example.com")).isEqualTo(new ServiceCredential("marvin", "marvins-pw"));
+
+        reset(forPersistingServiceCredentials);
+        service.removeMarvinsServiceCredential("openhab.example.com");
+        assertThat(changed(withMarvins)).isEqualTo(withShared);
+
+        reset(forPersistingServiceCredentials);
         service.clearSharedServiceCredential("openhab.example.com");
         assertThat(changed(withShared).getByService()).isEmpty();
     }

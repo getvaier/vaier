@@ -1,15 +1,16 @@
 package net.vaier.rest;
 
-import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
+import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.MailConfirmationUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.AuthMode;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.Machine;
@@ -19,10 +20,13 @@ import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.Operator;
 import net.vaier.domain.OsUpgrade;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.ServiceCall;
 import net.vaier.domain.ServiceCallAnswer;
+import net.vaier.domain.ServiceCredential;
+import net.vaier.domain.ServiceCredentials;
 import net.vaier.domain.ToolOffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +42,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -63,7 +68,7 @@ class ChatActionsTest {
     @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     @Mock GetPublishedServicesUseCase getPublishedServicesUseCase;
     @Mock CallServiceUseCase callServiceUseCase;
-    @Mock AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase;
+    @Mock GetServiceCredentialsUseCase getServiceCredentialsUseCase;
 
     @InjectMocks ChatActions chatActions;
 
@@ -144,15 +149,26 @@ class ChatActionsTest {
 
     /**
      * A write to a published service's own API: the card names the service as the operator knows it, the
-     * proposal keeps its address and the whole body, and the yes is done only when the service said so.
+     * proposal keeps its address and the whole body, and the yes is done only when the service said so. A
+     * service with no login for Marvin is refused before any card is offered.
      */
     @Test
-    void callingAService_resolvesItByName_carriesTheWholeBody_andIsDoneOnlyOnSuccess() {
+    void callingAService_resolvesItByName_carriesTheWholeBody_isDoneOnlyOnSuccess_andNeedsMarvinsLogin() {
         when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(PublishedServiceUco.builder()
             .name("openhab @ Colina 27").shortName("openhab").machineId(COLINA.value()).hostName("Colina 27")
             .serviceLocation(ServiceLocation.PEER_SERVER).healthy(true).dnsAddress("openhab.colina27.example.com")
             .hostAddress("10.13.13.3").hostPort(8080).state(State.OK).authenticated(true).authMode("social")
             .build()));
+        Map<String, String> asked = Map.of("service", "openHAB Colina 27", "method", "post",
+            "path", "rest/items/PoolPump", "body", "ON", "headline", "Turn on the pool pump at Colina 27.");
+        when(getServiceCredentialsUseCase.getServiceCredentials()).thenReturn(ServiceCredentials.empty());
+        assertThatThrownBy(() -> chatActions.canonical(ChatAction.CALL_SERVICE, asked))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("no login for Marvin");
+
+        ReverseProxyRoute social = ReverseProxyRoute.builder().name("openhab").domainName("openhab.colina27.example.com")
+            .middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build();
+        when(getServiceCredentialsUseCase.getServiceCredentials()).thenReturn(ServiceCredentials.empty()
+            .withMarvins("openhab.colina27.example.com", new ServiceCredential("marvin", "his"), List.of(social)));
         Map<String, String> canonical = chatActions.canonical(ChatAction.CALL_SERVICE, Map.of(
             "service", "openHAB Colina 27", "method", "post", "path", "rest/items/PoolPump", "body", "ON",
             "headline", "Turn on the pool pump at Colina 27."));
@@ -166,44 +182,14 @@ class ChatActionsTest {
             "{\"error\":\"Item PoolPump does not exist\"}".getBytes(StandardCharsets.UTF_8), false);
         assertThat(proposal.wording().details()).isEqualTo(call.details("openhab on Colina 27"));
 
-        when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
+        when(callServiceUseCase.callService(eq("openhab.colina27.example.com"), isNull(), eq(call)))
             .thenReturn(ok);
         assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
             new ChatActions.Outcome(true, ok.outcome("openhab on Colina 27"), ok.cameBack("openhab on Colina 27")));
 
-        when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
+        when(callServiceUseCase.callService(eq("openhab.colina27.example.com"), isNull(), eq(call)))
             .thenReturn(missing);
         assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
             new ChatActions.Outcome(false, missing.outcome("openhab on Colina 27"), null));
-    }
-
-    /**
-     * Always allow runs the read as Do it would, through the use case that also saves it, and says it is
-     * saved. Anything but a service call's GET is refused and runs nothing, whatever the page sent.
-     */
-    @Test
-    void alwaysAllow_runsTheGetThroughTheUseCaseThatSavesIt_andRefusesEverythingElse() {
-        ServiceCall read = ServiceCall.proposed("GET", "/api/documents/?query=x", null);
-        ActionProposal get = ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service",
-            "paperless on Apalveien 5", "host", "paperless.example.com", "method", "GET",
-            "path", "/api/documents/?query=x", "headline", "Search the documents."), 0);
-        ServiceCallAnswer ok = new ServiceCallAnswer(200, null, new byte[0], false);
-        when(alwaysAllowServiceCallUseCase.alwaysAllow(GEIR, "paperless.example.com", null, read)).thenReturn(ok);
-
-        assertThat(chatActions.alwaysAllow(get, GEIR)).isEqualTo(new ChatActions.Outcome(true,
-            read.alwaysAllowed(ok.outcome("paperless on Apalveien 5"), "paperless on Apalveien 5"),
-            ok.cameBack("paperless on Apalveien 5")));
-
-        for (ActionProposal refused : new ActionProposal[] {
-            ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service", "paperless on Apalveien 5",
-                "host", "paperless.example.com", "method", "DELETE", "path", "/api/documents/7/",
-                "headline", "Delete document 7."), 0),
-            ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27",
-                "machineId", COLINA.value()), 0),
-        }) {
-            assertThat(chatActions.alwaysAllow(refused, GEIR).done()).as(refused.action().toString()).isFalse();
-        }
-        verify(alwaysAllowServiceCallUseCase).alwaysAllow(any(), any(), any(), any());
-        verifyNoInteractions(runBackupJobUseCase, callServiceUseCase);
     }
 }

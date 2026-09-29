@@ -164,7 +164,7 @@
         services: [],                    // GET /published-services/discover — the whole fleet's routes
         publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
         access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
-        serviceCredentials: {},          // GET /access/services/credentials — host -> { sharedUsername, people }
+        serviceCredentials: {},          // GET /access/services/credentials — host -> { sharedUsername, marvinsUsername, people }
         people: [],                      // GET /access — the access entries a personal service credential can name
         ownSignIns: [],                  // GET /published-services/sign-ins — what each route's backend asks for by itself
         containers: new Map(),           // machine identity -> its containers, as Vaier last scraped them
@@ -4584,9 +4584,17 @@
             () => sendServiceCredential(credentialUrl(host, 'people/' + encodeURIComponent(p.email)), 'DELETE',
                 null, 'Could not remove ' + p.email + '’s credential.'))));
 
+        // Marvin's own: used on his service calls only, never handed to a browser. Unset paints no row.
+        if (current.marvinsUsername) {
+            wrap.appendChild(credentialLine('Marvin', current.marvinsUsername, 'Remove',
+                () => sendServiceCredential(credentialUrl(host, 'marvin'), 'DELETE', null,
+                    'Could not remove Marvin’s credential.')));
+        }
+
         const listed = new Set((current.people || []).map((p) => p.email));
         const candidates = (S.people || []).filter((p) => p.role !== 'pending' && !listed.has(p.email));
-        if (candidates.length) {
+        const MARVIN = 'marvin';   // a select value only; no email is a bare word
+        if (candidates.length || !current.marvinsUsername) {
             const who = el('select', 'ex-input');
             const blank = el('option'); blank.value = ''; blank.textContent = 'Give someone their own…';
             who.appendChild(blank);
@@ -4595,8 +4603,16 @@
                 o.textContent = p.name ? p.name + ' (' + p.email + ')' : p.email;
                 who.appendChild(o);
             });
+            if (!current.marvinsUsername) {
+                const o = el('option'); o.value = MARVIN; o.textContent = 'Marvin'; who.appendChild(o);
+            }
             const add = credentialInputs((username, password) => {
                 if (!who.value) { toast('Pick who this credential is for.'); return; }
+                if (who.value === MARVIN) {
+                    sendServiceCredential(credentialUrl(host, 'marvin'), 'PUT', { username, password },
+                        'Could not save Marvin’s credential.');
+                    return;
+                }
                 sendServiceCredential(credentialUrl(host, 'people/' + encodeURIComponent(who.value)), 'PUT',
                     { username, password }, 'Could not save the credential for ' + who.value + '.');
             }, 'Add');
@@ -4605,23 +4621,8 @@
         }
 
         wrap.appendChild(hint('Vaier signs people in to the service with this login, so they never need its '
-            + 'password. The service sees one account per credential: give someone their own to tell them apart.'));
-        return wrap;
-    }
-
-    // The paths Marvin may read here without asking, each granted by an Always allow. Absent when there are
-    // none, so the pane never shows an empty list; removing one sends Marvin back to asking.
-    function freeReadsEditor(s) {
-        const paths = s.freeReads || [];
-        if (!paths.length) return null;
-        const wrap = el('div', 'ex-field');
-        const l = el('label'); l.textContent = 'Free reads'; wrap.appendChild(l);
-        paths.forEach((path) => wrap.appendChild(credentialLine(path, null, 'Remove', () => sendServiceCredential(
-            '/published-services/' + encodeURIComponent(s.dnsAddress) + '/free-reads?path=' + encodeURIComponent(path)
-                + (s.pathPrefix ? '&pathPrefix=' + encodeURIComponent(s.pathPrefix) : ''),
-            'DELETE', null, 'Could not remove ' + path + '.'))));
-        wrap.appendChild(hint('Marvin reads these paths on this service without asking. Remove one and he asks '
-            + 'again next time.'));
+            + 'password. The service sees one account per credential: give someone their own to tell them apart. '
+            + 'Marvin uses only his own, and only on his calls to the service.'));
         return wrap;
     }
 
@@ -4727,8 +4728,13 @@
                 body.appendChild(allowedGroupsEditor(s));
                 body.appendChild(serviceCredentialEditor(s));
             }
-            const freeReads = freeReadsEditor(s);
-            if (freeReads) body.appendChild(freeReads);
+            // Only Marvin reads through a service credential, so the mark sits with it; a marked service
+            // that left Social keeps the box so the mark can still be cleared.
+            if (authMode === 'social' || s.askBeforeReading) {
+                body.appendChild(checkRow('Reading can change things here — Marvin always asks', s.askBeforeReading,
+                    (checked) => patchService(s, { askBeforeReading: checked },
+                        'Could not save whether Marvin asks before reading.')));
+            }
         }
 
         // The launchpad is a wall of links, and a stream has no link — so it has no tile and no name for one.
@@ -7689,14 +7695,6 @@
             yes.textContent = t.headline.replace(/\.$/, '');
             yes.onclick = () => confirmAction(t);
             row.appendChild(yes);
-            // Only on a service's GET, as the server decides: the same yes, and the folder it names saved as a
-            // free read — named on the button, so the operator sees how far the yes reaches.
-            if (t.alwaysAllow) {
-                const always = el('button', 'ex-btn');
-                always.textContent = t.allowance ? 'Always allow ' + t.allowance : 'Always allow';
-                always.onclick = () => confirmAction(t, '/always-allow');
-                row.appendChild(always);
-            }
             const no = el('button', 'ex-btn'); no.textContent = 'Not now';
             no.onclick = () => declineAction(t);
             row.appendChild(no);
@@ -7712,11 +7710,11 @@
 
     // The click. The card is taken once on the server, so a second click cannot run it twice; what came of
     // it is written into the card either way.
-    async function confirmAction(t, how = '') {
+    async function confirmAction(t) {
         if (t.state !== 'proposed') return;
         t.state = 'working'; render();
         try {
-            const res = await fetch(`/chat/actions/${encodeURIComponent(t.id)}${how}`, { method: 'POST' });
+            const res = await fetch(`/chat/actions/${encodeURIComponent(t.id)}`, { method: 'POST' });
             const body = await res.json().catch(() => ({}));
             t.state = res.ok && body.done ? 'done' : 'failed';
             t.outcome = body.headline || 'Vaier could not do that.';
@@ -7805,7 +7803,7 @@
                     const c = JSON.parse(data);
                     S.chat.turns.splice(S.chat.turns.indexOf(answer), 0,
                         { role: 'VAIER', kind: 'card', id: c.id, headline: c.headline, details: c.details,
-                          alwaysAllow: c.alwaysAllow, allowance: c.allowance, state: 'proposed' });
+                          state: 'proposed' });
                     render();
                 }
                 else if (name === 'error') throw new Error(data || 'Vaier could not answer.');

@@ -1,5 +1,7 @@
 package net.vaier.application;
 
+import lombok.Builder;
+
 public interface UpdatePublishedServiceUseCase {
     /**
      * Applies a partial update to the route at {@code dnsName} + {@code pathPrefix}. Each field in
@@ -15,6 +17,7 @@ public interface UpdatePublishedServiceUseCase {
      * for the string fields, an empty string means "clear" (consistent with how the prior per-field
      * endpoints treated blank input).
      */
+    @Builder
     record PublishedServicePatch(
         Boolean requiresAuth,
         Boolean directUrlDisabled,
@@ -28,7 +31,9 @@ public interface UpdatePublishedServiceUseCase {
          * unchanged". Supersedes the legacy {@code requiresAuth} toggle — when both are set,
          * {@code authMode} wins.
          */
-        String authMode
+        String authMode,
+        /** <b>Ask before reading</b>: true marks the service, false clears the mark. */
+        Boolean askBeforeReading
     ) {
         /** Back-compat constructor for callers predating the {@code authMode} field. */
         public PublishedServicePatch(Boolean requiresAuth, Boolean directUrlDisabled,
@@ -36,6 +41,14 @@ public interface UpdatePublishedServiceUseCase {
                                      String launchpadAlias, String versionEndpoint, String versionProperty) {
             this(requiresAuth, directUrlDisabled, hiddenFromLaunchpad, rootRedirectPath,
                 launchpadAlias, versionEndpoint, versionProperty, null);
+        }
+
+        public PublishedServicePatch(Boolean requiresAuth, Boolean directUrlDisabled,
+                                     Boolean hiddenFromLaunchpad, String rootRedirectPath,
+                                     String launchpadAlias, String versionEndpoint, String versionProperty,
+                                     String authMode) {
+            this(requiresAuth, directUrlDisabled, hiddenFromLaunchpad, rootRedirectPath,
+                launchpadAlias, versionEndpoint, versionProperty, authMode, null);
         }
     }
 }

@@ -108,6 +108,12 @@ class ChatToolTest {
         assertThat(ChatTool.READ_SERVICE.parameters()).extracting(ToolParameter::name)
             .containsExactly("service", "path");
         assertThat(ChatTool.READ_SERVICE.description()).contains("GET").contains("call_service");
+        // Marvin uses only his own login, so he is told where he has one before he proposes a call.
+        assertThat(ChatTool.PUBLISHED_SERVICES.description()).contains("marvinHasLogin");
+        assertThat(ChatTool.READ_SERVICE.description()).contains("marvinHasLogin");
+        // On a service marked ask before reading, every GET is a card, so he is told which ones those are.
+        assertThat(ChatTool.PUBLISHED_SERVICES.description()).contains("askBeforeReading");
+        assertThat(ChatTool.READ_SERVICE.description()).contains("askBeforeReading");
     }
 
     /**

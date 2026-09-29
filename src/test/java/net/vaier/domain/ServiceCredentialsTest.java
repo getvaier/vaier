@@ -12,6 +12,7 @@ class ServiceCredentialsTest {
     private static final String OPENHAB = "openhab.example.com";
     private static final ServiceCredential SHARED = new ServiceCredential("house", "shared-pw");
     private static final ServiceCredential TURIDS = new ServiceCredential("turid", "turids-pw");
+    private static final ServiceCredential MARVINS = new ServiceCredential("marvin", "marvins-pw");
 
     private static ReverseProxyRoute route(String host, AuthMode mode) {
         return ReverseProxyRoute.builder().name(host.replace('.', '-') + "-router").domainName(host)
@@ -57,6 +58,8 @@ class ServiceCredentialsTest {
             assertThatThrownBy(() -> ServiceCredentials.empty()
                     .withPersonal(OPENHAB, "turid@example.com", TURIDS, row.routes(), PEOPLE))
                 .as(row.why()).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("social login");
+            assertThatThrownBy(() -> ServiceCredentials.empty().withMarvins(OPENHAB, MARVINS, row.routes()))
+                .as(row.why()).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("social login");
         }
         List<ReverseProxyRoute> mixed = List.of(route(OPENHAB, AuthMode.NONE),
             route(OPENHAB, AuthMode.SOCIAL).toBuilder().name("openhab-api-router").pathPrefix("/api").build());
@@ -95,5 +98,32 @@ class ServiceCredentialsTest {
         assertThat(credentials.afterUnpublishing(OPENHAB, List.of(leftoverSignInRouter)).getByService()).isEmpty();
         assertThat(credentials.afterUnpublishing("plex.example.com", List.of()).getByService())
             .as("another host's unpublish leaves this one alone").containsKey(OPENHAB);
+    }
+
+    /** Marvin's is for his service calls only: no browser is ever handed it, and without it he is refused. */
+    @Test
+    void marvinsServiceCredential_isHisAlone_neverABrowsers_andWithoutOneHisCallsAreRefused() {
+        ServiceCredentials all = openhabWithBoth().withMarvins(OPENHAB, MARVINS, ROUTES);
+        ServiceCredentials marvinsOnly = ServiceCredentials.empty().withMarvins(OPENHAB, MARVINS, ROUTES);
+
+        for (String email : new String[] { "marvin", "Marvin", "marvins", "", " ", null, "geir@example.com" }) {
+            assertThat(all.credentialFor(OPENHAB, email)).as(String.valueOf(email)).contains(SHARED);
+            assertThat(marvinsOnly.credentialFor(OPENHAB, email)).as(String.valueOf(email)).isEmpty();
+        }
+        assertThat(all.marvinsFor("OpenHAB.example.com")).isEqualTo(MARVINS);
+        assertThat(marvinsOnly.hasMarvinsFor(OPENHAB)).isTrue();
+        assertThat(marvinsOnly.hasAnyFor(OPENHAB)).as("his signs no browser in, so the pane still advises one").isFalse();
+        assertThat(all.withoutPerson("turid@example.com").withoutShared(OPENHAB).marvinsFor(OPENHAB))
+            .as("nobody's revocation takes his").isEqualTo(MARVINS);
+        assertThat(marvinsOnly.withoutMarvins(OPENHAB).getByService()).isEmpty();
+
+        for (ServiceCredentials without : List.of(openhabWithBoth(), all.withoutMarvins(OPENHAB))) {
+            assertThat(without.hasMarvinsFor(OPENHAB)).isFalse();
+            assertThatThrownBy(() -> without.marvinsFor(OPENHAB))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("openhab.example.com has no login for Marvin, so he cannot use it. The operator can "
+                    + "add one on the service's pane under Service credential, after switching it to Social "
+                    + "sign-in if it is not already.");
+        }
     }
 }

@@ -31,8 +31,10 @@ public enum ChatTool implements ChatCapability {
             + "showing and how many minutes it has left."),
 
     PUBLISHED_SERVICES("published_services",
-        "Every service Vaier publishes, the machine it runs on, whether it is reachable, and its free reads: "
-            + "the paths on it read_service may read without asking."),
+        "Every service Vaier publishes, the machine it runs on, whether it is reachable, marvinHasLogin: "
+            + "whether you have a login of your own there - without one, read_service and call_service cannot "
+            + "use it - and askBeforeReading: whether reading it can change things, so every GET there waits "
+            + "for the operator's yes through call_service."),
 
     BACKUPS("backups",
         "The fleet's backup jobs, and how the last run of each one turned out."),
@@ -102,13 +104,12 @@ public enum ChatTool implements ChatCapability {
             + "search result or the operator gave it.")),
 
     READ_SERVICE("read_service",
-        "Read a published service's own API: one GET of a path on it, at its backend, with the service "
-            + "credential Vaier holds for the operator, and read back its status and body - text and JSON as "
-            + "they came, a long body cut, anything binary only measured. Use it to learn a service's state: "
-            + "an openHAB item, a sprinkler's programs. Only the service's free reads, as published_services "
-            + "lists them, with any query; the operator grants each one with Always allow. Any other path is "
-            + "proposed with call_service, method GET, and anything that changes something is proposed with "
-            + "call_service too.",
+        "Read a published service's own API: one GET of a path on it, with any query, at its backend, with "
+            + "your own service credential there (only where published_services says marvinHasLogin), and read "
+            + "back its status and body - text and JSON as they came, a long body cut, anything binary only "
+            + "measured. Use it to learn a service's state: an openHAB item, a sprinkler's programs. Not on a "
+            + "service published_services marks askBeforeReading: there every GET is proposed with "
+            + "call_service, method GET. Anything that changes something is proposed with call_service too.",
         new ToolParameter("service", "The published service: its name and machine as published_services "
             + "gives them (openhab on Colina 27), or its address."),
         new ToolParameter("path", "The path inside the service, with any query, for example "

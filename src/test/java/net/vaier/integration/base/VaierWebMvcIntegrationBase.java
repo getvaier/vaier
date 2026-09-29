@@ -95,6 +95,12 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected RemovePersonalServiceCredentialUseCase removePersonalServiceCredentialUseCase;
 
+    @MockBean
+    protected SetMarvinsServiceCredentialUseCase setMarvinsServiceCredentialUseCase;
+
+    @MockBean
+    protected RemoveMarvinsServiceCredentialUseCase removeMarvinsServiceCredentialUseCase;
+
     // --- Reverse proxy use cases ---
     @MockBean
     protected AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
@@ -212,9 +218,6 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
-
-    @MockBean
-    protected RemoveFreeReadUseCase removeFreeReadUseCase;
 
     @MockBean
     protected DeletePublishedServiceUseCase deletePublishedServiceUseCase;

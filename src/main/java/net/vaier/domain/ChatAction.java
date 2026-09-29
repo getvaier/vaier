@@ -46,8 +46,9 @@ public enum ChatAction implements ChatCapability {
         new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id.")),
 
     CALL_SERVICE("call_service",
-        "Call a published service's own API - POST, PUT, PATCH or DELETE one path on it, or a GET that "
-            + "read_service refused - at its backend, with the service credential Vaier holds for the operator.",
+        "Call a published service's own API - POST, PUT, PATCH or DELETE one path on it, or a GET where "
+            + "published_services says askBeforeReading - at its backend, with your own service credential there, so only where "
+            + "published_services says marvinHasLogin.",
         new ToolParameter("service", "The published service: its name and machine as published_services "
             + "gives them (openhab on Colina 27), or its address."),
         new ToolParameter("method", "GET, POST, PUT, PATCH or DELETE."),

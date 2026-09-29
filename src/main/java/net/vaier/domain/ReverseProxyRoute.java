@@ -62,6 +62,8 @@ public class ReverseProxyRoute {
     private final String versionProperty;
     /** True when this is a TCP stream (a Traefik {@code tcp:} router matched by {@code HostSNI}). */
     private final boolean stream;
+    /** <b>Ask before reading</b>: a GET here can change things, so Marvin's every GET waits for a yes. */
+    private final boolean askBeforeReading;
 
     /** Call sites use the builder: four consecutive booleans here are two silent swaps waiting to happen. */
     @Builder(toBuilder = true)
@@ -70,7 +72,8 @@ public class ReverseProxyRoute {
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
                              boolean isLanService, String protocol, String pathPrefix,
                              boolean hiddenFromLaunchpad, String launchpadAlias,
-                             String versionEndpoint, String versionProperty, boolean stream) {
+                             String versionEndpoint, String versionProperty, boolean stream,
+                             boolean askBeforeReading) {
         this.name = name;
         this.domainName = domainName;
         this.address = address;
@@ -90,6 +93,7 @@ public class ReverseProxyRoute {
         this.versionEndpoint = versionEndpoint;
         this.versionProperty = versionProperty;
         this.stream = stream;
+        this.askBeforeReading = askBeforeReading;
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
@@ -99,7 +103,7 @@ public class ReverseProxyRoute {
                              boolean hiddenFromLaunchpad, String launchpadAlias) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
              rootRedirectPath, directUrlDisabled, isLanService, protocol, pathPrefix, hiddenFromLaunchpad,
-             launchpadAlias, null, null, false);
+             launchpadAlias, null, null, false, false);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
@@ -170,7 +174,8 @@ public class ReverseProxyRoute {
         ROOT_REDIRECT("a root redirect"),
         DIRECT_URL("a direct LAN link"),
         LAUNCHPAD("a launchpad tile"),
-        VERSION_PROBE("a version probe");
+        VERSION_PROBE("a version probe"),
+        ASK_BEFORE_READING("a rule for Marvin's reads");
 
         private final String description;
 
@@ -783,15 +788,24 @@ public class ReverseProxyRoute {
     }
 
     /**
-     * A <b>Service call</b> to this route's backend, at the address the route points at, with the
-     * {@code credential} Vaier would hand the service. A stream speaks no HTTP, so it has no API to call.
+     * A <b>Service call</b> to this route's backend, at the address the route points at, carrying
+     * {@code credential}. A stream speaks no HTTP, so it has no API to call.
      */
-    public ServiceCallAnswer call(ForCallingServices caller, ServiceCall call, Optional<ServiceCredential> credential) {
+    public ServiceCallAnswer call(ForCallingServices caller, ServiceCall call, ServiceCredential credential) {
         if (stream) {
             throw new IllegalArgumentException(domainName + " is a stream, not a website, so it has no HTTP API.");
         }
-        return caller.call(originUrl() + call.path(), call,
-            credential.map(ServiceCredential::authorizationHeader).orElse(null));
+        return caller.call(originUrl() + call.path(), call, credential.authorizationHeader());
+    }
+
+    /** Marvin's GET of {@code path}, unless this service asks before reading: then it waits for a yes. */
+    public ServiceCall read(String path) {
+        ServiceCall call = ServiceCall.proposed("GET", path, null);
+        if (askBeforeReading) {
+            throw new IllegalArgumentException("Reading " + domainName + " can change things, so the operator "
+                + "asks to say yes to every GET there: propose it with call_service, method GET.");
+        }
+        return call;
     }
 
     /** Where a visitor lands: the path prefix, else the root redirect, else the root. */

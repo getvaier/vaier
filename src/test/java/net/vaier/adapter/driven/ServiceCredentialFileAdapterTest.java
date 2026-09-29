@@ -28,7 +28,8 @@ class ServiceCredentialFileAdapterTest {
         return ServiceCredentials.empty()
             .withShared("openhab.example.com", new ServiceCredential("house", "shared-secret-pw"), List.of(OPENHAB))
             .withPersonal("openhab.example.com", "turid@example.com", new ServiceCredential("turid", "turids-secret-pw"),
-                List.of(OPENHAB), List.of(AccessEntry.builder().email("turid@example.com").role(Role.USER).build()));
+                List.of(OPENHAB), List.of(AccessEntry.builder().email("turid@example.com").role(Role.USER).build()))
+            .withMarvins("openhab.example.com", new ServiceCredential("marvin", "marvins-secret-pw"), List.of(OPENHAB));
     }
 
     private ServiceCredentialFileAdapter adapter() {
@@ -41,7 +42,7 @@ class ServiceCredentialFileAdapterTest {
 
         Path file = tempDir.resolve("service-credentials.yml");
         assertThat(Files.readString(file))
-            .doesNotContain("shared-secret-pw").doesNotContain("turids-secret-pw")
+            .doesNotContain("shared-secret-pw").doesNotContain("turids-secret-pw").doesNotContain("marvins-secret-pw")
             .contains("enc:v1:").contains("openhab.example.com").contains("turid@example.com").contains("house");
         assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(file))).isEqualTo("rw-------");
         assertThat(adapter().read()).isEqualTo(openhabWithBoth());

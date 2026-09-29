@@ -22,6 +22,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 class TraefikReverseProxyAdapterTest {
 
@@ -573,6 +574,30 @@ class TraefikReverseProxyAdapterTest {
         ReverseProxyRoute prometheus = routes.stream().filter(r -> "/prometheus".equals(r.getPathPrefix())).findFirst().orElseThrow();
         assertThat(grafana.isHiddenFromLaunchpad()).isTrue();
         assertThat(prometheus.isHiddenFromLaunchpad()).isFalse();
+    }
+
+    /** Ask before reading lives on the one route it was set on, survives a restart, and goes with the route. */
+    @Test
+    void setRouteAskBeforeReading_marksOneRoute_andUnpublishingForgetsIt() {
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 8080, false, null, "/sprinkler");
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 9090, false, null, "/grafana");
+
+        adapter.setRouteAskBeforeReading("svc.example.com", "/sprinkler", true);
+
+        var reopened = new TraefikReverseProxyAdapter(
+            tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
+        assertThat(reopened.getReverseProxyRoutes()).extracting(ReverseProxyRoute::getPathPrefix,
+                ReverseProxyRoute::isAskBeforeReading)
+            .containsExactlyInAnyOrder(tuple("/sprinkler", true), tuple("/grafana", false));
+
+        adapter.setRouteAskBeforeReading("svc.example.com", "/sprinkler", false);
+        assertThat(adapter.getReverseProxyRoutes()).noneMatch(ReverseProxyRoute::isAskBeforeReading);
+
+        adapter.setRouteAskBeforeReading("svc.example.com", "/sprinkler", true);
+        adapter.deleteReverseProxyRoute(adapter.getReverseProxyRoutes().stream()
+            .filter(r -> "/sprinkler".equals(r.getPathPrefix())).findFirst().orElseThrow().getName());
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 8080, false, null, "/sprinkler");
+        assertThat(adapter.getReverseProxyRoutes()).noneMatch(ReverseProxyRoute::isAskBeforeReading);
     }
 
     // --- setRouteLaunchpadAlias ---

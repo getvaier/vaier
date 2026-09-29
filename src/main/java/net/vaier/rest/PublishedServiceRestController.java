@@ -12,7 +12,6 @@ import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
-import net.vaier.application.RemoveFreeReadUseCase;
 import net.vaier.domain.PublishableService;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase;
@@ -45,7 +44,6 @@ public class PublishedServiceRestController {
     private final ForSubscribingToEvents forSubscribingToEvents;
     private final GetOwnSignInsUseCase getOwnSignInsUseCase;
     private final MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
-    private final RemoveFreeReadUseCase removeFreeReadUseCase;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
@@ -75,15 +73,6 @@ public class PublishedServiceRestController {
                                                 @RequestParam(required = false) String pathPrefix,
                                                 @RequestBody MeantToBePublicRequest request) {
         markMeantToBePublicUseCase.markMeantToBePublic(dnsName, pathPrefix, request.meantToBePublic());
-        return ResponseEntity.noContent().build();
-    }
-
-    /** Takes one path off the service's free reads, so Marvin asks before reading it again. */
-    @DeleteMapping("/{dnsName}/free-reads")
-    public ResponseEntity<Void> removeFreeRead(@PathVariable String dnsName,
-                                               @RequestParam(required = false) String pathPrefix,
-                                               @RequestParam String path) {
-        removeFreeReadUseCase.removeFreeRead(dnsName, pathPrefix, path);
         return ResponseEntity.noContent().build();
     }
 

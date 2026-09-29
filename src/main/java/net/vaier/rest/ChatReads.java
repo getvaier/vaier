@@ -13,6 +13,7 @@ import net.vaier.application.GetMachineDiskStandingsUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
+import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
@@ -36,9 +37,9 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.Memory;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
-import net.vaier.domain.Operator;
 import net.vaier.domain.PublishedServiceReference;
 import net.vaier.domain.PublishedServiceReference.Candidate;
+import net.vaier.domain.ServiceCredentials;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
@@ -90,6 +91,7 @@ public class ChatReads {
     private final SearchWebUseCase searchWebUseCase;
     private final ReadWebPageUseCase readWebPageUseCase;
     private final ReadServiceUseCase readServiceUseCase;
+    private final GetServiceCredentialsUseCase getServiceCredentialsUseCase;
     private final RememberUseCase rememberUseCase;
     private final ForgetUseCase forgetUseCase;
     private final ObjectMapper objectMapper;
@@ -109,6 +111,7 @@ public class ChatReads {
                      SearchWebUseCase searchWebUseCase,
                      ReadWebPageUseCase readWebPageUseCase,
                      ReadServiceUseCase readServiceUseCase,
+                     GetServiceCredentialsUseCase getServiceCredentialsUseCase,
                      RememberUseCase rememberUseCase,
                      ForgetUseCase forgetUseCase,
                      ObjectMapper objectMapper) {
@@ -127,6 +130,7 @@ public class ChatReads {
         this.searchWebUseCase = searchWebUseCase;
         this.readWebPageUseCase = readWebPageUseCase;
         this.readServiceUseCase = readServiceUseCase;
+        this.getServiceCredentialsUseCase = getServiceCredentialsUseCase;
         this.rememberUseCase = rememberUseCase;
         this.forgetUseCase = forgetUseCase;
         this.objectMapper = objectMapper;
@@ -135,9 +139,9 @@ public class ChatReads {
     /**
      * One offer per read Marvin may make alone, in the catalogue's own order. Nothing here sends anything to
      * a pane: an errand has none, and a question's own controller wraps these to announce them. A published
-     * service is read as {@code operator}, with the service credential Vaier holds for them.
+     * service is read with Marvin's service credential, whoever asked.
      */
-    public List<ToolOffer> offers(Operator operator) {
+    public List<ToolOffer> offers() {
         Map<ChatTool, Function<Map<String, String>, String>> reads = new HashMap<>();
         reads.put(ChatTool.FLEET, arguments -> readFleet());
         reads.put(ChatTool.WAITING_TO_JOIN, arguments -> readWaitingToJoin());
@@ -149,7 +153,7 @@ public class ChatReads {
         reads.put(ChatTool.RUN_ON_MACHINE, this::readRunOnMachine);
         reads.put(ChatTool.SEARCH_WEB, this::searchWeb);
         reads.put(ChatTool.READ_WEB_PAGE, this::readWebPage);
-        reads.put(ChatTool.READ_SERVICE, arguments -> readService(arguments, operator));
+        reads.put(ChatTool.READ_SERVICE, this::readService);
         reads.put(ChatTool.REMEMBER, this::remember);
         reads.put(ChatTool.FORGET, this::forget);
 
@@ -190,8 +194,9 @@ public class ChatReads {
     }
 
     private String readPublishedServices() {
+        ServiceCredentials credentials = getServiceCredentialsUseCase.getServiceCredentials();
         return asJson(getPublishedServicesUseCase.getPublishedServices().stream()
-            .map(ServiceFact::of)
+            .map(service -> ServiceFact.of(service, credentials.hasMarvinsFor(service.dnsAddress())))
             .toList());
     }
 
@@ -294,7 +299,7 @@ public class ChatReads {
      * One GET of a published service's own API. A name the domain cannot place and a path it will not send
      * are said in its words; a transport failure is said in Vaier's, since its own can carry an address.
      */
-    private String readService(Map<String, String> arguments, Operator operator) {
+    private String readService(Map<String, String> arguments) {
         Candidate service;
         try {
             service = new PublishedServiceReference(arguments.get("service"))
@@ -303,7 +308,7 @@ public class ChatReads {
             return refused.getMessage();
         }
         try {
-            return readServiceUseCase.readService(operator, service.host(), service.pathPrefix(),
+            return readServiceUseCase.readService(service.host(), service.pathPrefix(),
                 arguments.get("path")).forModel(service.label());
         } catch (IllegalArgumentException | NotFoundException refused) {
             return refused.getMessage();
@@ -397,10 +402,12 @@ public class ChatReads {
         }
     }
 
-    record ServiceFact(String name, String machine, String address, boolean reachable, List<String> freeReads) {
-        static ServiceFact of(PublishedServiceUco service) {
+    /** Whether Marvin has a login there, never the login itself, and whether reading it waits for a yes. */
+    record ServiceFact(String name, String machine, String address, boolean reachable, boolean marvinHasLogin,
+                       boolean askBeforeReading) {
+        static ServiceFact of(PublishedServiceUco service, boolean marvinHasLogin) {
             return new ServiceFact(service.shortName(), service.hostName(), service.dnsAddress(),
-                service.healthy(), service.freeReads());
+                service.healthy(), marvinHasLogin, service.askBeforeReading());
         }
     }
 

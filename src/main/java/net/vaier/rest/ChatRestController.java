@@ -326,14 +326,6 @@ public class ChatRestController {
         return answered(email, id, chatActions::run);
     }
 
-    /** "Always allow": the click, and the service call's path saved as a free read. Only ever a GET. */
-    @PostMapping("/actions/{id}/always-allow")
-    public ResponseEntity<ActionOutcome> alwaysAllow(
-            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
-            @PathVariable String id) {
-        return answered(email, id, chatActions::alwaysAllow);
-    }
-
     private ResponseEntity<ActionOutcome> answered(String email, String id,
                                                    BiFunction<ActionProposal, Operator, ChatActions.Outcome> yes) {
         ActionProposal proposal;
@@ -395,7 +387,7 @@ public class ChatRestController {
         // click, a bundle to mail, and the two errand verbs. Merged by tool so the model is offered the
         // catalogue in the catalogue's own order, reads first.
         Map<ChatCapability, Function<Map<String, String>, String>> reads = new HashMap<>();
-        for (ToolOffer offer : chatReads.offers(operator)) {
+        for (ToolOffer offer : chatReads.offers()) {
             reads.put(offer.tool(), offer.read());
         }
         reads.put(ChatTool.BUNDLE_FILES, arguments -> offerBundle(arguments, operator, emitter));
@@ -445,7 +437,7 @@ public class ChatRestController {
             ActionProposal proposal = proposeActionUseCase.propose(operator, action,
                 chatActions.canonical(action, arguments));
             send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.wording().headline(),
-                proposal.wording().details(), proposal.mayBeAlwaysAllowed(), proposal.allowance())));
+                proposal.wording().details())));
             return proposal.toolResult();
         } catch (IllegalArgumentException refused) {
             return refused.getMessage();
@@ -592,7 +584,7 @@ public class ChatRestController {
     record AvailabilityResponse(boolean available) {}
 
     /** The card, as the answer stream carries it: enough to draw it and to click it. */
-    record ConfirmationEvent(String id, String headline, String details, boolean alwaysAllow, String allowance) {}
+    record ConfirmationEvent(String id, String headline, String details) {}
 
     /** The download card: the zip's name, what it holds, and where the click goes. */
     record BundleEvent(String id, String name, String size, String url) {

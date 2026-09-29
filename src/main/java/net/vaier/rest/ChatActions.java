@@ -1,13 +1,13 @@
 package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
+import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.MailConfirmationUseCase;
@@ -68,7 +68,7 @@ public class ChatActions {
     private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     private final GetPublishedServicesUseCase getPublishedServicesUseCase;
     private final CallServiceUseCase callServiceUseCase;
-    private final AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase;
+    private final GetServiceCredentialsUseCase getServiceCredentialsUseCase;
 
     public ChatActions(GetMachinesUseCase getMachinesUseCase,
                        ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase,
@@ -85,7 +85,7 @@ public class ChatActions {
                        RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
                        GetPublishedServicesUseCase getPublishedServicesUseCase,
                        CallServiceUseCase callServiceUseCase,
-                       AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase) {
+                       GetServiceCredentialsUseCase getServiceCredentialsUseCase) {
         this.getMachinesUseCase = getMachinesUseCase;
         this.listEnrolmentRequestsUseCase = listEnrolmentRequestsUseCase;
         this.getBackupJobsUseCase = getBackupJobsUseCase;
@@ -101,7 +101,7 @@ public class ChatActions {
         this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
         this.getPublishedServicesUseCase = getPublishedServicesUseCase;
         this.callServiceUseCase = callServiceUseCase;
-        this.alwaysAllowServiceCallUseCase = alwaysAllowServiceCallUseCase;
+        this.getServiceCredentialsUseCase = getServiceCredentialsUseCase;
     }
 
     /**
@@ -137,7 +137,8 @@ public class ChatActions {
             case CALL_SERVICE -> {
                 Candidate service = new PublishedServiceReference(canonical.get("service"))
                     .resolve(ChatReads.candidates(getPublishedServicesUseCase.getPublishedServices()));
-                // Judged now, so a path that would never be sent is refused before it is proposed.
+                // Judged now, so a call that would never be sent is refused before it is proposed.
+                getServiceCredentialsUseCase.getServiceCredentials().requireMarvinsFor(service.host());
                 ServiceCall call = ServiceCall.proposed(canonical.get("method"), canonical.get("path"),
                     arguments.get("body"));
                 canonical.put("service", service.label());
@@ -166,21 +167,6 @@ public class ChatActions {
      */
     public Outcome run(ActionProposal proposal, Operator operator) {
         return guarded(proposal, () -> carryOut(proposal, operator));
-    }
-
-    /**
-     * <b>Always allow</b>: run a service call's GET as {@link #run} would, and save its path as one of the
-     * service's free reads. Anything else is refused, and nothing runs.
-     */
-    public Outcome alwaysAllow(ActionProposal proposal, Operator operator) {
-        return guarded(proposal, () -> {
-            Map<String, String> a = proposal.arguments();
-            ServiceCall call = proposal.alwaysAllowedCall();
-            ServiceCallAnswer answer = alwaysAllowServiceCallUseCase.alwaysAllow(operator, a.get("host"),
-                a.get("pathPrefix"), call);
-            return new Outcome(answer.succeeded(), call.alwaysAllowed(answer.outcome(a.get("service")), a.get("service")),
-                answer.cameBack(a.get("service")));
-        });
     }
 
     private Outcome guarded(ActionProposal proposal, Supplier<Outcome> work) {
@@ -217,7 +203,7 @@ public class ChatActions {
             case UPGRADE_OS -> upgradeOsUseCase.upgradeOs(MachineId.of(a.get("machineId")))
                 .thenAccept(settled -> rememberActionOutcomeUseCase.remember(operator, settled.sentence()));
             case CALL_SERVICE -> {
-                ServiceCallAnswer answer = callServiceUseCase.callService(operator, a.get("host"), a.get("pathPrefix"),
+                ServiceCallAnswer answer = callServiceUseCase.callService(a.get("host"), a.get("pathPrefix"),
                     proposal.serviceCall());
                 return new Outcome(answer.succeeded(), answer.outcome(a.get("service")), answer.cameBack(a.get("service")));
             }

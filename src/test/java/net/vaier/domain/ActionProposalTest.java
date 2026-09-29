@@ -2,7 +2,6 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,30 +56,6 @@ class ActionProposalTest {
 
         assertThat(proposal.wording().details())
             .isEqualTo(ServiceCall.proposed("DELETE", "/api/tags/7", null).details("paperless on Apalveien 5"));
-    }
-
-    /** Always allow is offered for a service call's GET and nothing else: a write waits for a yes every time. */
-    @Test
-    void onlyAServiceCallsGetMayBeAlwaysAllowed() {
-        record Row(ChatAction action, Map<String, String> arguments, boolean alwaysAllow, String allowance) {}
-        Map<String, String> call = Map.of("service", "paperless on Apalveien 5", "host", "paperless.example.com",
-            "path", "/api/documents/", "headline", "Read the documents.");
-        for (Row row : new Row[] {
-            new Row(ChatAction.CALL_SERVICE, with(call, "method", "GET"), true, "/api/"),
-            new Row(ChatAction.CALL_SERVICE, with(call, "method", "POST"), false, null),
-            new Row(ChatAction.CALL_SERVICE, with(call, "method", "DELETE"), false, null),
-            new Row(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), false, null),
-        }) {
-            ActionProposal proposal = ActionProposal.propose(row.action(), row.arguments(), NOW);
-            assertThat(proposal.mayBeAlwaysAllowed()).as(row.toString()).isEqualTo(row.alwaysAllow());
-            assertThat(proposal.allowance()).as(row.toString()).isEqualTo(row.allowance());
-        }
-    }
-
-    private static Map<String, String> with(Map<String, String> arguments, String name, String value) {
-        Map<String, String> more = new HashMap<>(arguments);
-        more.put(name, value);
-        return more;
     }
 
     @Test

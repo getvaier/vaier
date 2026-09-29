@@ -1040,27 +1040,36 @@ class ReverseProxyRouteTest {
         }
     }
 
-    /** A <b>Service call</b> goes to the backend itself, with the credential Vaier would hand it; a stream has no API. */
+    /** A <b>Service call</b> goes to the backend itself, with the credential it is handed; a stream has no API. */
     @Test
-    void call_asksTheBackendAtItsOwnAddress_withTheCredentialVaierHolds_andAStreamIsRefused() {
+    void call_asksTheBackendAtItsOwnAddress_withTheCredentialItIsHanded_andAStreamIsRefused() {
         List<String> seen = new ArrayList<>();
         ForCallingServices caller = (url, call, authorization) -> {
             seen.add(call.method() + " " + url + " " + authorization);
             return new ServiceCallAnswer(200, null, new byte[0], false);
         };
-        ServiceCredential credential = new ServiceCredential("vaier", "s3cret");
+        ServiceCredential credential = new ServiceCredential("marvin", "s3cret");
 
-        versionRoute(null, null).call(caller, ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON"),
-            Optional.of(credential));
-        versionRoute(null, null).call(caller, ServiceCall.proposed("GET", "/rest/items", null), Optional.empty());
+        versionRoute(null, null).call(caller, ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON"), credential);
 
         assertThat(seen).containsExactly(
-            "POST http://192.168.3.50:9000/rest/items/PoolPump " + credential.authorizationHeader(),
-            "GET http://192.168.3.50:9000/rest/items null");
+            "POST http://192.168.3.50:9000/rest/items/PoolPump " + credential.authorizationHeader());
         ReverseProxyRoute stream = versionRoute(null, null).toBuilder().stream(true).build();
-        assertThatThrownBy(() -> stream.call(caller, ServiceCall.proposed("GET", "/rest", null), Optional.empty()))
+        assertThatThrownBy(() -> stream.call(caller, ServiceCall.proposed("GET", "/rest", null), credential))
             .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("stream");
-        assertThat(seen).hasSize(2);
+        assertThat(seen).hasSize(1);
+    }
+
+    /** A GET is Marvin's to make, unless reading the service can change things: then it waits for a yes. */
+    @Test
+    void read_isAGet_unlessTheServiceIsMarkedAskBeforeReading() {
+        assertThat(versionRoute(null, null).read("/rest/items?tags=Pool"))
+            .isEqualTo(ServiceCall.proposed("GET", "/rest/items?tags=Pool", null));
+
+        ReverseProxyRoute marked = versionRoute(null, null).toBuilder().askBeforeReading(true).build();
+        assertThatThrownBy(() -> marked.read("/jc"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("app.example.com").hasMessageContaining("call_service, method GET");
     }
 
     private static ReverseProxyRoute versionRoute(String endpoint, String property) {

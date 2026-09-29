@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -272,11 +273,12 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             }
 
             Set<String> directUrlDisabled = readDirectUrlDisabledDomains(config);
-            Set<String> hiddenFromLaunchpad = readHiddenFromLaunchpadRouters(config);
+            Set<String> hiddenFromLaunchpad = readListSidecar(config, HIDDEN_FROM_LAUNCHPAD_KEY);
+            Set<String> askBeforeReading = readListSidecar(config, ASK_BEFORE_READING_KEY);
             Map<String, String> launchpadAliases = readLaunchpadAliases(config);
             Map<String, String> lanMarkers = readLanServiceMarkers(config);
             Map<String, Map<String, String>> versionEndpoints = readVersionEndpoints(config);
-            if (!directUrlDisabled.isEmpty() || !hiddenFromLaunchpad.isEmpty()
+            if (!directUrlDisabled.isEmpty() || !hiddenFromLaunchpad.isEmpty() || !askBeforeReading.isEmpty()
                 || !launchpadAliases.isEmpty() || !lanMarkers.isEmpty() || !versionEndpoints.isEmpty()) {
                 routes = routes.stream()
                     .map(r -> {
@@ -289,7 +291,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                             current = applyDirectUrlDisabledFlag(current, true);
                         }
                         if (hiddenFromLaunchpad.contains(r.getName())) {
-                            current = applyHiddenFromLaunchpadFlag(current, true);
+                            current = current.toBuilder().hiddenFromLaunchpad(true).build();
+                        }
+                        if (askBeforeReading.contains(r.getName())) {
+                            current = current.toBuilder().askBeforeReading(true).build();
                         }
                         if (launchpadAliases.containsKey(r.getName())) {
                             current = applyLaunchpadAlias(current, launchpadAliases.get(r.getName()));
@@ -1390,6 +1395,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         removeFromMapSidecar(LAUNCHPAD_ALIAS_KEY, routerName);
         removeFromMapSidecar(VERSION_ENDPOINT_KEY, routerName);
         removeFromListSidecar(HIDDEN_FROM_LAUNCHPAD_KEY, routerName);
+        removeFromListSidecar(ASK_BEFORE_READING_KEY, routerName);
         removeFromListSidecar(DIRECT_URL_DISABLED_KEY, routerName);
         removeRedirectMiddleware(routerName);
     }
@@ -1939,6 +1945,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private static final String IGNORED_KEY = "x-vaier-ignored";
     private static final String DIRECT_URL_DISABLED_KEY = "x-vaier-direct-url-disabled";
     private static final String HIDDEN_FROM_LAUNCHPAD_KEY = "x-vaier-hidden-from-launchpad";
+    private static final String ASK_BEFORE_READING_KEY = "x-vaier-ask-before-reading";
     private static final String LAUNCHPAD_ALIAS_KEY = "x-vaier-launchpad-alias";
     private static final String LAN_SERVICE_KEY = "x-vaier-lan-service";
     private static final String VERSION_ENDPOINT_KEY = "x-vaier-version-endpoint";
@@ -1988,38 +1995,36 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
     @Override
     public void setRouteHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad) {
+        setListSidecar(HIDDEN_FROM_LAUNCHPAD_KEY, generateRouterName(dnsName, pathPrefix), hiddenFromLaunchpad);
+    }
+
+    @Override
+    public void setRouteAskBeforeReading(String dnsName, String pathPrefix, boolean askBeforeReading) {
+        setListSidecar(ASK_BEFORE_READING_KEY, generateRouterName(dnsName, pathPrefix), askBeforeReading);
+    }
+
+    /** Adds or removes {@code routerName} on a list sidecar keyed by router name; an empty list goes. */
+    private void setListSidecar(String key, String routerName, boolean on) {
         loadConfig();
         if (config == null) config = new LinkedHashMap<>();
-        Object raw = config.get(HIDDEN_FROM_LAUNCHPAD_KEY);
-        List<String> hidden = (raw instanceof List<?> list)
+        Object raw = config.get(key);
+        List<String> names = (raw instanceof List<?> list)
             ? new ArrayList<>(list.stream().map(Object::toString).toList())
             : new ArrayList<>();
-        String routerName = generateRouterName(dnsName, pathPrefix);
-        boolean changed;
-        if (hiddenFromLaunchpad) {
-            changed = !hidden.contains(routerName) && hidden.add(routerName);
-        } else {
-            changed = hidden.remove(routerName);
-        }
+        boolean changed = on ? !names.contains(routerName) && names.add(routerName) : names.remove(routerName);
         if (changed) {
-            if (hidden.isEmpty()) config.remove(HIDDEN_FROM_LAUNCHPAD_KEY);
-            else config.put(HIDDEN_FROM_LAUNCHPAD_KEY, hidden);
+            if (names.isEmpty()) config.remove(key);
+            else config.put(key, names);
             saveConfig();
         }
     }
 
-    private Set<String> readHiddenFromLaunchpadRouters(Map<String, Object> cfg) {
+    private Set<String> readListSidecar(Map<String, Object> cfg, String key) {
         if (cfg == null) return Set.of();
-        Object raw = cfg.get(HIDDEN_FROM_LAUNCHPAD_KEY);
-        if (raw instanceof List<?> list) {
-            return list.stream().map(Object::toString).collect(java.util.stream.Collectors.toSet());
+        if (cfg.get(key) instanceof List<?> list) {
+            return list.stream().map(Object::toString).collect(Collectors.toSet());
         }
         return Set.of();
-    }
-
-    private ReverseProxyRoute applyHiddenFromLaunchpadFlag(ReverseProxyRoute r, boolean hidden) {
-        if (r.isHiddenFromLaunchpad() == hidden) return r;
-        return r.toBuilder().hiddenFromLaunchpad(hidden).build();
     }
 
     @Override

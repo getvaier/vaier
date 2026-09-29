@@ -158,6 +158,7 @@ class ChatPromptTest {
             assertThat(said).contains("read_service").contains("call_service")
                 .contains("only for what the operator asked for or what an errand clearly calls for")
                 .contains("a GET that read_service refuses goes through call_service too")
+                .contains("marks askBeforeReading")
                 .contains("say in its headline, in everyday words, what the call really does")
                 .contains("never make it sound gentler than it is")
                 // openHAB answered every item to a filter it does not have, and Marvin trusted it.

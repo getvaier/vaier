@@ -74,6 +74,7 @@ public interface ForPersistingReverseProxyRoutes {
     void setRouteRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath);
     void setRouteDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled);
     void setRouteHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad);
+    void setRouteAskBeforeReading(String dnsName, String pathPrefix, boolean askBeforeReading);
     /** {@code launchpadAlias} may be null or blank to clear the override; non-blank to set it. */
     void setRouteLaunchpadAlias(String dnsName, String pathPrefix, String launchpadAlias);
     /** Sets (or, when either argument is null/blank, clears) the route's version endpoint — the

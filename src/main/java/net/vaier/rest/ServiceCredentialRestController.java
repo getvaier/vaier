@@ -3,7 +3,9 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import net.vaier.application.ClearSharedServiceCredentialUseCase;
 import net.vaier.application.GetServiceCredentialsUseCase;
+import net.vaier.application.RemoveMarvinsServiceCredentialUseCase;
 import net.vaier.application.RemovePersonalServiceCredentialUseCase;
+import net.vaier.application.SetMarvinsServiceCredentialUseCase;
 import net.vaier.application.SetPersonalServiceCredentialUseCase;
 import net.vaier.application.SetSharedServiceCredentialUseCase;
 import net.vaier.domain.ServiceCredentials;
@@ -33,6 +35,8 @@ public class ServiceCredentialRestController {
     private final ClearSharedServiceCredentialUseCase clearSharedServiceCredentialUseCase;
     private final SetPersonalServiceCredentialUseCase setPersonalServiceCredentialUseCase;
     private final RemovePersonalServiceCredentialUseCase removePersonalServiceCredentialUseCase;
+    private final SetMarvinsServiceCredentialUseCase setMarvinsServiceCredentialUseCase;
+    private final RemoveMarvinsServiceCredentialUseCase removeMarvinsServiceCredentialUseCase;
 
     @GetMapping("/access/services/credentials")
     public Map<String, ServiceCredentialsResponse> list() {
@@ -68,15 +72,29 @@ public class ServiceCredentialRestController {
         return ResponseEntity.noContent().build();
     }
 
+    @PutMapping("/access/services/{host}/credentials/marvin")
+    public ResponseEntity<Void> setMarvins(@PathVariable String host, @RequestBody CredentialRequest request) {
+        setMarvinsServiceCredentialUseCase.setMarvinsServiceCredential(host, request.username(), request.password());
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/access/services/{host}/credentials/marvin")
+    public ResponseEntity<Void> removeMarvins(@PathVariable String host) {
+        removeMarvinsServiceCredentialUseCase.removeMarvinsServiceCredential(host);
+        return ResponseEntity.noContent().build();
+    }
+
     public record CredentialRequest(String username, String password) {}
 
     public record PersonResponse(String email, String username) {}
 
     /** Who the service sees, never with what password. */
-    public record ServiceCredentialsResponse(String sharedUsername, List<PersonResponse> people) {
+    public record ServiceCredentialsResponse(String sharedUsername, String marvinsUsername,
+                                             List<PersonResponse> people) {
         static ServiceCredentialsResponse from(ServiceCredentials.Entry entry) {
             return new ServiceCredentialsResponse(
                 entry.shared() == null ? null : entry.shared().getUsername(),
+                entry.marvins() == null ? null : entry.marvins().getUsername(),
                 entry.personal().entrySet().stream()
                     .map(p -> new PersonResponse(p.getKey(), p.getValue().getUsername()))
                     .toList());

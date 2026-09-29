@@ -1,8 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.domain.FreeReads;
 import net.vaier.domain.TestMachineIds;
-import net.vaier.domain.port.ForPersistingFreeReads;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.port.ForResolvingVaierServerIdentity;
 import net.vaier.domain.port.ForDiscoveringPeerContainers;
@@ -48,9 +46,6 @@ class GetLaunchpadServicesTest {
 
     @Mock
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
-
-    @Mock
-    ForPersistingFreeReads forPersistingFreeReads;
 
     @Mock
     ForGettingServerInfo forGettingServerInfo;
@@ -119,7 +114,6 @@ class GetLaunchpadServicesTest {
     @BeforeEach
     void setUp() {
         lenient().when(configResolver.getDomain()).thenReturn("example.com");
-        lenient().when(forPersistingFreeReads.read()).thenReturn(FreeReads.empty());
         lenient().when(vaierServerIdentity.identity()).thenReturn(TestMachineIds.of("Vaier server"));
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());

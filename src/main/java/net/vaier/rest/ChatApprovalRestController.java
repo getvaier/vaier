@@ -24,8 +24,8 @@ import java.util.function.BiFunction;
 
 /**
  * The <b>approval link</b> a <b>Mailed confirmation</b> carries, behind the same sign-in as every other
- * {@code /chat} route. Looking runs nothing — mail scanners follow links — so the page's own "Do it" (or, for
- * a service's GET, "Always allow") is the only thing that runs the action, through the card's own dispatch.
+ * {@code /chat} route. Looking runs nothing — mail scanners follow links — so the page's own "Do it" is the
+ * only thing that runs the action, through the card's own dispatch.
  * Whether the link opens, and for whom, is the domain's decision.
  */
 @RestController
@@ -59,14 +59,9 @@ public class ChatApprovalRestController {
             return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
         String action = "/chat/approvals/" + HtmlUtils.htmlEscape(token);
-        String always = confirmation.proposal().mayBeAlwaysAllowed()
-            ? "<form method=\"post\" action=\"" + action + "/always-allow\"><button>Always allow "
-                + HtmlUtils.htmlEscape(confirmation.proposal().allowance()) + "</button></form>"
-            : "";
         return page(HttpStatus.OK, confirmation.proposal().wording(),
             "<div class=\"answers\">"
                 + "<form method=\"post\" action=\"" + action + "\"><button class=\"yes\">Do it</button></form>"
-                + always
                 + "<form method=\"post\" action=\"" + action + "/decline\"><button>No</button></form>"
                 + "</div>");
     }
@@ -75,13 +70,6 @@ public class ChatApprovalRestController {
     public ResponseEntity<String> approve(@RequestHeader(value = EMAIL_HEADER, required = false) String email,
                                           @PathVariable String token) {
         return answered(email, token, chatActions::run);
-    }
-
-    /** "Always allow": Do it, and the service call's path saved as a free read. Only ever a GET. */
-    @PostMapping("/{token}/always-allow")
-    public ResponseEntity<String> alwaysAllow(@RequestHeader(value = EMAIL_HEADER, required = false) String email,
-                                              @PathVariable String token) {
-        return answered(email, token, chatActions::alwaysAllow);
     }
 
     private ResponseEntity<String> answered(String email, String token,

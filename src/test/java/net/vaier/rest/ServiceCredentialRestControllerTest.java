@@ -3,7 +3,9 @@ package net.vaier.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ClearSharedServiceCredentialUseCase;
 import net.vaier.application.GetServiceCredentialsUseCase;
+import net.vaier.application.RemoveMarvinsServiceCredentialUseCase;
 import net.vaier.application.RemovePersonalServiceCredentialUseCase;
+import net.vaier.application.SetMarvinsServiceCredentialUseCase;
 import net.vaier.application.SetPersonalServiceCredentialUseCase;
 import net.vaier.application.SetSharedServiceCredentialUseCase;
 import net.vaier.domain.AccessEntry;
@@ -33,6 +35,8 @@ class ServiceCredentialRestControllerTest {
     @Mock ClearSharedServiceCredentialUseCase clearSharedServiceCredentialUseCase;
     @Mock SetPersonalServiceCredentialUseCase setPersonalServiceCredentialUseCase;
     @Mock RemovePersonalServiceCredentialUseCase removePersonalServiceCredentialUseCase;
+    @Mock SetMarvinsServiceCredentialUseCase setMarvinsServiceCredentialUseCase;
+    @Mock RemoveMarvinsServiceCredentialUseCase removeMarvinsServiceCredentialUseCase;
 
     @InjectMocks ServiceCredentialRestController controller;
 
@@ -43,11 +47,12 @@ class ServiceCredentialRestControllerTest {
         when(getServiceCredentialsUseCase.getServiceCredentials()).thenReturn(ServiceCredentials.empty()
             .withShared("openhab.example.com", new ServiceCredential("house", "shared-secret-pw"), List.of(openhab))
             .withPersonal("openhab.example.com", "turid@example.com", new ServiceCredential("turid", "turids-secret-pw"),
-                List.of(openhab), List.of(AccessEntry.builder().email("turid@example.com").role(Role.USER).build())));
+                List.of(openhab), List.of(AccessEntry.builder().email("turid@example.com").role(Role.USER).build()))
+            .withMarvins("openhab.example.com", new ServiceCredential("marvin", "marvins-secret-pw"), List.of(openhab)));
 
         String json = new ObjectMapper().writeValueAsString(controller.list());
 
-        assertThat(json).isEqualTo("{\"openhab.example.com\":{\"sharedUsername\":\"house\","
+        assertThat(json).isEqualTo("{\"openhab.example.com\":{\"sharedUsername\":\"house\",\"marvinsUsername\":\"marvin\","
             + "\"people\":[{\"email\":\"turid@example.com\",\"username\":\"turid\"}]}}");
     }
 
@@ -57,6 +62,8 @@ class ServiceCredentialRestControllerTest {
         controller.clearShared("openhab.example.com");
         controller.setPersonal("openhab.example.com", "turid@example.com", new CredentialRequest("turid", "pw2"));
         controller.removePersonal("openhab.example.com", "turid@example.com");
+        controller.setMarvins("openhab.example.com", new CredentialRequest("marvin", "pw3"));
+        controller.removeMarvins("openhab.example.com");
 
         verify(setSharedServiceCredentialUseCase).setSharedServiceCredential("openhab.example.com", "house", "pw");
         verify(clearSharedServiceCredentialUseCase).clearSharedServiceCredential("openhab.example.com");
@@ -64,5 +71,7 @@ class ServiceCredentialRestControllerTest {
             .setPersonalServiceCredential("openhab.example.com", "turid@example.com", "turid", "pw2");
         verify(removePersonalServiceCredentialUseCase)
             .removePersonalServiceCredential("openhab.example.com", "turid@example.com");
+        verify(setMarvinsServiceCredentialUseCase).setMarvinsServiceCredential("openhab.example.com", "marvin", "pw3");
+        verify(removeMarvinsServiceCredentialUseCase).removeMarvinsServiceCredential("openhab.example.com");
     }
 }

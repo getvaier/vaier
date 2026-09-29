@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
 import net.vaier.application.AddErrandUseCase;
-import net.vaier.application.AlwaysAllowServiceCallUseCase;
 import net.vaier.application.CancelErrandUseCase;
 import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.ChatUseCase;
@@ -21,6 +20,7 @@ import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
+import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.IsChatAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
@@ -62,8 +62,6 @@ import net.vaier.domain.ModelUsage;
 import net.vaier.domain.Spend;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
-import net.vaier.domain.ServiceCall;
-import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
@@ -147,7 +145,6 @@ class ChatRestControllerTest {
 
     /** The reads Marvin may make alone live in their own component now; {@code ChatReadsTest} covers them. */
     @Mock ChatReads chatReads;
-    @Mock AlwaysAllowServiceCallUseCase alwaysAllowServiceCallUseCase;
 
     private ChatRestController controller;
 
@@ -162,7 +159,8 @@ class ChatRestControllerTest {
             getBackupJobsUseCase, getBackupRepositoriesUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase,
             runBackupJobUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
             mock(MailConfirmationUseCase.class), mock(UpgradeOsUseCase.class), rememberActionOutcomeUseCase,
-            mock(GetPublishedServicesUseCase.class), mock(CallServiceUseCase.class), alwaysAllowServiceCallUseCase);
+            mock(GetPublishedServicesUseCase.class), mock(CallServiceUseCase.class),
+            mock(GetServiceCredentialsUseCase.class));
         controller = new ChatRestController(chatUseCase, followUpUseCase, isChatAvailableUseCase, getMachinesUseCase,
             proposeActionUseCase, takeActionProposalUseCase, getConversationUseCase, forgetConversationUseCase,
             rememberActionOutcomeUseCase, offerBundleUseCase, openBundleUseCase, forgetUseCase, getMemoryUseCase,
@@ -375,8 +373,7 @@ class ChatRestControllerTest {
         assertThat(sentEvents(emitter)).anySatisfy(event ->
             assertThat(event).startsWith("event:confirm\ndata:")
                 .contains("\"headline\":\"Back up Colina 27 now.\"")
-                .contains("\"details\":\"With the backup job it already has.\"")
-                .contains("\"alwaysAllow\":false"));
+                .contains("\"details\":\"With the backup job it already has.\""));
         assertThat(told).contains("Nothing has happened yet");
         verifyNoInteractions(runBackupJobUseCase);
     }
@@ -493,44 +490,6 @@ class ChatRestControllerTest {
             .when(liftBlockUseCase).liftBlock(anyString());
         ChatRestController.ActionOutcome failed = controller.confirm(EMAIL, "lift").getBody();
         assertThat(failed).isEqualTo(new ChatRestController.ActionOutcome(false, "Vaier could not do that.", null));
-    }
-
-    // --- Always allow: a service call's GET, run and saved as a free read --------------------------------
-
-    private static ActionProposal readingDocuments() {
-        return ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service", "paperless on Apalveien 5",
-            "host", "paperless.example.com", "method", "GET", "path", "/api/documents/?query=x",
-            "headline", "Search the documents."), NOW);
-    }
-
-    /** The card offers Always allow exactly when the domain says the proposal may be always allowed. */
-    @Test
-    void proposingAServicesGet_sendsACardThatOffersAlwaysAllow() throws IOException {
-        answering("ok");
-        when(proposeActionUseCase.propose(any(), any(), any())).thenReturn(readingDocuments());
-        SseEmitter emitter = mock(SseEmitter.class);
-
-        read(emitter, ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"));
-
-        assertThat(sentEvents(emitter)).anySatisfy(event ->
-            assertThat(event).startsWith("event:confirm\ndata:").contains("\"alwaysAllow\":true")
-                .contains("\"allowance\":\"/api/\""));
-    }
-
-    @Test
-    void alwaysAllowing_takesTheCard_runsAndSavesTheRead_andRemembersWhatCameOfIt() {
-        ActionProposal get = readingDocuments();
-        when(takeActionProposalUseCase.take("get")).thenReturn(get);
-        ServiceCall read = ServiceCall.proposed("GET", "/api/documents/?query=x", null);
-        ServiceCallAnswer ok = new ServiceCallAnswer(200, null, new byte[0], false);
-        when(alwaysAllowServiceCallUseCase.alwaysAllow(GEIR, "paperless.example.com", null, read)).thenReturn(ok);
-        ActionWording said = read.alwaysAllowed(ok.outcome("paperless on Apalveien 5"), "paperless on Apalveien 5");
-
-        ChatRestController.ActionOutcome outcome = controller.alwaysAllow(EMAIL, "get").getBody();
-
-        assertThat(outcome).isEqualTo(new ChatRestController.ActionOutcome(true, said.headline(), said.details()));
-        verify(rememberActionOutcomeUseCase).remember(GEIR,
-            get.record(true, said, ok.cameBack("paperless on Apalveien 5")));
     }
 
     // --- the kept conversation (#360 slice 3) --------------------------------------------------------
@@ -832,7 +791,7 @@ class ChatRestControllerTest {
     private void answering(String... chunks) {
         // The reads Marvin may make alone come from ChatReads — stubbed as itself answering, since this
         // controller's job is only to merge them with its own four and announce every one of them.
-        when(chatReads.offers(any())).thenReturn(ChatTool.whileNobodyIsWatching().stream()
+        when(chatReads.offers()).thenReturn(ChatTool.whileNobodyIsWatching().stream()
             .map(tool -> new ToolOffer(tool, () -> "[]"))
             .toList());
         doAnswer(invocation -> {

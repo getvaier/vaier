@@ -26,6 +26,7 @@ import java.util.function.UnaryOperator;
  * services:
  *   openhab.example.com:
  *     shared: {username: house, password: enc:v1:…}
+ *     marvin: {username: marvin, password: enc:v1:…}
  *     people:
  *       turid@example.com: {username: turid, password: enc:v1:…}
  * </pre>
@@ -105,7 +106,8 @@ public class ServiceCredentialFileAdapter implements ForPersistingServiceCredent
                 }
             });
         }
-        return new ServiceCredentials.Entry(credential(host, service.get("shared")), personal);
+        return new ServiceCredentials.Entry(credential(host, service.get("shared")),
+            credential(host, service.get("marvin")), personal);
     }
 
     /** One unreadable credential is skipped, so it cannot take the others down with it. */
@@ -128,6 +130,9 @@ public class ServiceCredentialFileAdapter implements ForPersistingServiceCredent
             Map<String, Object> service = new LinkedHashMap<>();
             if (entry.shared() != null) {
                 service.put("shared", sealed(entry.shared()));
+            }
+            if (entry.marvins() != null) {
+                service.put("marvin", sealed(entry.marvins()));
             }
             if (!entry.personal().isEmpty()) {
                 Map<String, Object> people = new LinkedHashMap<>();

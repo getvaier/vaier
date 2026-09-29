@@ -10,9 +10,11 @@ import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.GetSignInProvidersUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
+import net.vaier.application.RemoveMarvinsServiceCredentialUseCase;
 import net.vaier.application.RemovePersonalServiceCredentialUseCase;
 import net.vaier.application.ResolveViewerUseCase;
 import net.vaier.application.RevokeAccessUseCase;
+import net.vaier.application.SetMarvinsServiceCredentialUseCase;
 import net.vaier.application.SetPersonalServiceCredentialUseCase;
 import net.vaier.application.SetServiceAccessRuleUseCase;
 import net.vaier.application.SetSharedServiceCredentialUseCase;
@@ -63,7 +65,8 @@ public class UserService implements
         ResolveViewerUseCase, CaptureViewerIdentityUseCase, GetFirstRunPasswordUseCase,
         GetSignInProvidersUseCase, AddSignInProviderUseCase, GetServiceCredentialsUseCase,
         SetSharedServiceCredentialUseCase, ClearSharedServiceCredentialUseCase,
-        SetPersonalServiceCredentialUseCase, RemovePersonalServiceCredentialUseCase {
+        SetPersonalServiceCredentialUseCase, RemovePersonalServiceCredentialUseCase,
+        SetMarvinsServiceCredentialUseCase, RemoveMarvinsServiceCredentialUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
@@ -389,6 +392,18 @@ public class UserService implements
     @Override
     public void removePersonalServiceCredential(String host, String email) {
         forPersistingServiceCredentials.update(credentials -> credentials.withoutPersonal(host, email));
+    }
+
+    @Override
+    public void setMarvinsServiceCredential(String host, String username, String password) {
+        ServiceCredential credential = new ServiceCredential(username, password);
+        List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        forPersistingServiceCredentials.update(credentials -> credentials.withMarvins(host, credential, routes));
+    }
+
+    @Override
+    public void removeMarvinsServiceCredential(String host) {
+        forPersistingServiceCredentials.update(credentials -> credentials.withoutMarvins(host));
     }
 
     private static void validateEmail(String email) {

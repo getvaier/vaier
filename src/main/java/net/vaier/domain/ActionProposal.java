@@ -43,31 +43,12 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
             action.wording(arguments), nowEpochMs);
     }
 
-    /** Whether the card offers <b>Always allow</b>: a service call's GET, and nothing else. */
-    public boolean mayBeAlwaysAllowed() {
-        return action == ChatAction.CALL_SERVICE && serviceCall().mayBeAlwaysAllowed();
-    }
-
     /** The call a yes runs, when this is a service call. */
     public ServiceCall serviceCall() {
         if (action != ChatAction.CALL_SERVICE) {
             throw new IllegalArgumentException("That is not a service call.");
         }
         return ServiceCall.proposed(arguments.get("method"), arguments.get("path"), arguments.get("body"));
-    }
-
-    /** The folder Always allow would free, named on its button; none when the card cannot be always allowed. */
-    public String allowance() {
-        return mayBeAlwaysAllowed() ? serviceCall().allowance() : null;
-    }
-
-    /** The GET that Always allow runs and saves; anything else waits for a yes every time. */
-    public ServiceCall alwaysAllowedCall() {
-        if (!mayBeAlwaysAllowed()) {
-            throw new IllegalArgumentException("Only a service call's GET can be always allowed; this one waits "
-                + "for a yes every time.");
-        }
-        return serviceCall();
     }
 
     public boolean expired(long nowEpochMs) {

@@ -11,6 +11,7 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
+import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
@@ -24,6 +25,7 @@ import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.BlockDecision;
+import net.vaier.domain.AuthMode;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.CommandOutcome;
 import net.vaier.domain.DeviceCategory;
@@ -36,11 +38,13 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.Memory;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
-import net.vaier.domain.Operator;
 import net.vaier.domain.Reachability;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.ServiceCallAnswer;
+import net.vaier.domain.ServiceCredential;
+import net.vaier.domain.ServiceCredentials;
 import net.vaier.domain.SshConnectException;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.UpdateAvailability;
@@ -100,6 +104,7 @@ class ChatReadsTest {
     @Mock SearchWebUseCase searchWebUseCase;
     @Mock ReadWebPageUseCase readWebPageUseCase;
     @Mock ReadServiceUseCase readServiceUseCase;
+    @Mock GetServiceCredentialsUseCase getServiceCredentialsUseCase;
     @Mock RememberUseCase rememberUseCase;
     @Mock ForgetUseCase forgetUseCase;
 
@@ -108,13 +113,13 @@ class ChatReadsTest {
             listEnrolmentRequestsUseCase, getPublishedServicesUseCase, getBackupJobsUseCase,
             getBackupRunsUseCase, getMachineDiskStandingsUseCase, discoverPeerContainersUseCase,
             discoverVaierServerContainersUseCase, getBlockDecisionsUseCase, runReadOnlyCommandUseCase,
-            searchWebUseCase, readWebPageUseCase, readServiceUseCase, rememberUseCase, forgetUseCase,
+            searchWebUseCase, readWebPageUseCase, readServiceUseCase, getServiceCredentialsUseCase, rememberUseCase,
+            forgetUseCase,
             new ObjectMapper());
     }
 
     private static final MachineId COLINA = MachineId.of("c0355605-e5a0-419a-8943-fdc5ec209958");
     private static final long NOW = 1_700_000_000_000L;
-    private static final Operator GEIR = Operator.of("geir@example.com");
 
     /**
      * Exactly the reads Marvin may make alone, in the catalogue's own order — the domain's list, so an errand
@@ -122,7 +127,7 @@ class ChatReadsTest {
      */
     @Test
     void itOffersExactlyTheReadsMarvinMayMakeAlone() {
-        assertThat(chatReads().offers(GEIR)).extracting(ToolOffer::tool)
+        assertThat(chatReads().offers()).extracting(ToolOffer::tool)
             .containsExactlyElementsOf(ChatTool.whileNobodyIsWatching());
     }
 
@@ -260,17 +265,28 @@ class ChatReadsTest {
         assertThat(security).contains("203.0.113.7").contains("crowdsecurity/ssh-bf");
     }
 
-    /** Each service's free reads ride along, so Marvin knows what he may read without asking. */
+    /** Whether he has a login there and whether it asks before reading ride along, so Marvin proposes only what can run. */
     @Test
-    void thePublishedServicesReadSaysWhereEachServiceRunsWhetherItIsReachable_andItsFreeReads() {
+    void thePublishedServicesReadSaysWhereEachServiceRunsWhetherItIsReachable_marvinsLogin_andWhetherItAsksBeforeReading() {
         when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(
-            publishedService("Grafana", "Colina 27", "grafana.example.com").toBuilder()
-                .machineId(COLINA.value()).freeReads(List.of("/api/health")).build()));
+            publishedService("OpenSprinkler", "Colina 27", "sprinkler.example.com").toBuilder()
+                .machineId(COLINA.value()).askBeforeReading(true).build(),
+            publishedService("Plex", "Colina 27", "plex.example.com")));
+        marvinHasALoginOn("sprinkler.example.com");
 
         String services = read(ChatTool.PUBLISHED_SERVICES);
 
-        assertThat(services).contains("Grafana").contains("Colina 27").contains("grafana.example.com")
-            .contains("\"freeReads\":[\"/api/health\"]");
+        assertThat(services).contains("OpenSprinkler").contains("Colina 27").contains("sprinkler.example.com")
+            .contains("\"marvinHasLogin\":true,\"askBeforeReading\":true")
+            .contains("\"address\":\"plex.example.com\",\"reachable\":true,\"marvinHasLogin\":false,"
+                + "\"askBeforeReading\":false");
+    }
+
+    private void marvinHasALoginOn(String host) {
+        ReverseProxyRoute social = ReverseProxyRoute.builder().name("r").domainName(host)
+            .middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build();
+        when(getServiceCredentialsUseCase.getServiceCredentials()).thenReturn(ServiceCredentials.empty()
+            .withMarvins(host, new ServiceCredential("marvin", "MARVINS-SECRET"), List.of(social)));
     }
 
     /**
@@ -281,6 +297,9 @@ class ChatReadsTest {
     @Test
     void noReadEverRendersASecret() {
         fleetOf();
+        when(getPublishedServicesUseCase.getPublishedServices())
+            .thenReturn(List.of(publishedService("Grafana", "Colina 27", "grafana.example.com")));
+        marvinHasALoginOn("grafana.example.com");
         when(rememberUseCase.remember(any())).thenReturn(new Memory.Fact("ab12cd", "a fact", NOW));
         when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
             new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
@@ -291,7 +310,7 @@ class ChatReadsTest {
             .collect(Collectors.joining("\n"));
 
         assertThat(everything)
-            .doesNotContain("TICKET-SECRET", "PUBLICKEY-SECRET", "CONFIGFILE-SECRET", "PRESHARED-SECRET");
+            .doesNotContain("TICKET-SECRET", "PUBLICKEY-SECRET", "CONFIGFILE-SECRET", "PRESHARED-SECRET", "MARVINS-SECRET");
         assertThat(everything.toLowerCase()).doesNotContain(
             "publickey", "privatekey", "presharedkey", "passphrase", "password", "credential",
             "apikey", "ticket", "token", "secret", "configfile");
@@ -434,11 +453,11 @@ class ChatReadsTest {
 
     // --- a published service's own API ---------------------------------------------------------------
 
-    /** Named as the published services read names it; read as the operator asking, whose credential it carries. */
+    /** Named as the published services read names it. */
     @Test
-    void readService_resolvesTheServiceByItsNameAndMachine_andReadsAsTheOperator() {
+    void readService_resolvesTheServiceByItsNameAndMachine() {
         openHabsAtBothHouses();
-        when(readServiceUseCase.readService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(),
+        when(readServiceUseCase.readService(eq("openhab.colina27.example.com"), isNull(),
             eq("/rest/items/PoolPump/state"))).thenReturn(
             new ServiceCallAnswer(200, "text/plain", "ON".getBytes(StandardCharsets.UTF_8), false));
 
@@ -461,7 +480,7 @@ class ChatReadsTest {
             new Row(new IllegalStateException("connect timed out to 10.13.13.3:8080"),
                 "Vaier could not reach openhab on Colina 27."),
         }) {
-            doThrow(row.thrown()).when(readServiceUseCase).readService(any(), any(), any(), any());
+            doThrow(row.thrown()).when(readServiceUseCase).readService(any(), any(), any());
             assertThat(read(ChatTool.READ_SERVICE, Map.of("service", "openhab.colina27.example.com", "path", "/x")))
                 .as(row.said()).isEqualTo(row.said());
         }
@@ -477,7 +496,7 @@ class ChatReadsTest {
         return PublishedServiceUco.builder().name(name + " @ " + machine).shortName(name).hostName(machine)
             .serviceLocation(ServiceLocation.PEER_SERVER).healthy(true).dnsAddress(address)
             .hostAddress("10.13.13.3").hostPort(8080).state(State.OK).authenticated(true).authMode("social")
-            .freeReads(List.of()).build();
+            .build();
     }
 
     // --- memory: what Vaier keeps across conversations (#360) --------------------------------------------
@@ -529,7 +548,7 @@ class ChatReadsTest {
     }
 
     private String read(ChatTool tool, Map<String, String> arguments) {
-        return chatReads().offers(GEIR).stream()
+        return chatReads().offers().stream()
             .filter(offer -> offer.tool() == tool)
             .findFirst().orElseThrow()
             .read().apply(arguments);

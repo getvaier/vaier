@@ -33,7 +33,6 @@ import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingPeerIds;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingServiceGroup;
-import net.vaier.domain.port.ForPersistingFreeReads;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForPersistingOpenServiceState;
@@ -139,9 +138,6 @@ class PublishingServiceTest {
     ForCallingServices forCallingServices;
 
     @Mock
-    ForPersistingFreeReads forPersistingFreeReads;
-
-    @Mock
     Clock clock;
 
     @InjectMocks
@@ -159,7 +155,6 @@ class PublishingServiceTest {
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
         lenient().when(clock.instant()).thenReturn(Instant.parse("2026-09-23T10:00:00Z"));
         lenient().when(forPersistingOpenServiceState.read()).thenReturn(OpenServiceState.empty());
-        lenient().when(forPersistingFreeReads.read()).thenReturn(FreeReads.empty());
         // Every publish activates on the common pool. A test that never stubs the route in would otherwise
         // leave a 15 s poller behind, and enough of them starve the pool on a 4-core runner (CI went red
         // with parallelism 3 while the 2-core dev box, which runs a thread per task, stayed green).
@@ -176,20 +171,19 @@ class PublishingServiceTest {
     }
 
     @Test
-    void getPublishedServices_surfacesTheRoutesAuthMode_andItsFreeReads() {
+    void getPublishedServices_surfacesTheRoutesAuthMode_andWhetherItAsksBeforeReading() {
         ReverseProxyRoute social = new ReverseProxyRoute("app-router", "app.example.com", "10.0.0.1", 8080,
             "svc", null, List.of("websecure"), null,
-            List.of("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors"));
+            List.of("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors"))
+            .toBuilder().askBeforeReading(true).build();
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(social));
-        when(forPersistingFreeReads.read()).thenReturn(FreeReads.empty().alwaysAllowing("app.example.com", null,
-            ServiceCall.proposed("GET", "/api/status", null)));
         setupEmptyVpnClients();
         setupEmptyVaierServerServices();
 
         PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.authMode()).isEqualTo("social");
-        assertThat(result.freeReads()).containsExactly("/api/");
+        assertThat(result.askBeforeReading()).isTrue();
     }
 
     @Test
@@ -688,7 +682,7 @@ class PublishingServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void deleteService_handsTheRoutesLeftBehindToTheCredentialsAndFreeReads_soAnEmptiedHostForgetsThem() {
+    void deleteService_handsTheRoutesLeftBehindToTheCredentials_soAnEmptiedHostForgetsThem() {
         ReverseProxyRoute openhab = ReverseProxyRoute.builder().name("openhab-router")
             .domainName("openhab.example.com").middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build();
         ServiceCredentials before = ServiceCredentials.empty().withShared("openhab.example.com",
@@ -699,10 +693,6 @@ class PublishingServiceTest {
         ArgumentCaptor<UnaryOperator<ServiceCredentials>> change = ArgumentCaptor.forClass(UnaryOperator.class);
         verify(forPersistingServiceCredentials).update(change.capture());
         assertThat(change.getValue().apply(before).getByService()).isEmpty();
-        ArgumentCaptor<UnaryOperator<FreeReads>> reads = ArgumentCaptor.forClass(UnaryOperator.class);
-        verify(forPersistingFreeReads).update(reads.capture());
-        assertThat(reads.getValue().apply(FreeReads.empty().alwaysAllowing("openhab.example.com", null,
-            ServiceCall.proposed("GET", "/rest", null))).byService()).isEmpty();
     }
 
     // --- own sign-in detection: the rules are OwnSignIn's; the service picks routes, caches and tells ---
@@ -713,90 +703,58 @@ class PublishingServiceTest {
     }
 
     /**
-     * A <b>Service call</b> reaches the route's backend carrying what {@code /authz/verify} would hand the
-     * service for this operator: their personal credential, else the shared one.
+     * A <b>Service call</b> carries Marvin's service credential and nothing else — never the operator's own
+     * or the shared one — and a service without his is refused before anything is sent.
      */
     @Test
-    void aServiceCall_carriesTheOperatorsOwnCredentialElseTheSharedOne_andNamesOnlyAPublishedService() {
+    void aServiceCall_carriesOnlyMarvinsServiceCredential_andWithoutOneNothingIsSent() {
         String host = "openhab.colina27.example.com";
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(ReverseProxyRoute.builder()
-            .name("openhab").domainName(host).address("10.13.13.3").port(8080).service("svc").protocol("http")
-            .build()));
-        ServiceCredential mine = new ServiceCredential("geir", "mine");
-        ServiceCredential shared = new ServiceCredential("vaier", "shared");
-        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.of(Map.of(host,
-            new ServiceCredentials.Entry(shared, Map.of("geir@example.com", mine)))));
+        ReverseProxyRoute openhab = ReverseProxyRoute.builder().name("openhab").domainName(host)
+            .address("10.13.13.3").port(8080).service("svc").protocol("http")
+            .middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build();
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(openhab));
+        ServiceCredential marvins = new ServiceCredential("marvin", "his");
+        ServiceCredentials withoutMarvins = ServiceCredentials.empty()
+            .withShared(host, new ServiceCredential("vaier", "shared"), List.of(openhab));
+        when(forPersistingServiceCredentials.read())
+            .thenReturn(withoutMarvins.withMarvins(host, marvins, List.of(openhab)));
         ServiceCall read = ServiceCall.proposed("GET", "/rest/items", null);
-        when(forPersistingFreeReads.read()).thenReturn(FreeReads.empty().alwaysAllowing(host, null, read));
         ServiceCallAnswer answered = new ServiceCallAnswer(200, null, new byte[0], false);
         when(forCallingServices.call(any(), any(), any())).thenReturn(answered);
         ServiceCall write = ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON");
 
-        assertThat(service.readService(Operator.of("geir@example.com"), host, null, "/rest/items")).isSameAs(answered);
-        assertThat(service.callService(Operator.of("anna@example.com"), host, null, write)).isSameAs(answered);
+        assertThat(service.readService(host, null, "/rest/items")).isSameAs(answered);
+        assertThat(service.callService(host, null, write)).isSameAs(answered);
 
-        verify(forCallingServices).call("http://10.13.13.3:8080/rest/items", read, mine.authorizationHeader());
+        verify(forCallingServices).call("http://10.13.13.3:8080/rest/items", read, marvins.authorizationHeader());
         verify(forCallingServices).call("http://10.13.13.3:8080/rest/items/PoolPump", write,
-            shared.authorizationHeader());
-        assertThrows(NotFoundException.class,
-            () -> service.readService(Operator.of("geir@example.com"), "other.example.com", null, "/rest"));
+            marvins.authorizationHeader());
+        assertThrows(NotFoundException.class, () -> service.readService("other.example.com", null, "/rest"));
+
+        // Removed between the card and the yes: the domain's refusal, and nothing leaves Vaier.
+        clearInvocations(forCallingServices);
+        when(forPersistingServiceCredentials.read()).thenReturn(withoutMarvins);
+        assertThatThrownBy(() -> service.callService(host, null, write))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("no login for Marvin");
+        assertThatThrownBy(() -> service.readService(host, null, "/rest/items"))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("no login for Marvin");
+        verifyNoInteractions(forCallingServices);
     }
 
-    /** A read off the service's own list is refused before anything is sent. */
+    /** On a service marked ask before reading, a GET is refused like a write, even with Marvin's login. */
     @Test
-    void readService_refusesAPathThatIsNotOneOfTheServicesFreeReads() {
-        String host = "openhab.colina27.example.com";
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(httpRoute("openhab", host)));
+    void readService_onAServiceThatAsksBeforeReading_isRefusedBeforeAnythingIsSent() {
+        String host = "opensprinkler.colina27.example.com";
+        ReverseProxyRoute sprinkler = httpRoute("opensprinkler", host).toBuilder().askBeforeReading(true).build();
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(sprinkler));
+        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.empty()
+            .withMarvins(host, new ServiceCredential("marvin", "his"), List.of(sprinkler.toBuilder()
+                .middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build())));
 
-        assertThatThrownBy(() -> service.readService(Operator.of("geir@example.com"), host, null, "/rest/items"))
+        assertThatThrownBy(() -> service.readService(host, null, "/jc"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("call_service");
         verifyNoInteractions(forCallingServices);
-    }
-
-    /** Always allow saves the read on the service's list, runs it as Do it would, and tells the pane. */
-    @Test
-    @SuppressWarnings("unchecked")
-    void alwaysAllow_savesTheReadThenRunsIt_andAWriteIsRefusedWithNothingSavedOrSent() {
-        String host = "paperless.example.com";
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(ReverseProxyRoute.builder()
-            .name("paperless").domainName(host).address("10.13.13.6").port(8000).service("svc").protocol("http")
-            .build()));
-        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.empty());
-        ServiceCallAnswer answered = new ServiceCallAnswer(200, null, new byte[0], false);
-        ServiceCall read = ServiceCall.proposed("GET", "/api/documents/?query=x", null);
-        when(forCallingServices.call("http://10.13.13.6:8000/api/documents/?query=x", read, null)).thenReturn(answered);
-
-        assertThat(service.alwaysAllow(Operator.of("geir@example.com"), host, null, read)).isSameAs(answered);
-
-        ArgumentCaptor<UnaryOperator<FreeReads>> change = ArgumentCaptor.forClass(UnaryOperator.class);
-        verify(forPersistingFreeReads).update(change.capture());
-        assertThat(change.getValue().apply(FreeReads.empty()))
-            .isEqualTo(FreeReads.empty().alwaysAllowing(host, null, read));
-        verify(forPublishingEvents).publish("published-services", "service-updated", host);
-
-        clearInvocations(forPersistingFreeReads, forCallingServices);
-        doAnswer(invocation -> ((UnaryOperator<FreeReads>) invocation.getArgument(0)).apply(FreeReads.empty()))
-            .when(forPersistingFreeReads).update(any());
-        assertThatThrownBy(() -> service.alwaysAllow(Operator.of("geir@example.com"), host, null,
-            ServiceCall.proposed("DELETE", "/api/documents/7/", null)))
-            .isInstanceOf(IllegalArgumentException.class);
-        verifyNoInteractions(forCallingServices);
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void removeFreeRead_takesThePathOffTheServicesList_andTellsThePane() {
-        String host = "paperless.example.com";
-        FreeReads before = FreeReads.empty().alwaysAllowing(host, "/paperless",
-            ServiceCall.proposed("GET", "/api/documents/", null));
-
-        service.removeFreeRead(host, "/paperless", "/api/");
-
-        ArgumentCaptor<UnaryOperator<FreeReads>> change = ArgumentCaptor.forClass(UnaryOperator.class);
-        verify(forPersistingFreeReads).update(change.capture());
-        assertThat(change.getValue().apply(before).byService()).isEmpty();
-        verify(forPublishingEvents).publish("published-services", "service-updated", host);
     }
 
     @Test
@@ -1549,7 +1507,9 @@ class PublishingServiceTest {
     @Test
     void updateService_multipleFields_appliesAllSetValues() {
         service.updateService("app.example.com", null,
-            patch(true, true, false, "/dashboard/", "Alias", "/status", "build"));
+            PublishedServicePatch.builder().requiresAuth(true).directUrlDisabled(true).hiddenFromLaunchpad(false)
+                .rootRedirectPath("/dashboard/").launchpadAlias("Alias").versionEndpoint("/status")
+                .versionProperty("build").askBeforeReading(true).build());
 
         verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", null, true);
         verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, true);
@@ -1557,6 +1517,7 @@ class PublishingServiceTest {
         verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, "/dashboard/");
         verify(forPersistingReverseProxyRoutes).setRouteLaunchpadAlias("app.example.com", null, "Alias");
         verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint("app.example.com", null, "/status", "build");
+        verify(forPersistingReverseProxyRoutes).setRouteAskBeforeReading("app.example.com", null, true);
     }
 
     @Test
@@ -1628,6 +1589,7 @@ class PublishingServiceTest {
         verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
         verify(forPersistingReverseProxyRoutes, never()).setRouteLaunchpadAlias(anyString(), any(), any());
         verify(forPersistingReverseProxyRoutes, never()).setRouteVersionEndpoint(anyString(), any(), any(), any());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAskBeforeReading(anyString(), any(), anyBoolean());
     }
 
     // --- PublishableService.ignoreKey() ---
@@ -1911,7 +1873,8 @@ class PublishingServiceTest {
             new PublishedServicePatch(null, null, true, null, null, null, null),
             new PublishedServicePatch(null, null, null, "/dashboard", null, null, null),
             new PublishedServicePatch(null, null, null, null, "Broker", null, null),
-            new PublishedServicePatch(null, null, null, null, null, "/status", "build"));
+            new PublishedServicePatch(null, null, null, null, null, "/status", "build"),
+            PublishedServicePatch.builder().askBeforeReading(true).build());
 
         refused.forEach(patch -> assertThrows(IllegalArgumentException.class,
             () -> service.updateService("mqtt.example.com", null, patch)));
@@ -1922,6 +1885,7 @@ class PublishingServiceTest {
         verify(forPersistingReverseProxyRoutes, never()).setRouteHiddenFromLaunchpad(any(), any(), anyBoolean());
         verify(forPersistingReverseProxyRoutes, never()).setRouteLaunchpadAlias(any(), any(), any());
         verify(forPersistingReverseProxyRoutes, never()).setRouteVersionEndpoint(any(), any(), any(), any());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAskBeforeReading(any(), any(), anyBoolean());
     }
 
     @Test

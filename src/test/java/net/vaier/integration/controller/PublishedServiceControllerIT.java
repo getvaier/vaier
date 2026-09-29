@@ -163,13 +163,16 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                              "rootRedirectPath": "/dashboard",
                              "launchpadAlias": "Grafana Prod",
                              "versionEndpoint": "/status",
-                             "versionProperty": "build"
+                             "versionProperty": "build",
+                             "askBeforeReading": true
                            }
                            """))
                .andExpect(status().isOk());
 
         verify(updatePublishedServiceUseCase).updateService("app.example.com", null,
-            new PublishedServicePatch(true, false, true, "/dashboard", "Grafana Prod", "/status", "build"));
+            PublishedServicePatch.builder().requiresAuth(true).directUrlDisabled(false).hiddenFromLaunchpad(true)
+                .rootRedirectPath("/dashboard").launchpadAlias("Grafana Prod").versionEndpoint("/status")
+                .versionProperty("build").askBeforeReading(true).build());
     }
 
     @Test

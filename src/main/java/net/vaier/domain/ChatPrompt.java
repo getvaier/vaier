@@ -37,10 +37,11 @@ public record ChatPrompt(String text) {
      * handed in, never read here: "last year today" needs to know which day it is and "every morning at 8"
      * needs to know the hour and the zone, and the domain does not look at clocks.
      */
-    private static final String SERVICE_API = "read_service reads a published service's own API, as the "
-        + "operator: use it to learn a service's state. Propose call_service only for what the operator asked "
-        + "for or what an errand clearly calls for; a GET that read_service refuses goes through call_service "
-        + "too. The operator may not be technical: say in its headline, in everyday words, what the call really "
+    private static final String SERVICE_API = "read_service reads a published service's own API with your own "
+        + "login there: use it to learn a service's state. Where published_services marks askBeforeReading, "
+        + "reading can change things, so every GET there is proposed with call_service instead. Propose "
+        + "call_service only for what the operator asked for or what an errand clearly calls for; a GET that "
+        + "read_service refuses goes through call_service too. The operator may not be technical: say in its headline, in everyday words, what the call really "
         + "does, and never make it sound gentler than it is. A service's API may ignore a query parameter it does not "
         + "know and answer with everything, so check that what came back actually answers the question before "
         + "relying on it, and say so when it does not.\n";

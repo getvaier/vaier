@@ -73,12 +73,9 @@ public interface GetPublishedServicesUseCase {
         boolean stream,
         /** Where a client dials a stream ({@code <fqdn>:443}); null for an HTTP(S) service. */
         String connectAddress,
-        /** The paths Marvin may read on it without asking: its <b>free reads</b>. */
-        List<String> freeReads
+        /** <b>Ask before reading</b>: every GET Marvin makes here waits for a yes. */
+        boolean askBeforeReading
     ){
-        public PublishedServiceUco {
-            freeReads = freeReads == null ? List.of() : List.copyOf(freeReads);
-        }
         private static String legacyAuthMode(boolean authenticated) {
             return (authenticated ? AuthMode.SOCIAL : AuthMode.NONE).wireValue();
         }
@@ -88,7 +85,7 @@ public interface GetPublishedServicesUseCase {
             this(name, name, null, "", null, ServiceLocation.VAIER_SERVER, state == State.OK,
                 dnsAddress, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, false, null, false, null, null, null, null, null,
-                legacyAuthMode(authenticated), false, null, List.of());
+                legacyAuthMode(authenticated), false, null, false);
         }
         public PublishedServiceUco(String name, String dnsAddress, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -98,7 +95,7 @@ public interface GetPublishedServicesUseCase {
                 state == State.OK,
                 dnsAddress, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, null, false, null, null, null, null, null,
-                legacyAuthMode(authenticated), false, null, List.of());
+                legacyAuthMode(authenticated), false, null, false);
         }
         public PublishedServiceUco(String name, String dnsAddress, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -109,7 +106,7 @@ public interface GetPublishedServicesUseCase {
                 state == State.OK,
                 dnsAddress, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false, null, null, null, null, null,
-                legacyAuthMode(authenticated), false, null, List.of());
+                legacyAuthMode(authenticated), false, null, false);
         }
         public PublishedServiceUco(String name, String dnsAddress, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -120,7 +117,7 @@ public interface GetPublishedServicesUseCase {
                 state == State.OK,
                 dnsAddress, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
-                null, null, null, null, null, legacyAuthMode(authenticated), false, null, List.of());
+                null, null, null, null, null, legacyAuthMode(authenticated), false, null, false);
         }
         public PublishedServiceUco(String name, String dnsAddress, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -131,7 +128,7 @@ public interface GetPublishedServicesUseCase {
                 state == State.OK,
                 dnsAddress, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
-                launchpadAlias, null, null, null, null, legacyAuthMode(authenticated), false, null, List.of());
+                launchpadAlias, null, null, null, null, legacyAuthMode(authenticated), false, null, false);
         }
     }
 }
