@@ -24,12 +24,9 @@ public static class DeviceStore
     private static readonly string MembershipFile = Path.Combine(Folder, "vaier.json");
     private static readonly string NoticeFile = Path.Combine(Folder, "notice.txt");
 
-    /// <summary>The Vaier host this download was served from, written beside the exe; null for a build handed over by hand.</summary>
-    public static string? StampedHost()
-    {
-        var stamp = Path.Combine(AppContext.BaseDirectory, "stamped-host.txt");
-        return File.Exists(stamp) ? VaierAddress.Normalise(File.ReadAllText(stamp)) : null;
-    }
+    /// <summary>The Vaier host the setup was served from, kept at install; null for a setup handed over by hand.</summary>
+    public static string? StampedHost() =>
+        File.Exists(Installer.StampFile) ? VaierAddress.Normalise(File.ReadAllText(Installer.StampFile)) : null;
 
     public static Membership? Load()
     {
@@ -51,6 +48,12 @@ public static class DeviceStore
     {
         File.Delete(ConfigFile);
         File.Delete(MembershipFile);
+    }
+
+    /// <summary>Uninstalling: the key, the tunnel's own log, everything Vaier kept on this computer.</summary>
+    public static void Wipe()
+    {
+        if (Directory.Exists(Folder)) Directory.Delete(Folder, recursive: true);
     }
 
     /// <summary>Kept for whoever opens the window next — a removal is usually found with nobody looking.</summary>

@@ -138,7 +138,8 @@ class DockerComposeStructureTest {
 
         assertThat(rule).contains("Path(`/app/android/vaier.apk`)");
         // #370: the same for a laptop, and for the same reason.
-        assertThat(rule).contains("Path(`/app/windows/Vaier-windows.zip`)");
+        assertThat(rule).contains("Path(`/app/windows/VaierSetup.exe`)");
+        assertThat(rule).as("the zip it replaced is gone").doesNotContain("Vaier-windows.zip");
         // One file, exactly — never a prefix that could grow into serving the whole /app directory.
         assertThat(rule).doesNotContain("PathPrefix(`/app");
     }

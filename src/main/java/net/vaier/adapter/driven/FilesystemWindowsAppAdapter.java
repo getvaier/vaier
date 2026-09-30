@@ -18,26 +18,26 @@ import org.springframework.stereotype.Component;
 
 /**
  * Serves the Windows <b>Vaier app</b> off the image's filesystem: the Dockerfile copies
- * {@code windows/dist/Vaier-windows.zip} into {@code /app/windows/} when the build tree has one. What is
- * handed out is the zip with this deployment's host stamped in, kept on disk beside the source.
+ * {@code windows/dist/VaierSetup.exe} into {@code /app/windows/} when the build tree has one. What is
+ * handed out is the installer with this deployment's host stamped in, kept on disk beside the source.
  */
 @Component
 @Slf4j
 public class FilesystemWindowsAppAdapter implements ForReadingWindowsApp {
 
-    private final String zipPath;
+    private final String setupPath;
     private final KeptStampedCopy stampedCopy = new KeptStampedCopy(FilesystemWindowsAppAdapter::stamp);
 
-    public FilesystemWindowsAppAdapter(@Value("${vaier.windows.zip:/app/windows/Vaier-windows.zip}") String zipPath) {
-        this.zipPath = zipPath;
+    public FilesystemWindowsAppAdapter(@Value("${vaier.windows.setup:/app/windows/VaierSetup.exe}") String setupPath) {
+        this.setupPath = setupPath;
     }
 
     @Override
     public Optional<WindowsApp> readApp(String servedHost) {
-        if (zipPath == null || zipPath.isBlank()) {
+        if (setupPath == null || setupPath.isBlank()) {
             return Optional.empty();
         }
-        Path source = Path.of(zipPath);
+        Path source = Path.of(setupPath);
         if (!Files.isRegularFile(source)) {
             return Optional.empty();
         }
@@ -47,7 +47,7 @@ public class FilesystemWindowsAppAdapter implements ForReadingWindowsApp {
                 : stampedCopy.servedCopyOf(source, servedHost);
             return WindowsApp.of(Files.size(toServe), out -> copy(toServe, out));
         } catch (IOException e) {
-            log.debug("No Windows app to serve from {}: {}", zipPath, e.getMessage());
+            log.debug("No Windows app to serve from {}: {}", setupPath, e.getMessage());
             return Optional.empty();
         }
     }
@@ -59,13 +59,13 @@ public class FilesystemWindowsAppAdapter implements ForReadingWindowsApp {
                 return true;
             }
         }
-        log.warn("The Windows app at {} is not a zip, so it cannot carry {}; serving it as built", source, host);
+        log.warn("The Windows app at {} is empty, so it cannot carry {}; serving it as built", source, host);
         return false;
     }
 
-    private static void copy(Path zip, OutputStream out) {
+    private static void copy(Path exe, OutputStream out) {
         try {
-            Files.copy(zip, out);
+            Files.copy(exe, out);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

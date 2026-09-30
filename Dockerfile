@@ -23,12 +23,12 @@ COPY --from=build --chown=1000:1000 /app/target/*.jar app.jar
 # holds a README), so an image built from a tree with the package serves it and one built without simply
 # has nothing to offer — FilesystemAndroidAppAdapter reads the absence as "no app", never as an error.
 COPY --chown=1000:1000 apk/ /app/apk/
-# #370: the Windows Vaier app, served from /app/windows/Vaier-windows.zip. windows/dist/ is gitignored and
-# only exists after windows/build.sh, so it is reached through a bind mount a missing zip cannot fail;
+# #370: the Windows Vaier app, served from /app/windows/VaierSetup.exe. windows/dist/ is gitignored and
+# only exists after windows/build.sh, so it is reached through a bind mount a missing installer cannot fail;
 # the directory is created either way and owned by 1000 so the stamped copy can be kept beside it.
 RUN --mount=type=bind,source=windows,target=/tmp/windows \
     mkdir -p /app/windows \
-    && if [ -f /tmp/windows/dist/Vaier-windows.zip ]; then cp /tmp/windows/dist/Vaier-windows.zip /app/windows/; fi \
+    && if [ -f /tmp/windows/dist/VaierSetup.exe ]; then cp /tmp/windows/dist/VaierSetup.exe /app/windows/; fi \
     && chown -R 1000:1000 /app/windows
 EXPOSE 8080
 # The commit this image was built from: the self-update fetches the runtime files from the same one.

@@ -11,7 +11,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 /**
  * Hands out the Windows <b>Vaier app</b> (#370). Unauthenticated on the public Traefik router for the
- * Android package's reason: a laptop fetches the app before it can sign in, and the zip holds no fleet
+ * Android package's reason: a laptop fetches the app before it can sign in, and the installer holds no fleet
  * secret. 404 when the image carries none; HEAD is answered on the same mapping.
  */
 @RestController
@@ -23,7 +23,7 @@ public class WindowsAppRestController {
         this.getWindowsAppUseCase = getWindowsAppUseCase;
     }
 
-    @GetMapping("/app/windows/Vaier-windows.zip")
+    @GetMapping("/app/windows/VaierSetup.exe")
     public ResponseEntity<StreamingResponseBody> download() {
         return getWindowsAppUseCase.windowsApp()
             .map(app -> ResponseEntity.ok()

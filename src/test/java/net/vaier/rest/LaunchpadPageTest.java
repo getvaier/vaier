@@ -42,7 +42,7 @@ class LaunchpadPageTest {
         // be a locked door with the key behind it. Painted outside the signed-in / anonymous branch entirely.
         String page = launchpad();
 
-        assertThat(appForThisDevice(page)).contains("'/app/android/vaier.apk'", "'/app/windows/Vaier-windows.zip'");
+        assertThat(appForThisDevice(page)).contains("'/app/android/vaier.apk'", "'/app/windows/VaierSetup.exe'");
         assertThat(painter(page)).contains("href=\"${app.href}\"");
         assertThat(page).as("saved, not navigated to").contains("download");
         assertThat(page).contains("paintInstallCard();");

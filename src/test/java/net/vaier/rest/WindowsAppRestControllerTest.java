@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class WindowsAppRestControllerTest {
 
-    private static final String PATH = "/app/windows/Vaier-windows.zip";
+    private static final String PATH = "/app/windows/VaierSetup.exe";
 
     @Mock GetWindowsAppUseCase getWindowsAppUseCase;
 
@@ -56,16 +56,16 @@ class WindowsAppRestControllerTest {
     }
 
     @Test
-    void servesTheZipAsADownload() throws Exception {
-        byte[] payload = {'P', 'K', 3, 4, 9};
+    void servesTheInstallerAsADownload() throws Exception {
+        byte[] payload = {'M', 'Z', 3, 4, 9};
         when(getWindowsAppUseCase.windowsApp()).thenReturn(Optional.of(app(payload)));
 
         ResponseEntity<StreamingResponseBody> response = controller.download();
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.valueOf("application/zip"));
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.valueOf("application/vnd.microsoft.portable-executable"));
         assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
-            .isEqualTo("attachment; filename=\"Vaier-windows.zip\"");
+            .isEqualTo("attachment; filename=\"VaierSetup.exe\"");
         assertThat(response.getHeaders().getContentLength()).isEqualTo(payload.length);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         response.getBody().writeTo(out);
@@ -84,7 +84,7 @@ class WindowsAppRestControllerTest {
     }
 
     @Test
-    void answersNotFoundWhenTheImageCarriesNoZip() throws Exception {
+    void answersNotFoundWhenTheImageCarriesNoInstaller() throws Exception {
         when(getWindowsAppUseCase.windowsApp()).thenReturn(Optional.empty());
 
         mockMvc.perform(get(PATH)).andExpect(status().isNotFound());

@@ -22,7 +22,7 @@ Vaier app changes (including `src/main/resources/static/**`) only take effect on
    `..._KEY_ALIAS`); without it Gradle signs with the debug key and the phone refuses the upgrade.
 
    **Only if `windows/` changed:** `windows/build.sh` — self-contained (no `VAIER_SELF_CONTAINED`
-   override); the image copies `windows/dist/Vaier-windows.zip` when it is there and 404s without it.
+   override); it produces `windows/dist/VaierSetup.exe`, which the image copies when it is there and 404s without it.
 1. Build with the version baked in and the **exact** tag `getvaier/vaier:latest`:
    ```bash
    docker build --build-arg VAIER_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout) \

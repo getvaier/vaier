@@ -15,7 +15,9 @@ public class MainForm : Form
     private string? _notice;
     private Action? _onTick;
 
-    public MainForm()
+    public enum Opening { App, Install, Uninstall }
+
+    public MainForm(Opening opening)
     {
         Text = "Vaier";
         Icon = Theme.AppIcon();
@@ -28,6 +30,17 @@ public class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         _tick.Tick += (_, _) => _onTick?.Invoke();
         _tick.Start();
+
+        if (opening == Opening.Install)
+        {
+            ShowInstall();
+            return;
+        }
+        if (opening == Opening.Uninstall)
+        {
+            ShowUninstall();
+            return;
+        }
 
         _membership = DeviceStore.Load();
         _notice = DeviceStore.TakeNotice();
@@ -54,6 +67,108 @@ public class MainForm : Form
         Controls.Clear();
         Controls.Add(content);
         ResumeLayout();
+    }
+
+    // --- Install, update, uninstall ---
+
+    private void ShowInstall()
+    {
+        var installed = Installer.InstalledVersion();
+        var stack = Theme.Stack();
+        stack.Controls.Add(Theme.Label(installed is null ? "Install Vaier" : "Update Vaier", Theme.Ui(18, FontStyle.Bold), Theme.Text));
+        stack.Controls.Add(Theme.Label(installed is null
+            ? "Vaier moves into Program Files and the Start menu, and keeps this computer in your fleet — after a restart too."
+            : $"{installed} → {Installer.OwnVersion}. This computer stays in the fleet, and its connection comes back on its own.",
+            Theme.Ui(11), Theme.Text));
+        var go = Theme.Primary(installed is null ? "Install" : "Update");
+        var notice = Theme.Label("", Theme.Ui(10), Theme.Error);
+        stack.Controls.Add(go);
+        stack.Controls.Add(notice);
+        AcceptButton = go;
+        go.Click += async (_, _) =>
+        {
+            go.Enabled = false;
+            go.Text = installed is null ? "Installing…" : "Updating…";
+            try
+            {
+                await Task.Run(Installer.InstallOrUpdate);
+                Close();
+            }
+            catch (Exception e)
+            {
+                notice.Text = $"Vaier could not be installed: {e.Message}";
+                go.Enabled = true;
+                go.Text = installed is null ? "Install" : "Update";
+            }
+        };
+        Screen(stack);
+    }
+
+    /// <summary>Uninstalling leaves the fleet first, so no machine is left behind that nothing answers for.</summary>
+    private void ShowUninstall()
+    {
+        var membership = DeviceStore.Load();
+        var stack = Theme.Stack();
+        stack.Controls.Add(Theme.Label("Uninstall Vaier?", Theme.Ui(18, FontStyle.Bold), Theme.Text));
+        stack.Controls.Add(Theme.Label(membership is null
+            ? "Vaier is removed from this computer."
+            : "This computer leaves Vaier, and the app is removed. To come back you'll need to install it, join again and be approved.",
+            Theme.Ui(11), Theme.Text));
+        var go = Theme.Primary("Uninstall");
+        var cancel = Theme.Quiet("Cancel");
+        var notice = Theme.Label("", Theme.Ui(10), Theme.Error);
+        stack.Controls.AddRange([go, cancel, notice]);
+        var leftAnyway = false;
+
+        cancel.Click += (_, _) =>
+        {
+            if (_membership is null) Close();
+            else ShowHome();
+        };
+        go.Click += async (_, _) =>
+        {
+            go.Enabled = cancel.Enabled = false;
+            go.Text = "Uninstalling…";
+            if (membership is not null && !leftAnyway)
+            {
+                // Down before asking: the answer would otherwise come back down a tunnel that is gone.
+                await Task.Run(() => Attempt(() => TunnelService.Down(membership.ConfigFile)));
+                if (await _vaier.Leave(membership) == LeaveOutcome.Unreachable)
+                {
+                    notice.Text = "Vaier couldn't be reached, so this computer is still listed in the fleet. "
+                        + "Uninstall anyway, and remove it on the fleet page later?";
+                    go.Text = "Uninstall anyway";
+                    leftAnyway = true;
+                    go.Enabled = cancel.Enabled = true;
+                    return;
+                }
+            }
+            try
+            {
+                await Task.Run(Installer.Remove);
+                ShowUninstalled();
+            }
+            catch (Exception e)
+            {
+                notice.Text = $"Vaier could not be removed completely: {e.Message}";
+                go.Enabled = cancel.Enabled = true;
+                go.Text = "Uninstall";
+            }
+        };
+        Screen(stack);
+    }
+
+    private void ShowUninstalled()
+    {
+        _membership = null;
+        var stack = Theme.Stack();
+        stack.Controls.Add(Theme.Label("Vaier is uninstalled", Theme.Ui(18, FontStyle.Bold), Theme.Text));
+        stack.Controls.Add(Theme.Label("Nothing of it is left on this computer.", Theme.Ui(11), Theme.TextDim));
+        var close = Theme.Primary("Close");
+        close.Click += (_, _) => Close();
+        stack.Controls.Add(close);
+        AcceptButton = close;
+        Screen(stack);
     }
 
     // --- Ask to join ---
@@ -216,6 +331,8 @@ public class MainForm : Form
         more.FlatAppearance.BorderSize = 0;
         var menu = new ContextMenuStrip { Renderer = new ToolStripProfessionalRenderer(new Theme.MenuColours()), ShowImageMargin = false, Font = Theme.Ui(10.5f) };
         menu.Items.Add(new ToolStripMenuItem("Leave Vaier", null, (_, _) => ConfirmLeave()) { ForeColor = Theme.Text });
+        if (Installer.RunningInstalled)
+            menu.Items.Add(new ToolStripMenuItem("Uninstall Vaier…", null, (_, _) => ShowUninstall()) { ForeColor = Theme.Text });
         more.Click += (_, _) => menu.Show(more, new Point(more.Width - menu.Width, more.Height));
         top.Controls.Add(name, 0, 0);
         top.Controls.Add(more, 1, 0);

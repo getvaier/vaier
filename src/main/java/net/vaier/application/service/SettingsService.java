@@ -95,7 +95,7 @@ public class SettingsService implements
         return androidAppReader.readApp(servedHost());
     }
 
-    /** The Windows app's zip, stamped with the same host as the Android package (#370). */
+    /** The Windows app's installer, stamped with the same host as the Android package (#370). */
     @Override
     public Optional<WindowsApp> windowsApp() {
         return windowsAppReader.readApp(servedHost());

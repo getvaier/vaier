@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds dist/Vaier-windows.zip: Vaier.exe plus WireGuard's tunnel.dll (cross-compiled from a pinned
-# commit) and the signed wireguard.dll driver library. Needs Go, x86_64-w64-mingw32-gcc and .NET 10.
+# Builds dist/VaierSetup.exe: the app as one file, carrying WireGuard's tunnel.dll (cross-compiled from a
+# pinned commit) and the signed wireguard.dll, which it writes out when it installs itself. Vaier appends
+# its host to the file as it serves it. Needs Go, x86_64-w64-mingw32-gcc and .NET 10.
 set -euo pipefail
 
 WIREGUARD_WINDOWS_COMMIT=6ece77bc487c8aa697e3c092197621c4f3e5ccb8
@@ -30,18 +31,18 @@ nt="$work/wireguard-nt-$WIREGUARD_NT_VERSION.zip"
 [ -f "$nt" ] || curl -sSLo "$nt" "https://download.wireguard.com/wireguard-nt/wireguard-nt-$WIREGUARD_NT_VERSION.zip"
 echo "$WIREGUARD_NT_SHA256  $nt" | sha256sum -c --quiet
 
-echo "[+] Vaier.exe"
+stage="$work/stage"
+rm -rf "$stage" && mkdir -p "$stage"
+cp "$work/tunnel.dll" "$stage/"
+unzip -q -j -o "$nt" wireguard-nt/bin/amd64/wireguard.dll -d "$stage"
+unzip -q -p "$nt" wireguard-nt/LICENSE.txt > "$stage/wireguard-nt-LICENSE.txt"
+
+echo "[+] VaierSetup.exe"
 dotnet test "$here/Vaier.Core.Tests" --nologo -v quiet
 rm -rf "$work/publish"
 # VAIER_SELF_CONTAINED=false leaves the .NET runtime out: small enough to hand over, but needs it installed.
 dotnet publish "$here/Vaier.App" -c Release -o "$work/publish" --nologo -v quiet \
-  -p:SelfContained="${VAIER_SELF_CONTAINED:-true}"
-
-stage="$work/stage/Vaier"
-rm -rf "$work/stage" && mkdir -p "$stage"
-cp "$work/publish/Vaier.exe" "$work/tunnel.dll" "$stage/"
-unzip -q -j -o "$nt" wireguard-nt/bin/amd64/wireguard.dll -d "$stage"
-unzip -q -p "$nt" wireguard-nt/LICENSE.txt > "$stage/wireguard-nt-LICENSE.txt"
-rm -f "$dist/Vaier-windows.zip"
-(cd "$work/stage" && zip -q -r "$dist/Vaier-windows.zip" Vaier)
-echo "[+] $dist/Vaier-windows.zip"
+  -p:SelfContained="${VAIER_SELF_CONTAINED:-true}" -p:VaierNativeDir="$stage/"
+rm -f "$dist"/*
+cp "$work/publish/Vaier.exe" "$dist/VaierSetup.exe"
+echo "[+] $dist/VaierSetup.exe"
