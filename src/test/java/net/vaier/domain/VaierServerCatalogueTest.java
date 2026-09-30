@@ -62,7 +62,7 @@ class VaierServerCatalogueTest {
         assertThat(VaierServerCatalogue.isExcluded("WireGuard")).isTrue();
         assertThat(VaierServerCatalogue.isExcluded("grafana")).isFalse();
         // The operator's own containers on the Vaier host stay offered.
-        assertThat(VaierServerCatalogue.isExcluded("pihole")).isFalse();
+        assertThat(VaierServerCatalogue.isExcluded("mealie")).isFalse();
     }
 
     @Test
@@ -72,13 +72,15 @@ class VaierServerCatalogueTest {
         assertThat(VaierServerCatalogue.isVaierOwnStack("traefik")).isTrue();
         assertThat(VaierServerCatalogue.isVaierOwnStack("vaier")).isTrue();
         assertThat(VaierServerCatalogue.isVaierOwnStack("docker-proxy")).isTrue();
-        assertThat(VaierServerCatalogue.isVaierOwnStack("pihole")).isFalse();
+        assertThat(VaierServerCatalogue.isVaierOwnStack("pihole")).isTrue();
+        assertThat(VaierServerCatalogue.isVaierOwnStack("mealie")).isFalse();
         assertThat(VaierServerCatalogue.isVaierOwnStack("Traefik")).isTrue();
     }
 
     @Test
     void isOffered_isTheCarveOutForVaiersOwnContainersThatAreWorthPublishing() {
         assertThat(VaierServerCatalogue.isOffered("traefik")).isTrue();
+        assertThat(VaierServerCatalogue.isOffered("pihole")).isTrue();
         assertThat(VaierServerCatalogue.isOffered("crowdsec")).isFalse();
         // Not a claim about the operator's containers — those are offered because they aren't excluded.
         assertThat(VaierServerCatalogue.isOffered("grafana")).isFalse();
@@ -89,6 +91,9 @@ class VaierServerCatalogueTest {
         assertThat(VaierServerCatalogue.isPublishablePort("traefik", 8080)).isTrue();
         assertThat(VaierServerCatalogue.isPublishablePort("traefik", 80)).isFalse();
         assertThat(VaierServerCatalogue.isPublishablePort("traefik", 443)).isFalse();
+        // Pi-hole's admin UI, never its DNS port.
+        assertThat(VaierServerCatalogue.isPublishablePort("pihole", 80)).isTrue();
+        assertThat(VaierServerCatalogue.isPublishablePort("pihole", 53)).isFalse();
     }
 
     @Test
@@ -99,6 +104,7 @@ class VaierServerCatalogueTest {
     @Test
     void rootRedirectPath_returnsTheKnownPathOrNull() {
         assertThat(VaierServerCatalogue.rootRedirectPath("traefik")).isEqualTo("/dashboard/");
+        assertThat(VaierServerCatalogue.rootRedirectPath("pihole")).isEqualTo("/admin");
         assertThat(VaierServerCatalogue.rootRedirectPath("grafana")).isNull();
     }
 
@@ -147,11 +153,11 @@ class VaierServerCatalogueTest {
         List<DockerService> vaierServerContainers = List.of(
             running("traefik", "traefik:v3.6.14"),
             running("wireguard", "linuxserver/wireguard:latest"),
-            running("pihole", "pihole/pihole:latest"));
+            running("mealie", "hkotel/mealie:latest"));
 
         assertThat(VaierServerCatalogue.sweepable(vaierServerContainers))
             .extracting(DockerService::containerName)
-            .containsExactly("pihole");
+            .containsExactly("mealie");
     }
 
     @Test

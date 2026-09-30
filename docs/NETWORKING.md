@@ -110,6 +110,14 @@ The Windows app is not yet signed, so Windows SmartScreen warns before the first
 
 *Presence from the app and key rotation are still to come.*
 
+### Fleet DNS
+
+Every personal device's config — whether from the show-once download or the Vaier app — names `DNS = 172.20.0.53`: **Pi-hole**, which is part of Vaier's own stack. Server peers get no DNS line; they keep their own resolver, since they only send the fleet's addresses into the tunnel.
+
+Pi-hole sits at that fixed address on Vaier's internal network and publishes no host port, so it answers only what arrives through the tunnel — never the internet. Its data lives in `./pihole/` in your install directory. Before it shipped with Vaier it was a stack you ran yourself, and a fresh install without one left every phone and laptop with a tunnel and no working DNS.
+
+Its admin UI is offered for publishing like Traefik's dashboard (see [Publishing a service](#publishing-a-service)). Pi-hole's own password is switched off, because social login in front of it is the gate — so don't publish it as public. Its image is pinned and moves with a Vaier release, like the rest of Vaier's own stack.
+
 ---
 
 ## LAN servers and the LAN scanner
@@ -137,7 +145,7 @@ The service is live at `https://subdomain.yourdomain.com`.
 
 A machine's **published services** are child entries under it in the **Explorer** tree: open one to edit its authentication, display name, allowed groups, and advanced options, or to **Unpublish** it. The machine's discovered-but-unpublished containers appear as **+ Publish** rows that open the publish flow pre-filled, each with an **Ignore** button to hide it (a machine with ignored candidates shows a collapsible "N hidden" line to reveal and **Unignore** them); a relay-anchored LAN server adds a **Publish LAN port** form for publishing a bare host:port (port + protocol + subdomain). Every publish runs as a non-blocking **progress card** for the one step there is — reverse-proxy routing — turning green on success or red on rollback, and rebuilt from the server on reload so a refresh never loses an in-flight publish. Unpublishing asks for confirmation and tears down the Traefik route while leaving the container running; DNS is untouched, since the name resolves under your wildcard record either way.
 
-On the **Vaier server** itself, the containers of Vaier's own stack are not offered as candidates — the console, Traefik, WireGuard, oauth2-proxy, Dex, CrowdSec, the Docker socket proxy, the offline page and their sidecars are Vaier's plumbing, and the socket proxy in particular serves the Docker API, which is not something to put behind a public hostname. Your own containers on that host are discovered exactly as they are anywhere else. The one deliberate exception is **Traefik's dashboard** on port 8080, which appears as a candidate with a `/dashboard/` redirect already filled in: publish it if you want it, on the hostname you choose and — the sane choice — behind social login.
+On the **Vaier server** itself, the containers of Vaier's own stack are not offered as candidates — the console, Traefik, WireGuard, oauth2-proxy, Dex, CrowdSec, the Docker socket proxy, the offline page and their sidecars are Vaier's plumbing, and the socket proxy in particular serves the Docker API, which is not something to put behind a public hostname. Your own containers on that host are discovered exactly as they are anywhere else. The deliberate exceptions are **Traefik's dashboard** on port 8080 and **Pi-hole's admin** on port 80, which appear as candidates with a `/dashboard/` or `/admin` redirect already filled in: publish them if you want them, on the hostname you choose and — the sane choice — behind social login. Pi-hole's DNS port is never offered: it serves the fleet through the tunnel (see [Fleet DNS](#fleet-dns)).
 
 For per-service auth mode and access rules (who can reach a Social-login service), see [`docs/AUTH.md`](AUTH.md).
 

@@ -1025,12 +1025,12 @@ class ContainerServiceTest {
         // The catalogue hides Vaier's stack, not the host. A container the operator runs alongside it is
         // exactly what the publishable list is for.
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer("pihole", 80, "tcp")));
+            .thenReturn(List.of(localContainer("mealie", 80, "tcp")));
 
         List<PublishableService> result = refreshThenGetUnpublished(List.of());
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).containerName()).isEqualTo("pihole");
+        assertThat(result.get(0).containerName()).isEqualTo("mealie");
     }
 
     @Test
@@ -1112,7 +1112,7 @@ class ContainerServiceTest {
         // published before Vaier could see it on its own network hold the gateway spelling — and offering
         // it again as a candidate would tell the operator something plainly untrue about their own stack.
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(new DockerService("id", "pihole", "image:latest", "latest",
+            .thenReturn(List.of(new DockerService("id", "mealie", "image:latest", "latest",
                 List.of(new PortMapping(80, 8053, "tcp", "0.0.0.0")),
                 List.of("vaier_vaier-network"), "running")));
 
@@ -1293,13 +1293,13 @@ class ContainerServiceTest {
         // every image the operator CAN act on.
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of(
             imaged("traefik", "traefik:v3.6.14", "sha256:local"),
-            imaged("pihole", "pihole/pihole:latest", "sha256:local")));
+            imaged("mealie", "hkotel/mealie:latest", "sha256:local")));
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
         when(forResolvingRegistryDigest.resolveDigest(any())).thenReturn(Optional.of("sha256:newer"));
         service.refresh();
 
         assertThat(service.sweepImageUpdates().verdicts())
-            .containsOnlyKeys(onVaierServer("pihole/pihole:latest"));
+            .containsOnlyKeys(onVaierServer("hkotel/mealie:latest"));
         verify(forResolvingRegistryDigest, never())
             .resolveDigest(argThat(reference -> reference.toString().contains("traefik")));
     }

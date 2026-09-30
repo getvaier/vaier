@@ -64,7 +64,7 @@ class ContainerUpdateEligibilityTest {
         // the button rather than let five updates fail one after another.
         assertThat(onOperatorMachine(container("netdata", COMPOSE_LABELS), DockerCommandAccess.REFUSED))
             .isEqualTo(ContainerUpdateEligibility.NO_DOCKER_ACCESS);
-        assertThat(onVaierServer(container("pihole", COMPOSE_LABELS), DockerCommandAccess.REFUSED))
+        assertThat(onVaierServer(container("mealie", COMPOSE_LABELS), DockerCommandAccess.REFUSED))
             .isEqualTo(ContainerUpdateEligibility.NO_DOCKER_ACCESS);
     }
 

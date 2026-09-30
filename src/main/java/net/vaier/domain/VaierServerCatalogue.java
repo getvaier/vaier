@@ -49,11 +49,12 @@ public final class VaierServerCatalogue {
 
     /**
      * The carve-out: containers Vaier knows specifically and offers only on the listed ports. Traefik's
-     * dashboard is the one part of Vaier's own stack an operator has a reason to publish — behind auth,
-     * on the hostname of their choosing.
+     * dashboard and Pi-hole's admin are the parts of Vaier's own stack an operator has a reason to
+     * publish — behind auth, on the hostname of their choosing. Pi-hole's DNS port is never offered.
      */
     private static final Map<String, OfferedService> OFFERED = Map.of(
-        "traefik", new OfferedService(Set.of(8080), "/dashboard/")
+        "traefik", new OfferedService(Set.of(8080), "/dashboard/"),
+        "pihole", new OfferedService(Set.of(80), "/admin")
     );
 
     /** Whether {@code containerName} is one of Vaier's own infrastructure containers. */

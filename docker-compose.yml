@@ -477,6 +477,25 @@ services:
     networks:
       - vaier-network
 
+  # The fleet's DNS. Every phone/laptop peer config says `DNS = 172.20.0.53`, so this address must
+  # always answer. No host port: peers reach it through the tunnel. Its admin UI (port 80) is published
+  # like Traefik's dashboard, behind social login — so Pi-hole's own password is switched off.
+  pihole:
+    image: pihole/pihole:2026.09.0
+    container_name: pihole
+    environment:
+      TZ: ${VAIER_TZ:-UTC}
+      # Queries arrive from the tunnel, which is not Pi-hole's "local" network.
+      FTLCONF_dns_listeningMode: ALL
+      FTLCONF_webserver_api_password: ""
+    volumes:
+      - ./pihole/etc-pihole:/etc/pihole
+      - ./pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    restart: unless-stopped
+    networks:
+      vaier-network:
+        ipv4_address: 172.20.0.53
+
   # Rotates Traefik's access log (copytruncate — Traefik has no reopen signal to support any other
   # rotation strategy) so it can't grow unbounded now that it's written to a file for CrowdSec.
   traefik-logrotate:

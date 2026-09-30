@@ -46,7 +46,10 @@ class InstallScriptCoverageTest {
         // #329: Vaier's SecurityService writes the rendered trusted-networks allowlist here.
         "crowdsec/whitelist",
         // Traefik downloads its CrowdSec bouncer plugin here on first start and keeps it.
-        "traefik/plugins-storage"
+        "traefik/plugins-storage",
+        // Pi-hole writes its own settings, blocklists and query log on first start.
+        "pihole/etc-pihole",
+        "pihole/etc-dnsmasq.d"
     );
 
     // Variables the OPERATOR fills in — their domain, their identity-provider credentials, optional

@@ -21,7 +21,7 @@ Each row is the short version. The linked page carries the mechanism, the caveat
 
 | Feature | In short |
 |---------|----------|
-| **VPN mesh** | WireGuard peers and LAN servers (NAS, printers, extra Docker hosts) join one mesh, with cross-site routing between your networks. Vaier reads the network a machine sits on over the SSH it already has, so you are never asked for a CIDR. → [Networking](docs/NETWORKING.md) |
+| **VPN mesh** | WireGuard peers and LAN servers (NAS, printers, extra Docker hosts) join one mesh, with cross-site routing between your networks and no CIDR to type. Personal devices resolve names through the Pi-hole Vaier ships with. → [Networking](docs/NETWORKING.md) |
 | **Wildcard DNS** | One `*.yourdomain.com` record, made once, covers the console, sign-in, and every service you ever publish. Vaier checks it at every boot. → [Networking](docs/NETWORKING.md#wildcard-dns) |
 | **Reverse proxy & edge hardening** | Traefik terminates HTTPS with Let's Encrypt, enforces a security-header and TLS floor on every route, and shows a branded offline page when a backend is down. CrowdSec blocks malicious traffic at the edge; every block is listed in the Explorer, one click to lift it, even your own, trust the address, or block one yourself for up to 7 days. → [Networking](docs/NETWORKING.md#edge-hardening) |
 | **Service publishing & launchpad** | Publish any container's web interface in one click. A port that isn't a website — MQTT, a database — is published as a **stream** on the same HTTPS port. The launchpad shows each visitor only what they may reach. → [Networking](docs/NETWORKING.md#publishing-a-service) |
