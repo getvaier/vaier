@@ -6682,11 +6682,35 @@
         go(['fleet', machineId]);   // the `backup` entry is gone now; the machine always stands
     }
 
+    // An EventSource reconnects by itself after a network drop, but an HTTP error (a 502 while Vaier restarts,
+    // a login redirect) closes it for good. So reopen a CLOSED stream after a capped backoff — a retry on a
+    // failure edge, not a poll. onReopen re-reads what the gap hid, after either kind of reconnect.
+    function liveStream(url, { onReopen } = {}) {
+        const listeners = [];
+        let es, opened = false, delay = 2000;
+        const open = () => {
+            const src = es = new EventSource(url);
+            listeners.forEach(([name, fn]) => src.addEventListener(name, fn));
+            src.onopen = () => {
+                delay = 2000;
+                if (opened && onReopen) onReopen();
+                opened = true;
+            };
+            src.onerror = () => {
+                if (src.readyState !== EventSource.CLOSED) return;
+                setTimeout(open, delay);
+                delay = Math.min(delay * 2, 30000);
+            };
+        };
+        open();
+        return { addEventListener(name, fn) { listeners.push([name, fn]); es.addEventListener(name, fn); } };
+    }
+
     // The backups stream — the fourth and last the shell holds. It carries a run's outcome: when a launched
     // backup settles, the backend pushes run-settled { jobName, status }, and we re-read exactly that job's last
     // run. No polling: the browser waits to be told, the same discipline the transfers and services streams keep.
     function watchBackups() {
-        const events = new EventSource('/backup-jobs/events');
+        const events = liveStream('/backup-jobs/events');
         events.addEventListener('run-settled', (e) => {
             const d = JSON.parse(e.data);
             if (S.backupJobs.some((j) => j.machineId === d.machineId)) loadJobRun(d.machineId);
@@ -6868,7 +6892,7 @@
     // An errand answers while nobody asked, so the pane learns about it the same way every other live fact
     // arrives here: the backend pushes, this listens. Opened once, when the shell starts.
     function watchChat() {
-        const events = new EventSource('/chat/events');
+        const events = liveStream('/chat/events', { onReopen: () => { if (!S.chat.busy) { loadConversation(); loadErrands(); } } });
         events.addEventListener('errand-reported', () => {
             // Mid-answer the thread is being written into; the answer's own pass re-reads both when it lands.
             if (S.chat.busy) return;
@@ -6878,18 +6902,11 @@
     }
 
     function watchSecurity() {
-        const events = new EventSource('/security/events');
-        // SSE replays nothing missed while the stream was down, so re-read on every reconnect after the
-        // first — the same edge-triggered re-sync watchFleet does. Not polling: this fires on a reconnect,
-        // not on a clock.
-        let opened = false;
-        events.onopen = () => {
-            if (opened) {
-                loadSecurity().then(() => { repaintThreats(); repaintAccessSources(); });
-                loadTrusted().then(repaintTrusted);
-            }
-            opened = true;
-        };
+        // SSE replays nothing missed while the stream was down, so re-read on every reconnect.
+        const events = liveStream('/security/events', { onReopen: () => {
+            loadSecurity().then(() => { repaintThreats(); repaintAccessSources(); });
+            loadTrusted().then(repaintTrusted);
+        } });
         events.addEventListener('block-decisions', (e) => {
             try {
                 S.threats = JSON.parse(e.data);
@@ -9828,7 +9845,7 @@
     // listens and repaints the tray, never polling. A settled transfer stays in the tray as its own record
     // (done or failed) until the operator has seen it; it is not swept from under them.
     function watchTransfers() {
-        const events = new EventSource('/transfers/events');
+        const events = liveStream('/transfers/events', { onReopen: loadTransfers });
         events.addEventListener('transfer-progress', (e) => {
             const d = JSON.parse(e.data);
             const tr = S.transfers.get(d.id);
@@ -10479,32 +10496,22 @@
     function watchFleet() {
         // A phone asking to join is pushed here the moment it asks; so is its answer, from whichever
         // signed-in browser gave it. The list is re-read on each edge, never on a timer.
-        const asks = new EventSource('/vpn/enrolments/events');
+        const asks = liveStream('/vpn/enrolments/events', { onReopen: () => loadEnrolmentRequests().then(render) });
         ['requested', 'approved', 'refused'].forEach((name) => {
             asks.addEventListener(name, () => loadEnrolmentRequests().then(render));
         });
 
-        const events = new EventSource('/vpn/peers/events');
         // SSE does not replay events missed while the stream was down (an idle tab, a network blip, a Vaier
-        // redeploy). EventSource reconnects on its own, but a dot flip or a peer up/down that fired during the
-        // gap would sit stale until a manual refresh. So on every reconnect (onopen after the first), re-sync
-        // the state those events carry — peer liveness and LAN status — and repaint. Not polling: this fires
-        // only on a reconnect edge, not on a timer.
-        let opened = false;
-        events.onopen = () => {
-            if (opened) {
-                // A settled update may have fired into the gap, and there is no replay. Stop waiting on the
-                // ones we can no longer be told about: a button stuck on "Updating…" until the page is
-                // reloaded is a worse lie than offering it again, and the containers we re-read below are the
-                // honest answer about what is actually running.
-                _updating.clear();
-                _upgradingOs.clear();
-                Promise.all([loadFleet(), loadLanServers(), loadDiskStandings(),
-                    loadClaudeStandings(), loadContainers(), loadContainerStandings()])
-                    .then(render);
-            }
-            opened = true;
-        };
+        // redeploy), so a dot flip or a peer up/down in the gap would sit stale. Re-sync on every reconnect.
+        const events = liveStream('/vpn/peers/events', { onReopen: () => {
+            // A settled update may have fired into the gap, and there is no replay. A button stuck on
+            // "Updating…" is a worse lie than offering it again; the containers re-read below are the truth.
+            _updating.clear();
+            _upgradingOs.clear();
+            Promise.all([loadFleet(), loadLanServers(), loadDiskStandings(),
+                loadClaudeStandings(), loadContainers(), loadContainerStandings()])
+                .then(render);
+        } });
         // A peer was added, renamed or removed — the fleet's own shape changed.
         events.addEventListener('peers-updated', () => loadFleet().then(render));
         // Liveness. The backend polls WireGuard and pushes what it sees; the browser only ever listens, and
@@ -10574,18 +10581,13 @@
     // new one. It is what keeps the services (and the containers behind them) honest without a single poll:
     // the backend watches, the backend pushes, the browser listens.
     function watchServices() {
-        const events = new EventSource('/published-services/events');
         const refresh = () => {
             loadContainers();                       // re-renders when it lands
             loadServices().then(render);
         };
-        // Same reconnect re-sync as the fleet stream: a redeploy or blip drops this too, and a missed
-        // service/container change would otherwise wait for a manual refresh. Re-sync on reconnect only.
-        let opened = false;
-        events.onopen = () => {
-            if (opened) refresh();
-            opened = true;
-        };
+        // Same reconnect re-sync as the fleet stream: a missed service/container change would otherwise
+        // wait for a manual refresh.
+        const events = liveStream('/published-services/events', { onReopen: refresh });
         // A route was published, updated, unpublished — or a container behind one changed state
         // (DockerEventListener publishes `container-state-changed` on this same event).
         events.addEventListener('service-updated', refresh);

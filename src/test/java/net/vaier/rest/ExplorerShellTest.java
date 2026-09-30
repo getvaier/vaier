@@ -141,7 +141,7 @@ class ExplorerShellTest {
     void theShell_learnsMachineLivenessFromTheEventStream_notFromAPollLoop() throws IOException {
         // Hard project rule: the backend polls and pushes; the browser only ever listens.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("new EventSource('/vpn/peers/events')");
+        assertThat(js).contains("liveStream('/vpn/peers/events'");
         assertThat(js).contains("peers-stats");
         assertThat(js).doesNotContain("setInterval");
         // The Topology picture repaints from what the shell already holds: it never polls and never fetches.
@@ -567,11 +567,11 @@ class ExplorerShellTest {
         String js = read("explorer-shell.js");
         assertThat(js).contains("lan-servers-updated");
         assertThat(js).doesNotContain("setInterval");
-        assertThat(js).doesNotContain("setTimeout");
+        assertOnlyTimerIsTheStreamReopen(js);
         // LAN liveness in particular still costs no second connection: it rides the vpn-peers stream that is
         // already open. (Slice C adds a second EventSource for a *different* topic, published-services — the
         // stream count itself is pinned by theShell_holdsExactlyTwoStreams below.)
-        int fleetStream = js.indexOf("new EventSource('/vpn/peers/events')");
+        int fleetStream = js.indexOf("liveStream('/vpn/peers/events'");
         assertThat(fleetStream).isPositive();
         assertThat(js.indexOf("lan-servers-updated")).isGreaterThan(fleetStream);
     }
@@ -786,7 +786,7 @@ class ExplorerShellTest {
         // all publish on it. The shell listens. It does not poll — that is a hard project rule, and it is why
         // a second EventSource is right here and a setInterval never is.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("new EventSource('/published-services/events')");
+        assertThat(js).contains("liveStream('/published-services/events'");
         assertThat(js).contains("service-updated");
         assertThat(js).doesNotContain("setInterval");
     }
@@ -803,17 +803,27 @@ class ExplorerShellTest {
         // a phone asking to join and the answer it got, from whichever browser gave it. The errand adds the
         // seventh — `chat`, carrying errand-reported: Marvin answers a question nobody asked, and the thread
         // has to learn of it. It earns its place the same way the others did, and seven is the ceiling now.
-        // And still no clock of the shell's own — no setInterval, and no setTimeout (the toast lives out a CSS
-        // animation, not a JS timer).
+        // And still no clock of the shell's own — no setInterval, and the one setTimeout is liveStream's reopen
+        // of a stream the browser gave up on (a 502 mid-deploy fails an EventSource for good).
         String js = read("explorer-shell.js");
-        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(7);
-        assertThat(js).contains("new EventSource('/vpn/enrolments/events')");
-        assertThat(js).contains("new EventSource('/transfers/events')");
-        assertThat(js).contains("new EventSource('/backup-jobs/events')");
-        assertThat(js).contains("new EventSource('/security/events')");
-        assertThat(js).contains("new EventSource('/chat/events')");
+        assertThat(js.split("new EventSource\\(", -1).length - 1).as("only liveStream opens one").isEqualTo(1);
+        assertThat(js.split("liveStream\\('/", -1).length - 1).isEqualTo(7);
+        assertThat(js).contains("liveStream('/vpn/enrolments/events'");
+        assertThat(js).contains("liveStream('/transfers/events'");
+        assertThat(js).contains("liveStream('/backup-jobs/events'");
+        assertThat(js).contains("liveStream('/security/events'");
+        assertThat(js).contains("liveStream('/chat/events'");
         assertThat(js).doesNotContain("setInterval");
-        assertThat(js).doesNotContain("setTimeout");
+        assertOnlyTimerIsTheStreamReopen(js);
+    }
+
+    private static void assertOnlyTimerIsTheStreamReopen(String js) {
+        // A retry after the browser closed a stream for good — an error edge, never a clock.
+        assertThat(js.split("setTimeout\\(", -1).length - 1).isEqualTo(1);
+        int from = js.indexOf("function liveStream(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("EventSource.CLOSED").contains("setTimeout(");
     }
 
     @Test
@@ -2615,7 +2625,7 @@ class ExplorerShellTest {
         // The same rule the rest of the shell lives by: the backend sweeps and publishes, the browser
         // listens. A timer here would be the first one in the file.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("new EventSource('/security/events')");
+        assertThat(js).contains("liveStream('/security/events'");
         assertThat(js).contains("events.addEventListener('block-decisions'");
         assertThat(js).doesNotContain("setInterval");
     }
@@ -2699,7 +2709,7 @@ class ExplorerShellTest {
         // and the same rule the rest of the shell lives by: the backend sweeps and publishes, the browser
         // only listens.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("new EventSource('/security/events')");
+        assertThat(js).contains("liveStream('/security/events'");
         assertThat(js).contains("events.addEventListener('access-sources'");
         assertThat(js).doesNotContain("setInterval");
         // And the very first read happens once, at boot — never re-fetched on a timer or on view.
@@ -4120,7 +4130,10 @@ class ExplorerShellTest {
         String js = read("explorer-shell.js");
 
         assertThat(js).contains("fetch('/vpn/enrolments')");
-        assertThat(js).contains("new EventSource('/vpn/enrolments/events')");
+        assertThat(js).contains("liveStream('/vpn/enrolments/events'");
+        // A join asked while the stream was down (a redeploy) is re-read when it comes back, not on a refresh.
+        int ask = js.indexOf("liveStream('/vpn/enrolments/events'");
+        assertThat(js.substring(ask, js.indexOf(";", ask))).contains("onReopen").contains("loadEnrolmentRequests()");
         int from = js.indexOf("function renderFleet(");
         String fleet = js.substring(from, js.indexOf("\n    }", from));
         assertThat(fleet).contains("section('Waiting to join')");
@@ -4461,7 +4474,7 @@ class ExplorerShellTest {
         // the frontend never polls: the backend pushes, the pane listens, exactly as the Security view does.
         String js = read("explorer-shell.js");
 
-        assertThat(js).contains("new EventSource('/chat/events')");
+        assertThat(js).contains("liveStream('/chat/events'");
         int watch = js.indexOf("function watchChat(");
         assertThat(watch).isPositive();
         String watchBody = js.substring(watch, js.indexOf("\n    }", watch));
