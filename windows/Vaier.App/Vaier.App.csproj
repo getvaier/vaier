@@ -10,7 +10,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Vaier.App</RootNamespace>
     <AssemblyName>Vaier</AssemblyName>
-    <Version>0.4.0</Version>
+    <Version>0.5.1</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Assets\vaier.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -25,6 +25,7 @@
   <ItemGroup>
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
     <EmbeddedResource Include="Assets\vaier.ico" LogicalName="vaier.ico" />
+    <EmbeddedResource Include="Assets\vaier-off.ico" LogicalName="vaier-off.ico" />
   </ItemGroup>
 
   <!-- VaierSetup.exe carries WireGuard's two DLLs and writes them out on install; build.sh stages them here. -->

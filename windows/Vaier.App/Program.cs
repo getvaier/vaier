@@ -10,7 +10,7 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // The service control manager starts this same exe twice over: once to carry the tunnel, once to watch it.
+        // The service control manager starts this same exe twice over: once to carry the tunnel, once to manage it.
         switch (args)
         {
             case ["/service", var configFile]:
@@ -22,39 +22,35 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
-
-        // A copy handing over to the installed one may still be closing, so the installed one waits for it.
-        using var single = new Mutex(false, @"Global\VaierWindowsApp");
-        try
-        {
-            if (!single.WaitOne(TimeSpan.FromSeconds(args is ["/installed", ..] ? 10 : 2)))
-            {
-                MessageBox.Show("Vaier is already open. Close it first, then try again.", "Vaier",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-        }
-        catch (AbandonedMutexException)
-        {
-        }
-
         switch (args)
         {
             case ["/uninstall"]:
-                Application.Run(new MainForm(MainForm.Opening.Uninstall));
+                if (Elevated.Now) Application.Run(new MainForm(MainForm.Opening.Uninstall));
+                else Elevated.Run("/uninstall");
                 return;
-            case ["/installed", .. var rest]:
-                Installer.Finish(reconnect: rest is ["reconnect"]);
-                break;
+            case ["/repair"]:
+                if (Elevated.Now) Installer.Repair();
+                return;
         }
 
-        var setup = Installer.Decide();
-        if (setup == Setup.OpenInstalled)
+        switch (Installer.Decide())
         {
-            single.ReleaseMutex();
-            Process.Start(Installer.Exe);
+            case Setup.Install or Setup.Update:
+                if (Elevated.Now) Application.Run(new MainForm(MainForm.Opening.Install));
+                else Elevated.Run("");
+                return;
+            case Setup.OpenInstalled:
+                Process.Start(Installer.Exe);
+                return;
+        }
+
+        // The installed copy is the tray. A second start only asks the running one to show its window.
+        using var single = new Mutex(true, @"Local\VaierTray", out var first);
+        if (!first)
+        {
+            if (EventWaitHandle.TryOpenExisting(TrayApp.ShowEvent, out var show)) show.Set();
             return;
         }
-        Application.Run(new MainForm(setup == Setup.Run ? MainForm.Opening.App : MainForm.Opening.Install));
+        Application.Run(new TrayApp(showWindow: args is not ["/tray"]));
     }
 }

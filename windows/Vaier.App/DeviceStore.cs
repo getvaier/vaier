@@ -23,6 +23,22 @@ public static class DeviceStore
     public static readonly string ConfigFile = Path.Combine(Folder, "Vaier.conf");
     private static readonly string MembershipFile = Path.Combine(Folder, "vaier.json");
     private static readonly string NoticeFile = Path.Combine(Folder, "notice.txt");
+    private static readonly string ConnectedFile = Path.Combine(Folder, "connected");
+
+    /// <summary>
+    /// Whether the person wants the tunnel on. The manager keeps the tunnel matching it, so an update, a
+    /// repair or a reboot never has to remember the switch itself.
+    /// </summary>
+    public static bool WantsConnected
+    {
+        get => File.Exists(ConnectedFile);
+        set
+        {
+            LockedFolder();
+            if (value) File.WriteAllText(ConnectedFile, "");
+            else File.Delete(ConnectedFile);
+        }
+    }
 
     /// <summary>The Vaier host the setup was served from, kept at install; null for a setup handed over by hand.</summary>
     public static string? StampedHost() =>
@@ -48,6 +64,7 @@ public static class DeviceStore
     {
         File.Delete(ConfigFile);
         File.Delete(MembershipFile);
+        File.Delete(ConnectedFile);
     }
 
     /// <summary>Uninstalling: the key, the tunnel's own log, everything Vaier kept on this computer.</summary>
@@ -62,6 +79,8 @@ public static class DeviceStore
         LockedFolder();
         File.WriteAllText(NoticeFile, notice);
     }
+
+    public static string? PeekNotice() => File.Exists(NoticeFile) ? File.ReadAllText(NoticeFile) : null;
 
     public static string? TakeNotice()
     {

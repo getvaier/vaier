@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Vaier.App;
 
 namespace Tunnel;
 
@@ -13,13 +14,22 @@ public static class Services
     public static void Install(string name, string displayName, string description, string arguments,
                                bool unrestrictedSid, string? dependencies)
     {
-        var pathAndArgs = $"\"{Environment.ProcessPath}\" {arguments}";
+        // Services always run the installed copy, even when the setup in Downloads is the one creating them.
+        var pathAndArgs = $"\"{Installer.Exe}\" {arguments}";
         WithScm(scm =>
         {
-            var service = Win32.CreateService(scm, name, displayName, Win32.ServiceAccessRights.AllAccess,
-                Win32.ServiceType.Win32OwnProcess, Win32.ServiceStartType.Auto, Win32.ServiceError.Normal,
-                pathAndArgs, null, IntPtr.Zero, dependencies, null, null);
-            if (service == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            // A service just removed stays "marked for deletion" for a moment; its name frees up once it has gone.
+            var service = IntPtr.Zero;
+            for (var attempt = 1; service == IntPtr.Zero; attempt++)
+            {
+                service = Win32.CreateService(scm, name, displayName, Win32.ServiceAccessRights.AllAccess,
+                    Win32.ServiceType.Win32OwnProcess, Win32.ServiceStartType.Auto, Win32.ServiceError.Normal,
+                    pathAndArgs, null, IntPtr.Zero, dependencies, null, null);
+                if (service != IntPtr.Zero) break;
+                var error = Marshal.GetLastWin32Error();
+                if (error != ServiceMarkedForDelete || attempt == 20) throw new Win32Exception(error);
+                Thread.Sleep(500);
+            }
             try
             {
                 if (unrestrictedSid)

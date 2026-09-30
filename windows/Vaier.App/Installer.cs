@@ -19,6 +19,7 @@ public static class Installer
     public static string Exe => Path.Combine(Dir, "Vaier.exe");
 
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Vaier";
+    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
     private static readonly string[] Carried = ["tunnel.dll", "wireguard.dll", "wireguard-nt-LICENSE.txt"];
 
@@ -40,15 +41,16 @@ public static class Installer
 
     public static bool RunningInstalled => Decide() == Setup.Run;
 
-    /// <summary>Installs or updates, then starts the installed copy — which puts the tunnel back as it was.</summary>
+    /// <summary>Installs or updates, puts the tunnel back as it was, and starts the tray without admin.</summary>
     public static void InstallOrUpdate()
     {
         var membership = DeviceStore.Load();
         var wasUp = membership is not null && TunnelService.IsUp(membership.ConfigFile);
 
-        // Both services run the installed exe, so they must let go of it before it can be replaced.
+        // Both services and every signed-in tray run the installed exe; they must let go of it first.
         Services.Remove(ManagerService.Name);
         if (membership is not null) TunnelService.Down(membership.ConfigFile);
+        StopTrays();
 
         Directory.CreateDirectory(Dir);
         WhenReleased(() => File.Copy(Environment.ProcessPath!, Exe, overwrite: true));
@@ -68,15 +70,18 @@ public static class Installer
             if (SetupStamp.Read(self) is { } host) File.WriteAllText(StampFile, host);
         Register();
         CreateShortcut();
-        Process.Start(Exe, wasUp ? "/installed reconnect" : "/installed");
+        // The manager puts the tunnel back as it starts; it retries where this setup could not.
+        if (membership is not null) DeviceStore.WantsConnected = wasUp;
+        ManagerService.Ensure();
+        // Started through Explorer, the tray runs as the signed-in person rather than with this setup's admin.
+        Process.Start("explorer.exe", $"\"{Exe}\"");
     }
 
-    /// <summary>What the installed copy does first: its own manager service, and the tunnel if it was up.</summary>
-    public static void Finish(bool reconnect)
+    /// <summary>The manager service went missing or stopped; put it back and start it.</summary>
+    public static void Repair()
     {
         ManagerService.Ensure();
-        var membership = DeviceStore.Load();
-        if (reconnect && membership is not null) TunnelService.Up(membership.ConfigFile);
+        Services.Start(ManagerService.Name);
     }
 
     /// <summary>Everything but leaving the fleet, which the caller has already done or decided against.</summary>
@@ -85,8 +90,10 @@ public static class Installer
         var membership = DeviceStore.Load();
         if (membership is not null) TunnelService.Down(membership.ConfigFile);
         Services.Remove(ManagerService.Name);
+        StopTrays();
         DeviceStore.Wipe();
         Registry.LocalMachine.DeleteSubKeyTree(UninstallKey, throwOnMissingSubKey: false);
+        using (var run = Registry.LocalMachine.OpenSubKey(RunKey, writable: true)) run?.DeleteValue("Vaier", throwOnMissingValue: false);
         File.Delete(Shortcut);
         // Windows will not delete a running exe, so the folder goes once this process has really ended.
         var script = $"Wait-Process -Id {Environment.ProcessId} -ErrorAction SilentlyContinue; "
@@ -97,8 +104,26 @@ public static class Installer
         });
     }
 
+    /// <summary>The tray of everyone signed in holds the installed exe open; this setup is the one copy spared.</summary>
+    private static void StopTrays()
+    {
+        foreach (var tray in Process.GetProcessesByName("Vaier").Where(p => p.Id != Environment.ProcessId))
+        {
+            try
+            {
+                tray.Kill();
+                tray.WaitForExit(5000);
+            }
+            catch (Exception)
+            {
+                // Already gone, or a service stopping on its own.
+            }
+        }
+    }
+
     private static void Register()
     {
+        using (var run = Registry.LocalMachine.CreateSubKey(RunKey)) run.SetValue("Vaier", $"\"{Exe}\" /tray");
         using var key = Registry.LocalMachine.CreateSubKey(UninstallKey);
         key.SetValue("DisplayName", "Vaier");
         key.SetValue("DisplayVersion", OwnVersion);

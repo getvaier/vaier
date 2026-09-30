@@ -17,9 +17,9 @@ public static class Theme
     public static Font Ui(float size, FontStyle style = FontStyle.Regular) => new("Segoe UI", size, style);
     public static Font Mono(float size, FontStyle style = FontStyle.Regular) => new("Cascadia Mono", size, style);
 
-    public static Icon AppIcon()
+    public static Icon AppIcon(string name = "vaier.ico")
     {
-        using var stream = typeof(Theme).Assembly.GetManifestResourceStream("vaier.ico")!;
+        using var stream = typeof(Theme).Assembly.GetManifestResourceStream(name)!;
         return new Icon(stream);
     }
 
