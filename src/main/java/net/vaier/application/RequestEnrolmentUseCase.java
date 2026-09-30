@@ -4,7 +4,7 @@ import net.vaier.domain.ConflictException;
 import net.vaier.domain.EnrolmentRequest;
 
 /**
- * A phone asks to join the fleet and then waits (#359 slice 1b).
+ * A device — a phone or a Windows computer — asks to join the fleet and then waits (#359 slice 1b).
  *
  * <p>The one anonymous write in Vaier: the phone has no session, and the point of the slice is that
  * it never needs one — the operator approves it from whatever device they are already signed in on.
@@ -16,8 +16,10 @@ public interface RequestEnrolmentUseCase {
     /**
      * Opens an enrolment request for a device that minted its own keypair.
      *
-     * @throws IllegalArgumentException if the key is not a WireGuard key or the name slugs to nothing
-     * @throws ConflictException if {@link EnrolmentRequest#MAX_PENDING} phones are already waiting
+     * @param platform {@code "windows"}, or {@code null} for a phone
+     * @throws IllegalArgumentException if the key is not a WireGuard key, the name slugs to nothing or
+     *                                  the platform is unknown
+     * @throws ConflictException if {@link EnrolmentRequest#MAX_PENDING} devices are already waiting
      */
-    EnrolmentRequest request(String name, String publicKey);
+    EnrolmentRequest request(String name, String publicKey, String platform);
 }

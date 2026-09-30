@@ -84,3 +84,8 @@ Thumbs.db
 
 # The served Android app is a build product, never committed
 apk/*.apk
+
+# The Windows app (#370): build output, never committed
+windows/dist/
+windows/**/bin/
+windows/**/obj/

@@ -1,6 +1,7 @@
 package net.vaier.adapter.driven;
 
 import net.vaier.domain.EnrolmentRequest;
+import net.vaier.domain.MachineType;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -25,7 +26,7 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void open_mintsAnUnguessableTicketAndAFourDigitCode() {
-        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY);
+        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY, "windows");
 
         // 32 random bytes, base64url without padding, is exactly 43 characters — the same shape the
         // Traefik route for the phone's own event stream is anchored to.
@@ -33,19 +34,20 @@ class InMemoryEnrolmentRequestStoreTest {
         assertThat(request.code()).matches("\\d{4}");
         assertThat(request.name()).isEqualTo("Ruten");
         assertThat(request.publicKey()).isEqualTo(DEVICE_KEY);
+        assertThat(request.machineType()).isEqualTo(MachineType.WINDOWS_CLIENT);
         assertThat(request.isApproved()).isFalse();
     }
 
     @Test
     void open_mintsADistinctTicketEveryTime() {
-        assertThat(store.open("a", DEVICE_KEY).ticket())
-            .isNotEqualTo(store.open("b", OTHER_KEY).ticket());
+        assertThat(store.open("a", DEVICE_KEY, null).ticket())
+            .isNotEqualTo(store.open("b", OTHER_KEY, null).ticket());
     }
 
     @Test
     void open_neverShowsTwoWaitingPhonesTheSameCode() {
         List<String> codes = IntStream.range(0, EnrolmentRequest.MAX_PENDING)
-            .mapToObj(i -> store.open("phone-" + i, DEVICE_KEY).code())
+            .mapToObj(i -> store.open("phone-" + i, DEVICE_KEY, null).code())
             .toList();
 
         assertThat(codes).doesNotHaveDuplicates();
@@ -53,7 +55,7 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void open_refusesAKeyThatIsNotAWireGuardKey_andStoresNothing() {
-        assertThatThrownBy(() -> store.open("Ruten", "not-a-key"))
+        assertThatThrownBy(() -> store.open("Ruten", "not-a-key", null))
             .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(store.livePending()).isEmpty();
@@ -61,7 +63,7 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void findByCode_andByTicket_findTheSameRequest() {
-        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY);
+        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY, null);
 
         assertThat(store.findByCode(request.code())).contains(request);
         assertThat(store.findByTicket(request.ticket())).contains(request);
@@ -69,7 +71,7 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void findByCode_andByTicket_areEmptyForAnythingElse() {
-        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY);
+        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY, null);
         String freeCode = "0000".equals(request.code()) ? "0001" : "0000";
 
         assertThat(store.findByCode(freeCode)).isEmpty();
@@ -80,7 +82,7 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void recordApproval_leavesTheRequestForAPhoneWhoseStreamDropped() {
-        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY);
+        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY, null);
 
         store.recordApproval(request.code(), "[Interface]\nAddress = 10.13.13.7/32\n");
 
@@ -92,8 +94,8 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void livePending_neverListsAnApprovedRequest() {
-        EnrolmentRequest approved = store.open("Ruten", DEVICE_KEY);
-        EnrolmentRequest waiting = store.open("Kikkut", OTHER_KEY);
+        EnrolmentRequest approved = store.open("Ruten", DEVICE_KEY, null);
+        EnrolmentRequest waiting = store.open("Kikkut", OTHER_KEY, null);
 
         store.recordApproval(approved.code(), "[Interface]");
 
@@ -110,7 +112,7 @@ class InMemoryEnrolmentRequestStoreTest {
 
     @Test
     void remove_handsBackWhatItRemoved_soTheRefusalCanReachThePhone() {
-        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY);
+        EnrolmentRequest request = store.open("Ruten", DEVICE_KEY, null);
 
         assertThat(store.remove(request.code())).contains(request);
         assertThat(store.findByTicket(request.ticket())).isEmpty();

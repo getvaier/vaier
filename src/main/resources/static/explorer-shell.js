@@ -1381,7 +1381,7 @@
     function enrolmentRequestRow(r) {
         const row = el('div', 'ex-disc-row');
         const ic = el('span', 'ex-disc-icon');
-        ic.innerHTML = svg('phone', 'ex-disc-svg');
+        ic.innerHTML = svg(joinerWord(r) === 'computer' ? 'laptop' : 'phone', 'ex-disc-svg');
         const info = el('div', 'ex-disc-info');
         const line = el('div', 'ex-disc-line');
         const nm = el('span', 'ex-disc-name'); nm.textContent = r.name;
@@ -2822,7 +2822,7 @@
         let peerWindows = false;                    // whether the peer runs Windows — the OS second step's answer
         let peerCreated = null;                     // the create response, held for the handoff screen
         let adopted = null;                         // the adopt result, held for the LAN handoff screen: { name, credNote }
-        const enrolment = initialEnrolment || null; // the phone's enrolment request: { code, name, publicKey }
+        const enrolment = initialEnrolment || null; // the device's enrolment request: { code, name, publicKey, machineType }
         let enrolled = null;                        // the enrol response, held for the handoff screen
 
         const close = () => {
@@ -3541,7 +3541,7 @@
             }
         }
 
-        // ---- enrol · a phone that arrived with its own key ---------------------------------------------
+        // ---- enrol · a device that arrived with its own key--------------------------------------------
         // The device answered every question the peer flow would have asked, and the one answer Vaier
         // normally generates — the key — it generated itself. So there is nothing to fill in: one button.
         function paintEnrol() {
@@ -3550,9 +3550,10 @@
             content.innerHTML = '';
 
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A phone called ' + enrolment.name + ' wants to join the fleet. It is showing this '
-                + 'code — add it only if the two match. Its key was made on the phone and never leaves it; '
-                + 'Vaier only ever sees the public half.';
+            const device = joinerWord(enrolment);
+            sub.textContent = 'A ' + device + ' called ' + enrolment.name + ' wants to join the fleet. It is showing '
+                + 'this code — add it only if the two match. Its key was made on the ' + device + ' and never '
+                + 'leaves it; Vaier only ever sees the public half.';
             content.appendChild(sub);
 
             // The one thing to compare with the phone's screen, so it is the one thing set large.
@@ -3596,7 +3597,7 @@
                     { method: 'POST' });
                 if (res.status === 404) {
                     // The phone gave up, or ten minutes passed. Nothing to add any more.
-                    toast('That phone is no longer waiting. Ask it to join again.');
+                    toast('That ' + joinerWord(enrolment) + ' is no longer waiting. Ask it to join again.');
                     await loadEnrolmentRequests(); render(); close(); return;
                 }
                 if (!res.ok) {
@@ -3614,18 +3615,19 @@
             }
         }
 
-        // ---- enrol · handoff — to the phone, never to the operator -----------------------------------------
+        // ---- enrol · handoff — to the device, never to the operator----------------------------------------
         // Nothing is shown and nothing is saved: the config went to the phone over the stream it has been
         // waiting on since it asked. This browser was only ever the place the operator said yes.
         function paintEnrolHandoff() {
             const p = enrolled;
             if (!p) { screen('enrol'); return; }
-            titleEl.textContent = p.name + ' — over to the phone';
+            const device = joinerWord(p);
+            titleEl.textContent = p.name + ' — over to the ' + device;
             content.innerHTML = '';
 
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'Vaier sent ' + p.name + ' everything except the private key, which the phone '
-                + 'already has. There is nothing here to save.';
+            sub.textContent = 'Vaier sent ' + p.name + ' everything except the private key, which the ' + device
+                + ' already has. There is nothing here to save.';
             content.appendChild(sub);
 
             const wait = el('div', 'ex-waiting');
@@ -10239,6 +10241,8 @@
         }
     }
     const liveEnrolmentRequests = () => S.enrolmentRequests.filter((r) => r.expiresAt > Date.now());
+    // What to call a joining device: the Windows app is on a computer, the Vaier app on a phone.
+    const joinerWord = (r) => (r && r.machineType === 'WINDOWS_CLIENT' ? 'computer' : 'phone');
 
     async function loadFleet() {
         // The four reads are independent. A phone pays a round trip per link of a chain, so they go as
@@ -10754,7 +10758,7 @@
         if (approval) {
             const request = liveEnrolmentRequests().find((r) => r.code === approval);
             if (request) addMachineFork('enrol', null, request);
-            else toast('No phone is waiting with code ' + approval + '. Ask it to join again.');
+            else toast('No device is waiting with code ' + approval + '. Ask it to join again.');
         }
         // Not awaited and never toasted — a claimed device quietly refreshing its own position is a background
         // habit the operator opted into once, not an event of the visit.

@@ -397,14 +397,15 @@ class ChatRestControllerTest {
         answering("ok");
         proposing();
         when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
-            new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
-                System.currentTimeMillis() + 300_000, "CONFIGFILE-SECRET")));
+            EnrolmentRequest.builder().code("4417").ticket("TICKET-SECRET").name("Ruten")
+                .publicKey("PUBLICKEY-SECRET").expiresAtEpochMs(System.currentTimeMillis() + 300_000)
+                .configFile("CONFIGFILE-SECRET").build()));
 
         String told = read(ChatAction.LET_PHONE_IN, Map.of("code", "4417"));
 
         assertThat(told).contains("Ruten").contains("4417").doesNotContain("TICKET-SECRET");
         assertThat(read(ChatAction.LET_PHONE_IN, Map.of("code", "9999")))
-            .isEqualTo("No phone is waiting with join code 9999.");
+            .isEqualTo("No device is waiting with join code 9999.");
     }
 
     /** The pane is handed the domain's own wording of what is now under way. */

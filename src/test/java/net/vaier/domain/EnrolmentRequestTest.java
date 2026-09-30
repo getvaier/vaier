@@ -24,7 +24,7 @@ class EnrolmentRequestTest {
     private static final long NOW = 1_000_000L;
 
     private static EnrolmentRequest open() {
-        return EnrolmentRequest.open("Ruten", DEVICE_KEY, "4821", TICKET, NOW);
+        return EnrolmentRequest.open("Ruten", DEVICE_KEY, null, "4821", TICKET, NOW);
     }
 
     // --- the request is judged while it is still anonymous, before anything is stored ---
@@ -37,20 +37,20 @@ class EnrolmentRequestTest {
         "c2hvcnQ="
     })
     void open_refusesAKeyThatIsNotAWireGuardKey(String malicious) {
-        assertThatThrownBy(() -> EnrolmentRequest.open("Ruten", malicious, "4821", TICKET, NOW))
+        assertThatThrownBy(() -> EnrolmentRequest.open("Ruten", malicious, null, "4821", TICKET, NOW))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void open_refusesANameThatSlugsToNothing() {
-        assertThatThrownBy(() -> EnrolmentRequest.open("  ", DEVICE_KEY, "4821", TICKET, NOW))
+        assertThatThrownBy(() -> EnrolmentRequest.open("  ", DEVICE_KEY, null, "4821", TICKET, NOW))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void open_keepsTheNameVerbatimAndTheTrimmedKey() {
         EnrolmentRequest request = EnrolmentRequest.open("Geir's phone", " " + DEVICE_KEY + "\n",
-            "4821", TICKET, NOW);
+            null, "4821", TICKET, NOW);
 
         assertThat(request.name()).isEqualTo("Geir's phone");
         assertThat(request.publicKey()).isEqualTo(DEVICE_KEY);
@@ -58,6 +58,19 @@ class EnrolmentRequestTest {
         assertThat(request.ticket()).isEqualTo(TICKET);
         assertThat(request.expiresAtEpochMs()).isEqualTo(NOW + EnrolmentRequest.TTL.toMillis());
         assertThat(request.configFile()).isNull();
+    }
+
+    @Test
+    void open_readsThePlatformAsTheDevicesMachineType_andRefusesAnyOtherPlatform() {
+        // No platform is the Android app, which has never sent one.
+        assertThat(EnrolmentRequest.open("Ruten", DEVICE_KEY, null, "4821", TICKET, NOW).machineType())
+            .isEqualTo(MachineType.MOBILE_CLIENT);
+        assertThat(EnrolmentRequest.open("Laptop", DEVICE_KEY, "windows", "4821", TICKET, NOW).machineType())
+            .isEqualTo(MachineType.WINDOWS_CLIENT);
+        for (String unknown : new String[] { "android", "macos", "" }) {
+            assertThatThrownBy(() -> EnrolmentRequest.open("Ruten", DEVICE_KEY, unknown, "4821", TICKET, NOW))
+                .as(unknown).isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test
@@ -189,6 +202,7 @@ class EnrolmentRequestTest {
         assertThat(approved.ticket()).isEqualTo(TICKET);
         assertThat(approved.name()).isEqualTo("Ruten");
         assertThat(approved.publicKey()).isEqualTo(DEVICE_KEY);
+        assertThat(approved.machineType()).isEqualTo(MachineType.MOBILE_CLIENT);
         assertThat(approved.expiresAtEpochMs()).isEqualTo(open().expiresAtEpochMs());
         assertThat(approved.isApproved()).isTrue();
         assertThat(open().isApproved()).isFalse();
@@ -198,8 +212,8 @@ class EnrolmentRequestTest {
 
     @Test
     void aWaitingPhoneIsFoundByTheCodeItIsShowing() {
-        EnrolmentRequest ruten = new EnrolmentRequest("4417", "t1", "Ruten", "pk1", 1L, "cfg1");
-        EnrolmentRequest other = new EnrolmentRequest("9021", "t2", "Other", "pk2", 1L, "cfg2");
+        EnrolmentRequest ruten = EnrolmentRequest.builder().code("4417").ticket("t1").name("Ruten").build();
+        EnrolmentRequest other = EnrolmentRequest.builder().code("9021").ticket("t2").name("Other").build();
 
         assertThat(EnrolmentRequest.byCode(List.of(other, ruten), "4417")).isSameAs(ruten);
         assertThat(EnrolmentRequest.byCode(List.of(other, ruten), " 4417 ")).isSameAs(ruten);
@@ -209,7 +223,7 @@ class EnrolmentRequestTest {
     void aCodeNoPhoneIsShowingIsRefusedInWords() {
         assertThatThrownBy(() -> EnrolmentRequest.byCode(List.of(), "9999"))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessage("No phone is waiting with join code 9999.");
+            .hasMessage("No device is waiting with join code 9999.");
         assertThatThrownBy(() -> EnrolmentRequest.byCode(List.of(), null))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Say which code.");

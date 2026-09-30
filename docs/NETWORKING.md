@@ -94,6 +94,10 @@ A phone running the **Vaier app** joins without meeting the WireGuard app at all
 
 **Leaving is just as self-contained.** The phone removes itself from the fleet for good, not just from that handset. A phone you remove from the fleet notices on its own, too: it goes quiet, checks in over ordinary internet a few minutes later, and if it's no longer wanted it forgets itself, tells whoever's holding it, and offers to join again — you never have to touch the handset yourself.
 
+**On a Windows computer, too.** The Vaier app for Windows joins the same way: give it your Vaier's address and a name for the computer, and it shows the same join code. The fleet page and the approval dialog call it a computer, with a laptop icon, and it joins as a Windows client. It runs the tunnel with WireGuard's own signed driver, as a Windows service, so the tunnel keeps running with the window closed and comes back when Windows starts; the app's Connect and Disconnect switch it. The private key lives in `C:\ProgramData\Vaier\Vaier.conf`, in a folder only SYSTEM and Administrators can read. The app asks for administrator rights when it starts, and because it is not yet signed, Windows SmartScreen warns before the first run.
+
+The Windows app is early: it cannot yet leave the fleet on its own or notice that you removed it, there is no installer, and your Vaier does not hand it out — there is no install card for Windows.
+
 *Presence from the app and key rotation are still to come.*
 
 ---

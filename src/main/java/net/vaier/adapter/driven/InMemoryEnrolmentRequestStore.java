@@ -32,13 +32,13 @@ public class InMemoryEnrolmentRequestStore implements ForHoldingEnrolmentRequest
     private final Map<String, EnrolmentRequest> requestsByCode = new LinkedHashMap<>();
 
     @Override
-    public synchronized EnrolmentRequest open(String name, String publicKey) {
+    public synchronized EnrolmentRequest open(String name, String publicKey, String platform) {
         dropExpired();
         Set<String> taken = requestsByCode.keySet().stream().collect(Collectors.toUnmodifiableSet());
         String code = EnrolmentRequest.pickCode(taken, RANDOM::nextInt);
         byte[] ticketBytes = new byte[32];
         RANDOM.nextBytes(ticketBytes);
-        EnrolmentRequest request = EnrolmentRequest.open(name, publicKey, code,
+        EnrolmentRequest request = EnrolmentRequest.open(name, publicKey, platform, code,
             ENCODER.encodeToString(ticketBytes), System.currentTimeMillis());
         requestsByCode.put(code, request);
         return request;

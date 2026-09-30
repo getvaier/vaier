@@ -70,9 +70,9 @@ public class EnrolmentRequestRestController {
     /** ANONYMOUS. A phone registers the key it minted and starts waiting. */
     @PostMapping
     public ResponseEntity<RequestEnrolmentResponse> request(@RequestBody RequestEnrolmentRequest body) {
-        // The key and the name are judged in the domain (IllegalArgumentException -> 400), and the
+        // The key, the name and the platform are judged in the domain (IllegalArgumentException -> 400), and the
         // cap on waiting phones is the domain's too (ConflictException -> 409).
-        EnrolmentRequest opened = requestEnrolmentUseCase.request(body.name(), body.publicKey());
+        EnrolmentRequest opened = requestEnrolmentUseCase.request(body.name(), body.publicKey(), body.platform());
         log.info("Enrolment request from '{}' waiting with join code {}",
             LogSafe.forLog(opened.name()), opened.code());
 
@@ -111,7 +111,7 @@ public class EnrolmentRequestRestController {
         long now = System.currentTimeMillis();
         return ResponseEntity.ok(listEnrolmentRequestsUseCase.pending().stream()
             .map(request -> new PendingEnrolmentResponse(request.code(), request.name(),
-                request.publicKey(), request.secondsLeft(now)))
+                request.publicKey(), request.machineType().name(), request.secondsLeft(now)))
             .toList());
     }
 
@@ -135,7 +135,7 @@ public class EnrolmentRequestRestController {
         MachineId machineId = approved.device().machineId();
         return ResponseEntity.ok(new ApprovedEnrolmentResponse(approved.device().id(),
             machineId == null ? null : machineId.value(), approved.device().name(),
-            approved.device().ipAddress()));
+            approved.device().ipAddress(), approved.device().peerType().name()));
     }
 
     /** ADMIN. Turns the phone away. An unknown code is still {@code 204} — there is nothing to undo. */
@@ -154,16 +154,17 @@ public class EnrolmentRequestRestController {
         return CONFIG_ENCODER.encodeToString(configFile.getBytes(StandardCharsets.UTF_8));
     }
 
-    public record RequestEnrolmentRequest(String name, String publicKey) {}
+    /** {@code platform}: {@code "windows"}, or absent for a phone. */
+    public record RequestEnrolmentRequest(String name, String publicKey, String platform) {}
 
     /** Everything here is about the caller's own request; nothing in it describes the fleet. */
     public record RequestEnrolmentResponse(String code, String ticket, long expiresInSeconds) {}
 
     /** No ticket: it is handed to the phone once and must never reach another screen. */
     public record PendingEnrolmentResponse(String code, String name, String publicKey,
-                                           long expiresInSeconds) {}
+                                           String machineType, long expiresInSeconds) {}
 
     /** No config: it belongs to the phone and travels on the phone's own stream. */
     public record ApprovedEnrolmentResponse(String id, String machineId, String name,
-                                            String ipAddress) {}
+                                            String ipAddress, String machineType) {}
 }

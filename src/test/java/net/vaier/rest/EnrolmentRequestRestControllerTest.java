@@ -62,7 +62,7 @@ class EnrolmentRequestRestControllerTest {
     @InjectMocks EnrolmentRequestRestController controller;
 
     private static EnrolmentRequest waiting(String code, String ticket) {
-        return EnrolmentRequest.open("Ruten", DEVICE_KEY, code, ticket, System.currentTimeMillis());
+        return EnrolmentRequest.open("Ruten", DEVICE_KEY, null, code, ticket, System.currentTimeMillis());
     }
 
     private static String encoded(String config) {
@@ -74,10 +74,10 @@ class EnrolmentRequestRestControllerTest {
 
     @Test
     void request_handsBackTheCodeToShowAndTheTicketToHold() {
-        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY)).thenReturn(waiting("4821", TICKET));
+        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY, "windows")).thenReturn(waiting("4821", TICKET));
 
         var response = controller.request(
-            new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY));
+            new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY, "windows"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().code()).isEqualTo("4821");
@@ -95,31 +95,31 @@ class EnrolmentRequestRestControllerTest {
 
     @Test
     void request_tellsEverySignedInOperatorAPhoneIsWaiting() {
-        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY)).thenReturn(waiting("4821", TICKET));
+        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY, null)).thenReturn(waiting("4821", TICKET));
 
-        controller.request(new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY));
+        controller.request(new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY, null));
 
         verify(forPublishingEvents).publish("enrolment-requests", "requested", "4821");
     }
 
     @Test
     void request_doesNotJudgeTheKeyItself_theDomainDoes() {
-        when(requestEnrolmentUseCase.request("Ruten", "not-a-key"))
+        when(requestEnrolmentUseCase.request("Ruten", "not-a-key", null))
             .thenThrow(new IllegalArgumentException("WireGuard key must be a 32-byte base64 key"));
 
         assertThatThrownBy(() -> controller.request(
-                new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", "not-a-key")))
+                new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", "not-a-key", null)))
             .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(forPublishingEvents);
     }
 
     @Test
     void request_lettingTheConflictThrough_whenTooManyAreAlreadyWaiting() {
-        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY))
-            .thenThrow(new ConflictException("Too many phones are already waiting to join."));
+        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY, null))
+            .thenThrow(new ConflictException("Too many devices are already waiting to join."));
 
         assertThatThrownBy(() -> controller.request(
-                new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY)))
+                new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY, null)))
             .isInstanceOf(ConflictException.class);
         verifyNoInteractions(forPublishingEvents);
     }
@@ -136,6 +136,7 @@ class EnrolmentRequestRestControllerTest {
         assertThat(body.get(0).code()).isEqualTo("4821");
         assertThat(body.get(0).name()).isEqualTo("Ruten");
         assertThat(body.get(0).publicKey()).isEqualTo(DEVICE_KEY);
+        assertThat(body.get(0).machineType()).isEqualTo("MOBILE_CLIENT");
         assertThat(body.get(0).expiresInSeconds()).isBetween(590L, 600L);
     }
 
@@ -145,7 +146,7 @@ class EnrolmentRequestRestControllerTest {
         // any other screen, browser or log — including an admin's.
         assertThat(EnrolmentRequestRestController.PendingEnrolmentResponse.class.getRecordComponents())
             .extracting(RecordComponent::getName)
-            .containsExactly("code", "name", "publicKey", "expiresInSeconds");
+            .containsExactly("code", "name", "publicKey", "machineType", "expiresInSeconds");
     }
 
     // --- GET /vpn/enrolments/{ticket}/events (anonymous, ticket-gated) ---
@@ -209,9 +210,10 @@ class EnrolmentRequestRestControllerTest {
         assertThat(response.getBody().machineId()).isEqualTo(TestMachineIds.of("ruten").value());
         assertThat(response.getBody().name()).isEqualTo("Ruten");
         assertThat(response.getBody().ipAddress()).isEqualTo("10.13.13.7");
+        assertThat(response.getBody().machineType()).isEqualTo("MOBILE_CLIENT");
         assertThat(EnrolmentRequestRestController.ApprovedEnrolmentResponse.class.getRecordComponents())
             .extracting(RecordComponent::getName)
-            .containsExactly("id", "machineId", "name", "ipAddress");
+            .containsExactly("id", "machineId", "name", "ipAddress", "machineType");
     }
 
     @Test
@@ -228,7 +230,7 @@ class EnrolmentRequestRestControllerTest {
     @Test
     void approve_anUnknownCode_isNotFound_andTellsNobodyAnything() {
         when(approveEnrolmentUseCase.approve("0000"))
-            .thenThrow(new NotFoundException("No phone is waiting with join code 0000"));
+            .thenThrow(new NotFoundException("No device is waiting with join code 0000"));
 
         assertThatThrownBy(() -> controller.approve("0000")).isInstanceOf(NotFoundException.class);
 
@@ -268,11 +270,11 @@ class EnrolmentRequestRestControllerTest {
 
     @Test
     void request_mailsTheAdmins_becauseAPhoneIsWaitingOnAPerson() {
-        EnrolmentRequest opened = EnrolmentRequest.open("Ruten", DEVICE_KEY, "4821", TICKET,
+        EnrolmentRequest opened = EnrolmentRequest.open("Ruten", DEVICE_KEY, null, "4821", TICKET,
             System.currentTimeMillis());
-        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY)).thenReturn(opened);
+        when(requestEnrolmentUseCase.request("Ruten", DEVICE_KEY, null)).thenReturn(opened);
 
-        controller.request(new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY));
+        controller.request(new EnrolmentRequestRestController.RequestEnrolmentRequest("Ruten", DEVICE_KEY, null));
 
         verify(notifyAdminsOfEnrolmentRequestUseCase).notifyAdminsOfEnrolmentRequest(opened);
     }

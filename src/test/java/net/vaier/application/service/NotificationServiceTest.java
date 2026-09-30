@@ -374,7 +374,7 @@ class NotificationServiceTest {
     void notifyAdminsOfEnrolmentRequest_saysWhoAndWhichCode_andLinksTheApproval() {
         when(configResolver.getDomain()).thenReturn("example.com");
         EnrolmentRequest request = EnrolmentRequest.open("Ruten",
-            "Cdd32h4brltAwRS22xopgiyeyXUNv202FMgAoj1Hgio=", "4821", "ticket", System.currentTimeMillis());
+            "Cdd32h4brltAwRS22xopgiyeyXUNv202FMgAoj1Hgio=", null, "4821", "ticket", System.currentTimeMillis());
 
         service.notifyAdminsOfEnrolmentRequest(request);
 

@@ -4110,7 +4110,7 @@ class ExplorerShellTest {
         int init = js.indexOf("async function init(");
         String body = js.substring(init, js.indexOf("\n    }", init));
         assertThat(body).contains("liveEnrolmentRequests().find((r) => r.code === approval)");
-        assertThat(body).as("and says so rather than opening an empty dialog").contains("No phone is waiting with code");
+        assertThat(body).as("and says so rather than opening an empty dialog").contains("No device is waiting with code");
     }
 
     @Test

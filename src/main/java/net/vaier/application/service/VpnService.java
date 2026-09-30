@@ -664,7 +664,8 @@ public class VpnService implements
 
     @Override
     public EnrolledDeviceUco enrol(String name, String publicKey) {
-        return enrolDevice(name, publicKey);
+        // The operator-driven path is the phone app's.
+        return enrolDevice(name, publicKey, MachineIntent.PERSONAL_DEVICE.toMachineType(false));
     }
 
     /**
@@ -672,7 +673,7 @@ public class VpnService implements
      * phone that came in through a join code joins on exactly the terms one that came in through the
      * console does.
      */
-    private EnrolledDeviceUco enrolDevice(String name, String publicKey) {
+    private EnrolledDeviceUco enrolDevice(String name, String publicKey, MachineType peerType) {
         // Both judgements BEFORE any state change, exactly as createPeer validates a lanCidr: the key
         // goes straight into `wg set ... peer <key>`'s argv and onto disk, and a name that slugs to
         // nothing has no config directory to live in.
@@ -691,9 +692,6 @@ public class VpnService implements
 
             // Rendered with no private key and the device's public key in the metadata: the config is
             // installable by the app, which supplies the half Vaier does not have.
-            // The Vaier app runs on a phone: a personal device that is not Windows. The intent -> type
-            // mapping stays MachineIntent's, exactly as it is for the peer form.
-            MachineType peerType = MachineIntent.PERSONAL_DEVICE.toMachineType(false);
             String clientConfig = WireGuardPeerConfig.generate(
                     null, slot.ipAddress(), slot.serverPublicKey(), slot.presharedKey(),
                     slot.serverEndpoint(), peerType, null, null, vpnSubnet,
@@ -719,17 +717,17 @@ public class VpnService implements
         }
     }
 
-    // --- Enrolment requests: a phone waits to be approved (#359 slice 1b) ---
+    // --- Enrolment requests: a device waits to be approved (#359 slice 1b) ---
 
     @Override
-    public EnrolmentRequest request(String name, String publicKey) {
+    public EnrolmentRequest request(String name, String publicKey, String platform) {
         if (!EnrolmentRequest.mayOpenAnother(forHoldingEnrolmentRequests.livePending().size())) {
-            throw new ConflictException("Too many phones are already waiting to join. Approve or refuse "
+            throw new ConflictException("Too many devices are already waiting to join. Approve or refuse "
                 + "one of them, or wait for a request to expire.");
         }
         // The key and the name are judged inside the store's open(), by the domain, before anything
         // is stored — this call is still anonymous and must be able to cost nothing.
-        EnrolmentRequest opened = forHoldingEnrolmentRequests.open(name, publicKey);
+        EnrolmentRequest opened = forHoldingEnrolmentRequests.open(name, publicKey, platform);
         log.info("A device is waiting to join as '{}' with join code {}", opened.name(), opened.code());
         return opened;
     }
@@ -742,11 +740,11 @@ public class VpnService implements
     @Override
     public ApprovedEnrolmentUco approve(String code) {
         EnrolmentRequest request = forHoldingEnrolmentRequests.findByCode(code)
-            .orElseThrow(() -> new NotFoundException("No phone is waiting with join code " + code
-                + ". It may have expired — ask for a new code on the phone."));
+            .orElseThrow(() -> new NotFoundException("No device is waiting with join code " + code
+                + ". It may have expired — ask for a new code on the device."));
 
-        EnrolledDeviceUco device = enrolDevice(request.name(), request.publicKey());
-        // Only once the peer really exists: a failed enrolment leaves the phone waiting, so the
+        EnrolledDeviceUco device = enrolDevice(request.name(), request.publicKey(), request.machineType());
+        // Only once the peer really exists: a failed enrolment leaves the device waiting, so the
         // operator can simply approve it again.
         forHoldingEnrolmentRequests.recordApproval(request.code(), device.configFile());
         log.info("Approved join code {} as peer {}", request.code(), device.id());

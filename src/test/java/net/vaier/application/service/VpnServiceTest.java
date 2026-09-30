@@ -1998,16 +1998,16 @@ class VpnServiceTest {
     private static final String PSK = "cGKrDp0z0Fs0IiUrPzuTfnJ7CEZzSXpGX0ZlLBFgLGE=";
 
     private EnrolmentRequest waitingRequest(String code, String ticket) {
-        return EnrolmentRequest.open("Ruten", DEVICE_KEY, code, ticket, System.currentTimeMillis());
+        return EnrolmentRequest.open("Ruten", DEVICE_KEY, null, code, ticket, System.currentTimeMillis());
     }
 
     @Test
     void request_opensARequestWhileFewerThanFivePhonesAreWaiting() {
         EnrolmentRequest opened = waitingRequest("4821", "ticket-1");
         when(forHoldingEnrolmentRequests.livePending()).thenReturn(List.of());
-        when(forHoldingEnrolmentRequests.open("Ruten", DEVICE_KEY)).thenReturn(opened);
+        when(forHoldingEnrolmentRequests.open("Ruten", DEVICE_KEY, "windows")).thenReturn(opened);
 
-        assertThat(service.request("Ruten", DEVICE_KEY)).isEqualTo(opened);
+        assertThat(service.request("Ruten", DEVICE_KEY, "windows")).isEqualTo(opened);
     }
 
     @Test
@@ -2017,10 +2017,10 @@ class VpnServiceTest {
             waitingRequest("0001", "t1"), waitingRequest("0002", "t2"), waitingRequest("0003", "t3"),
             waitingRequest("0004", "t4"), waitingRequest("0005", "t5")));
 
-        assertThatThrownBy(() -> service.request("Ruten", DEVICE_KEY))
+        assertThatThrownBy(() -> service.request("Ruten", DEVICE_KEY, null))
             .isInstanceOf(ConflictException.class);
 
-        verify(forHoldingEnrolmentRequests, never()).open(any(), any());
+        verify(forHoldingEnrolmentRequests, never()).open(any(), any(), any());
     }
 
     @Test
@@ -2035,8 +2035,8 @@ class VpnServiceTest {
     void approve_enrolsTheDeviceUnderTheKeyItPresented_andRecordsTheConfigOnTheRequest(@TempDir Path dir)
             throws Exception {
         wireguardIsReachable(dir);
-        when(forHoldingEnrolmentRequests.findByCode("4821"))
-            .thenReturn(Optional.of(waitingRequest("4821", "ticket-1")));
+        when(forHoldingEnrolmentRequests.findByCode("4821")).thenReturn(Optional.of(
+            EnrolmentRequest.open("Ruten", DEVICE_KEY, "windows", "4821", "ticket-1", System.currentTimeMillis())));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
@@ -2049,6 +2049,8 @@ class VpnServiceTest {
         assertThat(approved.device().name()).isEqualTo("Ruten");
         assertThat(approved.device().publicKey()).isEqualTo(DEVICE_KEY);
         assertThat(approved.device().configFile()).doesNotContain("PrivateKey");
+        // The request's machine type, not the phone the operator-driven enrol assumes.
+        assertThat(approved.device().peerType()).isEqualTo(MachineType.WINDOWS_CLIENT);
         // The config stays on the request, so a phone whose stream dropped mid-approval still gets it.
         verify(forHoldingEnrolmentRequests).recordApproval("4821", approved.device().configFile());
     }

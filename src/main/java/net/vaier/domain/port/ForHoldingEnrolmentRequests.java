@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port for the phones currently waiting to be approved into the fleet (#359 slice 1b). The
+ * Driven port for the devices currently waiting to be approved into the fleet (#359 slice 1b). The
  * store mints the {@code Enrolment ticket}'s randomness and holds the requests; every judgement
  * about them — liveness, ticket authorisation, code uniqueness, how many may wait — lives on
  * {@link EnrolmentRequest}.
@@ -17,14 +17,15 @@ public interface ForHoldingEnrolmentRequests {
 
     /**
      * Opens a request for a device that minted its own keypair: a cryptographically-random ticket, a
-     * join code no waiting phone is already showing, and the ~10-minute TTL.
+     * join code no waiting device is already showing, and the ~10-minute TTL.
      *
-     * @throws IllegalArgumentException if the key is not a WireGuard key or the name slugs to nothing
-     *                                  — judged before anything is stored
+     * @param platform {@code "windows"}, or {@code null} for a phone
+     * @throws IllegalArgumentException if the key, the name or the platform is refused — judged
+     *                                  before anything is stored
      */
-    EnrolmentRequest open(String name, String publicKey);
+    EnrolmentRequest open(String name, String publicKey, String platform);
 
-    /** The phones still waiting, in the order they arrived. Never an already-approved request. */
+    /** The devices still waiting, in the order they arrived. Never an already-approved request. */
     List<EnrolmentRequest> livePending();
 
     /** The live request showing this join code, approved or not. Empty for anything unknown or expired. */
@@ -35,7 +36,7 @@ public interface ForHoldingEnrolmentRequests {
 
     /**
      * Records the config an approval produced against the request, which then keeps living until its
-     * TTL so a phone whose stream dropped can reconnect and still be served. A no-op for an unknown
+     * TTL so a device whose stream dropped can reconnect and still be served. A no-op for an unknown
      * or expired code.
      */
     void recordApproval(String code, String configFile);

@@ -196,9 +196,9 @@ class ChatReadsTest {
     @Test
     void theWaitingToJoinReadCarriesTheJoinCodeAndNeverTheTicketOrTheKey() {
         when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
-            new EnrolmentRequest("4417", "a-32-byte-unguessable-ticket", "Ruten",
-                "aGVsbG8td29ybGQtdGhpcy1pcy1hLXdnLWtleS0xMjM0NQ=", System.currentTimeMillis() + 300_000,
-                null)));
+            EnrolmentRequest.builder().code("4417").ticket("a-32-byte-unguessable-ticket").name("Ruten")
+                .publicKey("aGVsbG8td29ybGQtdGhpcy1pcy1hLXdnLWtleS0xMjM0NQ=")
+                .expiresAtEpochMs(System.currentTimeMillis() + 300_000).build()));
 
         String waiting = read(ChatTool.WAITING_TO_JOIN);
 
@@ -302,8 +302,9 @@ class ChatReadsTest {
         marvinHasALoginOn("grafana.example.com");
         when(rememberUseCase.remember(any())).thenReturn(new Memory.Fact("ab12cd", "a fact", NOW));
         when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
-            new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
-                System.currentTimeMillis() + 300_000, "CONFIGFILE-SECRET")));
+            EnrolmentRequest.builder().code("4417").ticket("TICKET-SECRET").name("Ruten")
+                .publicKey("PUBLICKEY-SECRET").expiresAtEpochMs(System.currentTimeMillis() + 300_000)
+                .configFile("CONFIGFILE-SECRET").build()));
 
         String everything = ChatTool.whileNobodyIsWatching().stream()
             .map(this::read)
