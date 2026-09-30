@@ -98,7 +98,7 @@
 
         .stat.ok .n { color: var(--live); }
 
-        /* Install card — the Vaier app, offered on the phone that can actually take it (#359).
+        /* Install card — the Vaier app, offered on the device that can actually take it (#359, #370).
            Sits at the foot of the page, below the fleet. Same object family as a service tile: card ground, --radius-2, one shadow, no frame. The only
            thing that marks it out is the app's amber mark, so the amber is spent exactly once and the
            Install button stays the product's primary cyan. Nothing here moves. */
@@ -448,9 +448,9 @@
             }
         }
 
-        // The Vaier app, offered on the phone that can actually take it (#359). Two things have to be
-        // true before anything is painted: the visitor is on Android, and this deployment carries a
-        // package. A desktop, an iPhone, or an image built without the package gets silence — Vaier does
+        // The Vaier app, offered on the device that can actually take it (#359, #370). Two things have to
+        // be true before anything is painted: the visitor is on Android or Windows, and this deployment
+        // carries that app. A Mac, an iPhone, or an image built without the app gets silence — Vaier does
         // not offer what cannot be acted on. It sits at the foot of the page and is never dismissed: a
         // card that is in nobody's way needs no cross, and one that went away and never came back was
         // the first thing the operator tripped over.
@@ -459,10 +459,22 @@
             return platform ? platform === 'Android' : /Android/i.test(navigator.userAgent);
         }
 
+        function onWindows() {
+            const platform = navigator.userAgentData?.platform;
+            return platform ? platform === 'Windows' : /Windows/i.test(navigator.userAgent);
+        }
+
+        function appForThisDevice() {
+            if (onAndroid()) return { href: '/app/android/vaier.apk', line: 'Get on the VPN from this phone', verb: 'Install' };
+            if (onWindows()) return { href: '/app/windows/Vaier-windows.zip', line: 'Get on the VPN from this computer', verb: 'Download' };
+            return null;
+        }
+
         async function paintInstallCard() {
-            if (!onAndroid()) return;
+            const app = appForThisDevice();
+            if (!app) return;
             try {
-                const res = await fetch('/app/android/vaier.apk', { method: 'HEAD', cache: 'no-store' });
+                const res = await fetch(app.href, { method: 'HEAD', cache: 'no-store' });
                 if (!res.ok) return;
             } catch (_) { return; }
             const slot = document.getElementById('installCard');
@@ -472,9 +484,9 @@
                     <div class="install-mark">${ICON_APP}</div>
                     <div class="install-txt">
                         <div class="install-name">Vaier</div>
-                        <div class="install-sub">Get on the VPN from this phone</div>
+                        <div class="install-sub">${app.line}</div>
                     </div>
-                    <a class="btn btn-primary" href="/app/android/vaier.apk" download>Install</a>
+                    <a class="btn btn-primary" href="${app.href}" download>${app.verb}</a>
                 </div>`;
         }
 

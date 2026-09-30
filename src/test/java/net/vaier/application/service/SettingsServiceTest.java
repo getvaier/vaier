@@ -5,12 +5,14 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.config.WildcardDnsStatusHolder;
 import net.vaier.domain.AndroidApp;
 import net.vaier.domain.VaierConfig;
+import net.vaier.domain.WindowsApp;
 import net.vaier.domain.WildcardDnsReport;
 import net.vaier.domain.WildcardDnsStatus;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingAndroidApp;
 import net.vaier.domain.port.ForReadingAppVersion;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
+import net.vaier.domain.port.ForReadingWindowsApp;
 import net.vaier.domain.port.ForSendingTestEmail;
 import net.vaier.domain.port.ForVerifyingSmtpCredentials;
 import org.junit.jupiter.api.Test;
@@ -49,6 +51,7 @@ class SettingsServiceTest {
     @Mock WildcardDnsStatusHolder wildcardDnsStatusHolder;
     @Mock ForReadingAppVersion appVersionReader;
     @Mock ForReadingAndroidApp androidAppReader;
+    @Mock ForReadingWindowsApp windowsAppReader;
 
     /** A zone that is not the CI JVM's default (UTC), so a hardcoded-UTC answer can't pass by accident. */
     @Spy Clock clock = Clock.fixed(Instant.parse("2026-07-10T00:00:00Z"), ZoneId.of("Europe/Oslo"));
@@ -118,6 +121,16 @@ class SettingsServiceTest {
         assertThat(service.androidApp()).isEmpty();
 
         verify(androidAppReader).readApp(null);
+    }
+
+    @Test
+    void windowsApp_isServedStampedWithTheSameHostAsTheAndroidApp() {
+        WindowsApp app = WindowsApp.of(46_000_000L, out -> {
+        }).orElseThrow();
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(windowsAppReader.readApp("vaier.eilertsen.family")).thenReturn(Optional.of(app));
+
+        assertThat(service.windowsApp()).contains(app);
     }
 
     // --- getSettings ---

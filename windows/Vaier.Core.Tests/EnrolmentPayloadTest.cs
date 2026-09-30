@@ -57,6 +57,14 @@ public class EnrolmentPayloadTest
         Assert.Throws<EnrolmentException>(() => Parse(conf));
     }
 
+    [Fact]
+    public void A_saved_config_reads_back_everything_that_proves_this_computer()
+    {
+        var saved = SavedConfig.Read(Parse(Conf()).ConfigText);
+
+        Assert.Equal(new SavedConfig(OurPublicKey, "FpCyhws9cxwWoV4xELtfJvjJN+zQVRPISllRWgeopVE=", "10.13.13.7/32"), saved);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("!!not base64!!")]

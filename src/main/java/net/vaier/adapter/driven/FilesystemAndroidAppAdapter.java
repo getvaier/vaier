@@ -5,7 +5,6 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.AndroidApp;
@@ -35,12 +34,8 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class FilesystemAndroidAppAdapter implements ForReadingAndroidApp {
 
-    private static final String STAMPED_SUFFIX = ".stamped";
-
     private final String apkPath;
-
-    /** What the kept copy was cut from, so a rebuilt or re-stamped package is noticed. Guarded by this. */
-    private StampedPackage kept;
+    private final KeptStampedCopy stampedCopy = new KeptStampedCopy(FilesystemAndroidAppAdapter::stamp);
 
     public FilesystemAndroidAppAdapter(@Value("${vaier.android.apk:/app/apk/vaier.apk}") String apkPath) {
         this.apkPath = apkPath;
@@ -58,7 +53,7 @@ public class FilesystemAndroidAppAdapter implements ForReadingAndroidApp {
         try {
             Path toServe = servedHost == null || servedHost.isBlank()
                 ? source
-                : stampedCopyOf(source, servedHost);
+                : stampedCopy.servedCopyOf(source, servedHost);
             return AndroidApp.of(Files.size(toServe), out -> copy(toServe, out));
         } catch (IOException e) {
             log.debug("No Android app to serve from {}: {}", apkPath, e.getMessage());
@@ -66,40 +61,15 @@ public class FilesystemAndroidAppAdapter implements ForReadingAndroidApp {
         }
     }
 
-    /**
-     * The stamped package to serve — cut now if this source and host have not been stamped yet, and
-     * otherwise the copy already sitting beside the source. The source itself comes back when the stamp
-     * could not be cut, so an unstampable package is not re-read on every download either.
-     */
-    private synchronized Path stampedCopyOf(Path source, String servedHost) throws IOException {
-        StampedPackage current = new StampedPackage(Files.size(source),
-            Files.getLastModifiedTime(source).toMillis(), servedHost, null);
-        if (kept != null && kept.cutFrom(current) && Files.isRegularFile(kept.served())) {
-            return kept.served();
-        }
-        Path served = stamp(source, servedHost);
-        kept = current.servedFrom(served);
-        return served;
-    }
-
-    private Path stamp(Path source, String servedHost) throws IOException {
+    private static boolean stamp(Path source, Path target, String servedHost) throws IOException {
         Optional<byte[]> stamped = ApkStamp.stampedWith(Files.readAllBytes(source), servedHost);
         if (stamped.isEmpty()) {
             log.warn("The Vaier app at {} has no APK Signing Block, so it cannot carry {}; serving it as "
                 + "built — the app will have to be told this Vaier's address by hand", source, servedHost);
-            return source;
+            return false;
         }
-        Path target = source.resolveSibling(source.getFileName() + STAMPED_SUFFIX);
-        try {
-            Path scratch = Files.createTempFile(target.toAbsolutePath().getParent(), ".vaier-apk", ".tmp");
-            Files.write(scratch, stamped.get());
-            Files.move(scratch, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            log.info("Vaier app stamped with {} and kept at {}", servedHost, target);
-            return target;
-        } catch (IOException e) {
-            log.warn("Cannot keep a stamped Vaier app beside {} ({}); serving it as built", source, e.getMessage());
-            return source;
-        }
+        Files.write(target, stamped.get());
+        return true;
     }
 
     private void copy(Path apk, OutputStream out) {
@@ -107,20 +77,6 @@ public class FilesystemAndroidAppAdapter implements ForReadingAndroidApp {
             Files.copy(apk, out);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        }
-    }
-
-    /** The source a kept stamp was cut from, and where the result went. */
-    private record StampedPackage(long sourceSize, long sourceModified, String servedHost, Path served) {
-
-        boolean cutFrom(StampedPackage source) {
-            return sourceSize == source.sourceSize()
-                && sourceModified == source.sourceModified()
-                && servedHost.equals(source.servedHost());
-        }
-
-        StampedPackage servedFrom(Path path) {
-            return new StampedPackage(sourceSize, sourceModified, servedHost, path);
         }
     }
 }

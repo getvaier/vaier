@@ -58,6 +58,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetAndroidAppUseCase getAndroidAppUseCase;
 
+    @MockBean
+    protected GetWindowsAppUseCase getWindowsAppUseCase;
+
     // --- Social-login authorization use cases ---
     @MockBean
     protected VerifyAccessUseCase verifyAccessUseCase;

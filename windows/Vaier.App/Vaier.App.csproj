@@ -10,8 +10,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Vaier.App</RootNamespace>
     <AssemblyName>Vaier</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets\vaier.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -20,6 +21,11 @@
     <!-- WireGuard's interop predates nullable annotations; it is kept verbatim. -->
     <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8625</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+    <EmbeddedResource Include="Assets\vaier.ico" LogicalName="vaier.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Vaier.Core\Vaier.Core.csproj" />

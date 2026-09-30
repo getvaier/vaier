@@ -50,6 +50,46 @@ public class VaierClient
         }
     }
 
+    /// <summary>404 is a removal too: whatever this computer was, Vaier does not have it any more.</summary>
+    public async Task<LeaveOutcome> Leave(Membership membership)
+    {
+        using var response = await Prove(membership, "leave");
+        return response?.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.NotFound
+            ? LeaveOutcome.Removed
+            : LeaveOutcome.Unreachable;
+    }
+
+    /// <summary>
+    /// Whether this computer is still one of Vaier's devices. Must go over ordinary internet: a removed
+    /// computer's tunnel is a black hole, so an answer down it never comes.
+    /// </summary>
+    public async Task<Standing> AskStanding(Membership membership)
+    {
+        using var response = await Prove(membership, "standing");
+        return response?.StatusCode switch
+        {
+            HttpStatusCode.NoContent => Standing.Member,
+            HttpStatusCode.NotFound => Standing.Removed,
+            _ => Standing.Unreachable,
+        };
+    }
+
+    private static async Task<HttpResponseMessage?> Prove(Membership membership, string route)
+    {
+        var saved = membership.Saved;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            return await Http.PostAsync($"https://{membership.Address}/vpn/peers/{route}",
+                new StringContent(JoinProtocol.Proof(saved.PublicKey, saved.PresharedKey), Encoding.UTF8, "application/json"),
+                timeout.Token);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Holds this computer's own stream open until Vaier decides, the connection drops, or the caller cancels.</summary>
     public async Task<(Verdict Verdict, string Payload)> AwaitVerdict(string address, string ticket, CancellationToken cancel)
     {

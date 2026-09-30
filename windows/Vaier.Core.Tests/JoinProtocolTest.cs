@@ -17,6 +17,15 @@ public class JoinProtocolTest
             JoinProtocol.ReadJoinAnswer("""{"code":"4821","ticket":"t0k3n","expiresInSeconds":600}"""));
     }
 
+    [Fact]
+    public void Leaving_and_asking_about_standing_prove_who_is_asking_with_both_keys()
+    {
+        var sent = JsonDocument.Parse(JoinProtocol.Proof("pub=", "psk=")).RootElement;
+
+        Assert.Equal("pub=", sent.GetProperty("publicKey").GetString());
+        Assert.Equal("psk=", sent.GetProperty("presharedKey").GetString());
+    }
+
     [Theory]
     [InlineData("<html>")]
     [InlineData("""{"code":"4821"}""")]

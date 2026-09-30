@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetAndroidAppUseCase;
 import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppVersionUseCase;
+import net.vaier.application.GetWindowsAppUseCase;
 import net.vaier.application.SetSurvivalKitPassphraseUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAnthropicApiKeyUseCase;
@@ -16,10 +17,12 @@ import net.vaier.domain.AndroidApp;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.WildcardDnsReport;
+import net.vaier.domain.WindowsApp;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingAndroidApp;
 import net.vaier.domain.port.ForReadingAppVersion;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
+import net.vaier.domain.port.ForReadingWindowsApp;
 import net.vaier.domain.port.ForSendingTestEmail;
 import net.vaier.domain.port.ForVerifyingSmtpCredentials;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,7 @@ public class SettingsService implements
     GetAppSettingsUseCase,
     GetAppVersionUseCase,
     GetAndroidAppUseCase,
+    GetWindowsAppUseCase,
     UpdateSmtpSettingsUseCase,
     UpdateDiskMonitorSettingsUseCase,
     UpdateBackupSettingsUseCase,
@@ -48,6 +52,7 @@ public class SettingsService implements
     private final WildcardDnsStatusHolder wildcardDnsStatusHolder;
     private final ForReadingAppVersion appVersionReader;
     private final ForReadingAndroidApp androidAppReader;
+    private final ForReadingWindowsApp windowsAppReader;
     private final Clock clock;
 
     public SettingsService(ForPersistingAppConfiguration configPersistence,
@@ -58,6 +63,7 @@ public class SettingsService implements
                            WildcardDnsStatusHolder wildcardDnsStatusHolder,
                            ForReadingAppVersion appVersionReader,
                            ForReadingAndroidApp androidAppReader,
+                           ForReadingWindowsApp windowsAppReader,
                            Clock clock) {
         this.configPersistence = configPersistence;
         this.smtpVerifier = smtpVerifier;
@@ -67,6 +73,7 @@ public class SettingsService implements
         this.wildcardDnsStatusHolder = wildcardDnsStatusHolder;
         this.appVersionReader = appVersionReader;
         this.androidAppReader = androidAppReader;
+        this.windowsAppReader = windowsAppReader;
         this.clock = clock;
     }
 
@@ -85,9 +92,17 @@ public class SettingsService implements
      */
     @Override
     public Optional<AndroidApp> androidApp() {
-        return androidAppReader.readApp(new VaierHostnames(configResolver.getDomain())
-            .configuredVaierServerFqdn()
-            .orElse(null));
+        return androidAppReader.readApp(servedHost());
+    }
+
+    /** The Windows app's zip, stamped with the same host as the Android package (#370). */
+    @Override
+    public Optional<WindowsApp> windowsApp() {
+        return windowsAppReader.readApp(servedHost());
+    }
+
+    private String servedHost() {
+        return new VaierHostnames(configResolver.getDomain()).configuredVaierServerFqdn().orElse(null);
     }
 
     @Override

@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>It is handed out as an <b>install card</b>: an app is installed, not linked to, and a nav link
  * spelled "Android" asked the visitor to work out what it would do. The card is painted only where it
- * can be acted on — an Android phone, on a deployment that carries the package — so a desktop and an
- * iPhone see nothing rather than an offer they cannot take.
+ * can be acted on — an Android phone or a Windows computer, on a deployment that carries that app (#370)
+ * — so a Mac and an iPhone see nothing rather than an offer they cannot take.
  *
  * <p>There is no JS test harness in this project, so — as with {@code ExplorerShellTest} — the invariants
  * are asserted on the shipped page itself.
@@ -30,34 +30,43 @@ class LaunchpadPageTest {
         return page.substring(from, page.indexOf("\n        }", from));
     }
 
+    private static String appForThisDevice(String page) {
+        int from = page.indexOf("function appForThisDevice(");
+        assertThat(from).isPositive();
+        return page.substring(from, page.indexOf("\n        }", from));
+    }
+
     @Test
-    void theAndroidApp_isOfferedToEveryVisitorSignedInOrNot() throws IOException {
-        // A phone fetches the app before it can sign in, so gating this behind a session would be a
-        // locked door with the key behind it. Painted outside the signed-in / anonymous branch entirely.
+    void theVaierApp_isOfferedToEveryVisitorSignedInOrNot() throws IOException {
+        // A phone or a laptop fetches the app before it can sign in, so gating this behind a session would
+        // be a locked door with the key behind it. Painted outside the signed-in / anonymous branch entirely.
         String page = launchpad();
 
-        assertThat(page).contains("href=\"/app/android/vaier.apk\"");
+        assertThat(appForThisDevice(page)).contains("'/app/android/vaier.apk'", "'/app/windows/Vaier-windows.zip'");
+        assertThat(painter(page)).contains("href=\"${app.href}\"");
         assertThat(page).as("saved, not navigated to").contains("download");
         assertThat(page).contains("paintInstallCard();");
         assertThat(page).as("the nav no longer carries it").doesNotContain("paintAndroidLink");
     }
 
     @Test
-    void theCardIsPaintedOnlyOnAndroid() throws IOException {
-        // A desktop and an iPhone cannot install an APK. Offering one there is an offer that fails in the
+    void theCardIsPaintedOnlyOnAndroidOrWindows() throws IOException {
+        // A Mac and an iPhone can take neither app. Offering one there is an offer that fails in the
         // visitor's hands, which is exactly the kind of dead end Vaier catches before it paints anything.
         String page = launchpad();
-        String body = painter(page);
 
-        assertThat(body).contains("onAndroid()");
+        assertThat(painter(page)).contains("appForThisDevice()");
+        assertThat(appForThisDevice(page)).contains("onAndroid()", "onWindows()");
 
-        int from = page.indexOf("function onAndroid(");
-        assertThat(from).isPositive();
-        String android = page.substring(from, page.indexOf("\n        }", from));
-        assertThat(android).as("the modern hint first").contains("navigator.userAgentData?.platform");
-        assertThat(android).contains("'Android'");
-        assertThat(android).as("and the user-agent string when there is none")
-            .contains("/Android/i.test(navigator.userAgent)");
+        for (String os : new String[] { "Android", "Windows" }) {
+            int from = page.indexOf("function on" + os + "(");
+            assertThat(from).as(os).isPositive();
+            String detect = page.substring(from, page.indexOf("\n        }", from));
+            assertThat(detect).as("the modern hint first").contains("navigator.userAgentData?.platform");
+            assertThat(detect).contains("'" + os + "'");
+            assertThat(detect).as("and the user-agent string when there is none")
+                .contains("/" + os + "/i.test(navigator.userAgent)");
+        }
     }
 
     @Test
@@ -66,8 +75,7 @@ class LaunchpadPageTest {
         // and the card is simply absent rather than painted over a dead link.
         String body = painter(launchpad());
 
-        assertThat(body).contains("method: 'HEAD'");
-        assertThat(body).contains("/app/android/vaier.apk");
+        assertThat(body).contains("fetch(app.href, { method: 'HEAD'");
         assertThat(body).as("only a 200 paints it").contains("res.ok");
         assertThat(body).as("a failed probe is silence, never a broken card").contains("catch");
     }
@@ -80,8 +88,10 @@ class LaunchpadPageTest {
         String body = painter(page);
 
         assertThat(body).contains("class=\"install-name\">Vaier<");
-        assertThat(body).contains("Get on the VPN from this phone");
-        assertThat(body).containsPattern("class=\"btn btn-primary\"[^>]*download>Install<");
+        assertThat(appForThisDevice(page)).contains("Get on the VPN from this phone", "verb: 'Install'",
+            "Get on the VPN from this computer", "verb: 'Download'");
+        assertThat(body).contains("${app.line}");
+        assertThat(body).containsPattern("class=\"btn btn-primary\"[^>]*download>\\$\\{app.verb}<");
         assertThat(body).as("the app's own mark, not a generic phone glyph").contains("ICON_APP");
 
         // The favicon's geometry — hub and four spokes — in the app's amber, which is the one colour the

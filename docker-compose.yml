@@ -710,7 +710,7 @@ services:
       # by a single-use, ~15-min setup token validated inside Vaier (over HTTPS via websecure).
       # #359: /app/android/vaier.apk is the Vaier app itself — the same signed package for every visitor,
       # carrying no secret — and a phone must fetch it before it can sign in and enrol, so it is public.
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || Path(`/avatar.js`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/launchpad/events`) || Path(`/app/android/vaier.apk`) || Path(`/lan-servers/docker-setup.sh`) || PathRegexp(`^/vpn/peers/[^/]+/setup$`) || PathRegexp(`^/lan-servers/[^/]+/setup$`))
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || Path(`/avatar.js`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/launchpad/events`) || Path(`/app/android/vaier.apk`) || Path(`/app/windows/Vaier-windows.zip`) || Path(`/lan-servers/docker-setup.sh`) || PathRegexp(`^/vpn/peers/[^/]+/setup$`) || PathRegexp(`^/lan-servers/[^/]+/setup$`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200

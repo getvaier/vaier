@@ -1,213 +1,400 @@
+using System.Diagnostics;
 using Tunnel;
 using Vaier.Core;
 
 namespace Vaier.App;
 
-/// <summary>Three screens: ask to join, show the join code while waiting, and the tunnel once this computer is in.</summary>
+/// <summary>The Android app's three screens: ask to join, the join code while waiting, and the connection once in.</summary>
 public class MainForm : Form
 {
-    private readonly VaierClient _client = new();
-    private readonly Panel _setup = Screen();
-    private readonly Panel _waiting = Screen();
-    private readonly Panel _member = Screen();
-
-    private readonly TextBox _address = Field();
-    private readonly TextBox _deviceName = Field();
-    private readonly Button _join = Action("Ask to join");
-    private readonly Label _setupError = Note(Color.Firebrick);
-
-    private readonly Label _code = new() { AutoSize = true, Font = new Font("Segoe UI", 40, FontStyle.Bold) };
-    private readonly Label _countdown = Note(SystemColors.GrayText);
-    private readonly Button _cancel = Action("Cancel");
-    private CancellationTokenSource? _waitingCancel;
-    private DateTime _deadline;
-
-    private readonly Label _memberName = new() { AutoSize = true, Font = new Font("Segoe UI", 16, FontStyle.Bold) };
-    private readonly Label _memberAddress = Note(SystemColors.GrayText);
-    private readonly Label _status = Note(SystemColors.ControlText);
-    private readonly Button _toggle = Action("Connect");
+    private readonly VaierClient _vaier = new();
+    private readonly string? _stampedHost = DeviceStore.StampedHost();
     private readonly System.Windows.Forms.Timer _tick = new() { Interval = 1000 };
     private Membership? _membership;
+    private CancellationTokenSource? _waiting;
+    private string? _notice;
+    private Action? _onTick;
 
     public MainForm()
     {
         Text = "Vaier";
-        Font = new Font("Segoe UI", 10);
+        Icon = Theme.AppIcon();
+        BackColor = Theme.Panel;
+        ForeColor = Theme.Text;
+        Font = Theme.Ui(10.5f);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
-        ClientSize = new Size(420, 320);
+        ClientSize = new Size(420, 600);
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.White;
-
-        Stack(_setup, Heading("Join Vaier"), Note(SystemColors.GrayText, "This computer asks to join. You let it in from Vaier's fleet page."),
-            Note(SystemColors.ControlText, "Vaier address"), _address,
-            Note(SystemColors.ControlText, "Name this computer"), _deviceName, _join, _setupError);
-        Stack(_waiting, Note(SystemColors.ControlText, "Your join code"), _code,
-            Note(SystemColors.GrayText, "Approve it on Vaier's fleet page, under Waiting to join."), _countdown, _cancel);
-        Stack(_member, _memberName, _memberAddress, _status, _toggle);
-        Controls.AddRange([_setup, _waiting, _member]);
-
-        _deviceName.Text = Environment.MachineName;
-        _join.Click += async (_, _) => await Join();
-        _cancel.Click += (_, _) => _waitingCancel?.Cancel();
-        _toggle.Click += (_, _) => Toggle();
-        _tick.Tick += (_, _) => UpdateStatus();
-        AcceptButton = _join;
+        _tick.Tick += (_, _) => _onTick?.Invoke();
+        _tick.Start();
 
         _membership = DeviceStore.Load();
-        Show(_membership is null ? _setup : _member);
-        _tick.Start();
+        _notice = DeviceStore.TakeNotice();
+        if (_membership is null)
+        {
+            ShowSetup();
+            return;
+        }
+        Attempt(ManagerService.Ensure);
+        ShowHome();
+        _ = CheckStandingOnOpening(_membership);
     }
 
-    private async Task Join()
+    protected override void OnHandleCreated(EventArgs e)
     {
-        _setupError.Text = "";
-        var address = VaierAddress.Normalise(_address.Text);
-        if (address is null)
-        {
-            _setupError.Text = "That does not look like an address. Try vaier.example.com.";
-            return;
-        }
-        var name = _deviceName.Text.Trim();
-        if (name.Length == 0)
-        {
-            _setupError.Text = "Give this computer a name.";
-            return;
-        }
-
-        _join.Enabled = false;
-        var keypair = Keypair.Generate();
-        var outcome = await _client.AskToJoin(address, name, keypair.Public);
-        _join.Enabled = true;
-        if (outcome is JoinOutcome.Turned turned)
-        {
-            _setupError.Text = turned.Reason;
-            return;
-        }
-
-        var answer = ((JoinOutcome.Waiting)outcome).Answer;
-        _code.Text = answer.Code;
-        _deadline = DateTime.UtcNow.AddSeconds(answer.ExpiresInSeconds);
-        Show(_waiting);
-        _setupError.Text = await AwaitApproval(address, answer.Ticket, keypair);
-        if (_membership is null) Show(_setup);
+        base.OnHandleCreated(e);
+        Theme.DarkTitleBar(this);
     }
 
-    /// <summary>Waits for the operator's decision, reconnecting when the stream drops. Returns why it ended, if not in.</summary>
-    private async Task<string> AwaitApproval(string address, string ticket, Keypair keypair)
+    private void Screen(Control content)
     {
-        using var cancel = _waitingCancel = new CancellationTokenSource();
+        _onTick = null;
+        SuspendLayout();
+        Controls.Clear();
+        Controls.Add(content);
+        ResumeLayout();
+    }
+
+    // --- Ask to join ---
+
+    private void ShowSetup()
+    {
+        var stack = Theme.Stack();
+        stack.Controls.Add(Theme.Label("Join Vaier", Theme.Ui(18, FontStyle.Bold), Theme.Text));
+        stack.Controls.Add(Theme.Label("This computer asks to join. Whoever runs Vaier says yes, and you are in.", Theme.Ui(11), Theme.Text));
+
+        // A download served by Vaier carries its server's name, so there is nothing to type.
+        var (addressField, address) = Theme.Field("Vaier address", "vaier.example.com");
+        if (_stampedHost is null) stack.Controls.Add(addressField);
+        var (nameField, name) = Theme.Field("Name this computer", "");
+        name.Text = Environment.MachineName;
+        stack.Controls.Add(nameField);
+
+        var join = Theme.Primary("Ask to join");
+        var notice = Theme.Label(_notice ?? "", Theme.Ui(10), Theme.Error);
+        stack.Controls.Add(join);
+        stack.Controls.Add(notice);
+        AcceptButton = join;
+
+        join.Click += async (_, _) =>
+        {
+            var host = _stampedHost ?? VaierAddress.Normalise(address.Text);
+            if (host is null)
+            {
+                notice.Text = "That does not look like an address. Try vaier.example.com.";
+                return;
+            }
+            if (name.Text.Trim().Length == 0)
+            {
+                notice.Text = "Give this computer a name.";
+                return;
+            }
+            join.Enabled = false;
+            join.Text = "Asking…";
+            var keypair = Keypair.Generate();
+            var outcome = await _vaier.AskToJoin(host, name.Text.Trim(), keypair.Public);
+            if (outcome is JoinOutcome.Waiting waiting)
+            {
+                _notice = null;
+                ShowWaiting(host, waiting.Answer, keypair);
+                return;
+            }
+            notice.Text = ((JoinOutcome.Turned)outcome).Reason;
+            join.Enabled = true;
+            join.Text = "Ask to join";
+        };
+        Screen(stack);
+    }
+
+    // --- Waiting on the join code ---
+
+    /// <summary>The code is the whole screen: someone reading it out across a room should never hunt for it.</summary>
+    private void ShowWaiting(string host, JoinAnswer answer, Keypair keypair)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(answer.ExpiresInSeconds);
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, Padding = new Padding(28, 24, 28, 24), BackColor = Theme.Panel };
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        for (var i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        for (var i = 0; i < 3; i++) grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        Label Centred(string text, Font font, Color colour) =>
+            new() { Text = text, Font = font, ForeColor = colour, AutoSize = true, Anchor = AnchorStyles.None, TextAlign = ContentAlignment.MiddleCenter, MaximumSize = new Size(360, 0), Margin = new Padding(0, 6, 0, 6) };
+
+        var code = Centred(string.Join(" ", answer.Code.ToCharArray()), Theme.Mono(44, FontStyle.Bold), Theme.Amber);
+        var countdown = Centred("", Theme.Ui(9.5f), Theme.TextDim);
+        var notice = Centred("", Theme.Ui(10), Theme.Error);
+        var approveHere = Theme.Primary("I run Vaier — approve it here");
+        var cancel = Theme.Quiet("Cancel");
+
+        grid.Controls.Add(new Panel { Height = 1 }, 0, 0);
+        grid.Controls.Add(code, 0, 1);
+        grid.Controls.Add(Centred("Read this code out to whoever runs Vaier.", Theme.Ui(11.5f), Theme.Text), 0, 2);
+        grid.Controls.Add(Centred("The moment they say yes, this computer is in. Leave this window open.", Theme.Ui(10), Theme.TextDim), 0, 3);
+        grid.Controls.Add(countdown, 0, 4);
+        grid.Controls.Add(notice, 0, 6);
+        grid.Controls.Add(approveHere, 0, 7);
+        grid.Controls.Add(cancel, 0, 8);
+        Screen(grid);
+
+        _onTick = () =>
+        {
+            var left = deadline - DateTime.UtcNow;
+            countdown.Text = left > TimeSpan.Zero ? $"{left:m\\:ss} left" : "";
+        };
+        approveHere.Click += (_, _) => Open($"https://{host}/explorer.html?approve={answer.Code}");
+        cancel.Click += (_, _) => _waiting?.Cancel();
+
+        _ = Wait(host, answer.Ticket, keypair, deadline);
+    }
+
+    private async Task Wait(string host, string ticket, Keypair keypair, DateTime deadline)
+    {
+        using var cancel = _waiting = new CancellationTokenSource();
         try
         {
-            while (DateTime.UtcNow < _deadline)
+            while (DateTime.UtcNow < deadline)
             {
-                var (verdict, payload) = await _client.AwaitVerdict(address, ticket, cancel.Token);
+                var (verdict, payload) = await _vaier.AwaitVerdict(host, ticket, cancel.Token);
                 switch (verdict)
                 {
                     case Verdict.Approved:
                         var enrolment = EnrolmentPayload.Parse(payload, keypair.Public, keypair.Private);
-                        _membership = DeviceStore.Save(address, enrolment.PeerName, enrolment.ConfigText);
-                        TunnelService.Add(_membership.ConfigFile);
-                        Show(_member);
-                        return "";
+                        _membership = DeviceStore.Save(host, enrolment.PeerName, enrolment.ConfigText);
+                        TunnelService.Up(_membership.ConfigFile);
+                        Attempt(ManagerService.Ensure);
+                        ShowHome();
+                        return;
                     case Verdict.Refused:
-                        return "Vaier turned this computer away.";
+                        _notice = "Vaier turned this computer away.";
+                        ShowSetup();
+                        return;
                     case Verdict.Gone:
-                        return "That join code ran out. Ask again.";
+                        _notice = "That join code ran out. Ask again.";
+                        ShowSetup();
+                        return;
                     case Verdict.Lost:
                         await Task.Delay(TimeSpan.FromSeconds(3), cancel.Token);
                         break;
                 }
             }
-            return "That join code ran out. Ask again.";
+            _notice = "That join code ran out. Ask again.";
         }
         catch (OperationCanceledException)
         {
-            return "";
+            _notice = null;
         }
         catch (EnrolmentException e)
         {
-            return e.Message;
+            _notice = e.Message;
         }
         catch (Exception e)
         {
-            return $"This computer was let in, but its tunnel would not start: {e.Message}";
+            _notice = $"This computer was let in, but its tunnel would not start: {e.Message}";
         }
         finally
         {
-            _waitingCancel = null;
+            _waiting = null;
         }
+        if (_membership is null) ShowSetup();
     }
 
-    private void Toggle()
+    // --- In the fleet ---
+
+    private void ShowHome()
     {
-        if (_membership is null) return;
-        _toggle.Enabled = false;
+        var membership = _membership!;
+        var stack = Theme.Stack();
+
+        var top = new TableLayoutPanel { ColumnCount = 2, Size = new Size(360, 36), Margin = new Padding(0, 0, 0, 12) };
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var name = Theme.Label(membership.Name, Theme.Ui(12), Theme.TextDim);
+        name.Anchor = AnchorStyles.Left;
+        var more = new Button { Text = "⋯", FlatStyle = FlatStyle.Flat, ForeColor = Theme.Text, BackColor = Theme.Panel, Size = new Size(36, 32), Font = Theme.Ui(12), Cursor = Cursors.Hand };
+        more.FlatAppearance.BorderSize = 0;
+        var menu = new ContextMenuStrip { Renderer = new ToolStripProfessionalRenderer(new Theme.MenuColours()), ShowImageMargin = false, Font = Theme.Ui(10.5f) };
+        menu.Items.Add(new ToolStripMenuItem("Leave Vaier", null, (_, _) => ConfirmLeave()) { ForeColor = Theme.Text });
+        more.Click += (_, _) => menu.Show(more, new Point(more.Width - menu.Width, more.Height));
+        top.Controls.Add(name, 0, 0);
+        top.Controls.Add(more, 1, 0);
+        stack.Controls.Add(top);
+
+        var card = new Theme.RoundedCard { Size = new Size(360, 112), Margin = new Padding(0, 0, 0, 16) };
+        var state = new Label { Font = Theme.Ui(16), ForeColor = Theme.Text, BackColor = Theme.Card, AutoSize = true, Location = new Point(20, 22) };
+        var meaning = new Label { Font = Theme.Ui(10), ForeColor = Theme.TextDim, BackColor = Theme.Card, AutoSize = true, MaximumSize = new Size(250, 0), Location = new Point(20, 56) };
+        var connected = new Theme.Switch { Location = new Point(360 - 20 - 52, 40) };
+        card.Controls.AddRange([state, meaning, connected]);
+        stack.Controls.Add(card);
+
+        var notice = Theme.Label(_notice ?? "", Theme.Ui(10), Theme.Error);
+        stack.Controls.Add(notice);
+
+        var details = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Visible = false, Margin = new Padding(0) };
+        var fold = new Button { Text = "Details  ▾", FlatStyle = FlatStyle.Flat, ForeColor = Theme.Amber, BackColor = Theme.Panel, AutoSize = true, Font = Theme.Ui(10, FontStyle.Bold), Cursor = Cursors.Hand, Margin = new Padding(0, 8, 0, 8) };
+        fold.FlatAppearance.BorderSize = 0;
+        fold.Click += (_, _) =>
+        {
+            details.Visible = !details.Visible;
+            fold.Text = details.Visible ? "Details  ▴" : "Details  ▾";
+        };
+        stack.Controls.Add(fold);
+        Label Field(string label)
+        {
+            details.Controls.Add(Theme.Label(label, Theme.Ui(9), Theme.TextDim).With(l => l.Margin = new Padding(0, 0, 0, 2)));
+            var value = Theme.Label("—", Theme.Mono(10.5f), Theme.Text);
+            details.Controls.Add(value);
+            return value;
+        }
+        Field("Vaier address").Text = membership.Address;
+        Field("This computer's address").Text = Attempt(() => membership.Saved.TunnelAddress) ?? "—";
+        var handshake = Field("Last handshake");
+        var received = Field("Received");
+        var sent = Field("Sent");
+        stack.Controls.Add(details);
+        Screen(stack);
+
+        var busy = false;
+        connected.Click += (_, _) =>
+        {
+            if (busy) return;
+            busy = true;
+            connected.Enabled = false;
+            var turnOn = connected.Checked;
+            notice.Text = "";
+            Task.Run(() => Attempt(() => { if (turnOn) TunnelService.Up(membership.ConfigFile); else TunnelService.Down(membership.ConfigFile); }))
+                .ContinueWith(_ => BeginInvoke(() => { busy = false; connected.Enabled = true; }));
+        };
+
+        _onTick = () =>
+        {
+            if (!busy) connected.Checked = Attempt(() => TunnelService.IsUp(membership.ConfigFile));
+            state.Text = connected.Checked ? "Connected" : "Not connected";
+            meaning.Text = connected.Checked ? "Everything this computer does online goes through Vaier." : "Turn it on to use Vaier.";
+            var peer = connected.Checked ? TunnelService.Peer(membership.ConfigFile) : null;
+            handshake.Text = Since(peer?.LastHandshake);
+            received.Text = peer is null ? "—" : Bytes(peer.RxBytes);
+            sent.Text = peer is null ? "—" : Bytes(peer.TxBytes);
+        };
+        _onTick();
+    }
+
+    private void ConfirmLeave()
+    {
+        using var ask = new LeaveDialog();
+        if (ask.ShowDialog(this) == DialogResult.OK) _ = LeaveVaier();
+    }
+
+    /// <summary>The tunnel goes down before the request: Vaier removes the peer before it answers.</summary>
+    private async Task LeaveVaier()
+    {
+        var membership = _membership!;
+        var wasConnected = Attempt(() => TunnelService.IsUp(membership.ConfigFile));
+        await Task.Run(() => Attempt(() => TunnelService.Down(membership.ConfigFile)));
+        var steps = Leaving.After(await _vaier.Leave(membership), wasConnected);
+        if (steps.Reconnect) await Task.Run(() => Attempt(() => TunnelService.Up(membership.ConfigFile)));
+        _notice = steps.Notice;
+        if (steps.Forget)
+        {
+            DeviceStore.Forget();
+            _membership = null;
+            ShowSetup();
+            return;
+        }
+        ShowHome();
+    }
+
+    /// <summary>Opened with the tunnel off, nothing is watching — so ask once, over ordinary internet.</summary>
+    private async Task CheckStandingOnOpening(Membership membership)
+    {
+        if (Attempt(() => TunnelService.IsUp(membership.ConfigFile))) return;
+        var steps = StandingWatch.AfterOpening(await _vaier.AskStanding(membership));
+        if (!steps.Forget || _membership != membership) return;
+        DeviceStore.Forget();
+        _membership = null;
+        _notice = steps.Notice;
+        ShowSetup();
+    }
+
+    private static void Open(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+
+    private static void Attempt(Action act) => Attempt(() => { act(); return true; });
+
+    private static T? Attempt<T>(Func<T> read)
+    {
         try
         {
-            if (TunnelService.IsRunning(_membership.ConfigFile)) TunnelService.Remove(_membership.ConfigFile);
-            else TunnelService.Add(_membership.ConfigFile);
+            return read();
         }
-        catch (Exception e)
+        catch (Exception)
         {
-            MessageBox.Show(this, e.Message, "Vaier", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-        _toggle.Enabled = true;
-        UpdateStatus();
-    }
-
-    private void UpdateStatus()
-    {
-        if (_waiting.Visible)
-        {
-            var left = _deadline - DateTime.UtcNow;
-            _countdown.Text = left > TimeSpan.Zero ? $"Waiting · {left:m\\:ss} left" : "";
-        }
-        if (_member.Visible && _membership is not null)
-        {
-            var running = TunnelService.IsRunning(_membership.ConfigFile);
-            _toggle.Text = running ? "Disconnect" : "Connect";
-            _status.Text = running ? $"Connected{Handshake()}" : "Disconnected";
+            return default;
         }
     }
 
-    private string Handshake()
+    private static string Since(DateTime? at)
     {
-        try
+        if (at is not { } when || when == default) return "never";
+        var seconds = (long)(DateTime.UtcNow - when).TotalSeconds;
+        return seconds switch
         {
-            var peer = new Driver.Adapter(Path.GetFileNameWithoutExtension(_membership!.ConfigFile)).GetConfiguration().Peers.FirstOrDefault();
-            if (peer is null || peer.LastHandshake == default) return " · waiting for a handshake";
-            var ago = DateTime.UtcNow - peer.LastHandshake;
-            return $" · last handshake {(int)ago.TotalSeconds} s ago";
-        }
-        catch
-        {
-            return "";
-        }
+            < 60 => $"{seconds} s ago",
+            < 3600 => $"{seconds / 60} min ago",
+            _ => $"{seconds / 3600} h ago",
+        };
     }
 
-    private void Show(Panel screen)
+    private static string Bytes(ulong count) => count switch
     {
-        foreach (var panel in new[] { _setup, _waiting, _member }) panel.Visible = panel == screen;
-        if (screen == _member && _membership is not null)
-        {
-            _memberName.Text = _membership.Name;
-            _memberAddress.Text = $"In {_membership.Address}'s fleet";
-        }
-        UpdateStatus();
+        < 1024 => $"{count} B",
+        < 1024 * 1024 => $"{count / 1024.0:0.0} kB",
+        < 1024UL * 1024 * 1024 => $"{count / (1024.0 * 1024):0.0} MB",
+        _ => $"{count / (1024.0 * 1024 * 1024):0.00} GB",
+    };
+}
+
+/// <summary>"Leave Vaier?" in the app's own colours rather than a grey system box.</summary>
+public class LeaveDialog : Form
+{
+    public LeaveDialog()
+    {
+        Text = "Leave Vaier?";
+        Icon = Theme.AppIcon();
+        BackColor = Theme.Panel;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = MinimizeBox = false;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(380, 190);
+
+        var stack = Theme.Stack();
+        stack.Padding = new Padding(24, 20, 24, 16);
+        stack.Controls.Add(Theme.Label("Leave Vaier?", Theme.Ui(14, FontStyle.Bold), Theme.Text));
+        stack.Controls.Add(Theme.Label("This computer will be removed from Vaier. To come back you'll need to join again and be approved.", Theme.Ui(10), Theme.TextDim).With(l => l.MaximumSize = new Size(330, 0)));
+        var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, Size = new Size(330, 44), Margin = new Padding(0) };
+        var leave = new Button { Text = "Leave", DialogResult = DialogResult.OK, FlatStyle = FlatStyle.Flat, ForeColor = Theme.Amber, BackColor = Theme.Panel, Size = new Size(90, 36), Font = Theme.Ui(10.5f, FontStyle.Bold) };
+        var stay = new Button { Text = "Stay", DialogResult = DialogResult.Cancel, FlatStyle = FlatStyle.Flat, ForeColor = Theme.Amber, BackColor = Theme.Panel, Size = new Size(90, 36), Font = Theme.Ui(10.5f) };
+        leave.FlatAppearance.BorderSize = stay.FlatAppearance.BorderSize = 0;
+        buttons.Controls.AddRange([leave, stay]);
+        stack.Controls.Add(buttons);
+        Controls.Add(stack);
+        AcceptButton = stay;
+        CancelButton = stay;
     }
 
-
-    private static Panel Screen() => new() { Dock = DockStyle.Fill, Padding = new Padding(24), Visible = false };
-    private static TextBox Field() => new() { Width = 360 };
-    private static Button Action(string text) => new() { Text = text, AutoSize = true, Padding = new Padding(8, 2, 8, 2), Margin = new Padding(0, 12, 0, 0) };
-    private static Label Heading(string text) => new() { Text = text, AutoSize = true, Font = new Font("Segoe UI", 16, FontStyle.Bold) };
-    private static Label Note(Color colour, string text = "") => new() { Text = text, AutoSize = true, MaximumSize = new Size(360, 0), ForeColor = colour, Margin = new Padding(0, 6, 0, 0) };
-
-    private static void Stack(Panel screen, params Control[] controls)
+    protected override void OnHandleCreated(EventArgs e)
     {
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        flow.Controls.AddRange(controls);
-        screen.Controls.Add(flow);
+        base.OnHandleCreated(e);
+        Theme.DarkTitleBar(this);
+    }
+}
+
+internal static class ControlExtensions
+{
+    public static T With<T>(this T control, Action<T> change) where T : Control
+    {
+        change(control);
+        return control;
     }
 }
