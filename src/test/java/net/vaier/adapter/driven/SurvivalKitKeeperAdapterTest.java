@@ -55,6 +55,11 @@ class SurvivalKitKeeperAdapterTest {
         public CommandResult run(SshTarget target, String command, Duration timeout) {
             return run(target, command);
         }
+
+        @Override
+        public CommandResult run(SshTarget target, String command, Duration timeout, String stdin) {
+            return run(target, command);
+        }
     };
 
     private SurvivalKitKeeperAdapter adapter() {

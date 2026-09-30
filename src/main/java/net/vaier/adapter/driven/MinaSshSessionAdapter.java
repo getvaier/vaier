@@ -72,6 +72,11 @@ public class MinaSshSessionAdapter implements ForOpeningSshSessions, ForRunningS
 
     @Override
     public CommandResult run(SshTarget target, String command, Duration timeout) {
+        return run(target, command, timeout, null);
+    }
+
+    @Override
+    public CommandResult run(SshTarget target, String command, Duration timeout, String stdin) {
         Connection conn = SshConnector.establish(target);
         ChannelExec channel = null;
         try {
@@ -81,6 +86,13 @@ public class MinaSshSessionAdapter implements ForOpeningSshSessions, ForRunningS
             channel.setOut(out);
             channel.setErr(err);
             channel.open().verify(CHANNEL_TIMEOUT);
+            if (stdin != null) {
+                // Closing the input sends EOF, so a command reading to the end is not left waiting.
+                try (OutputStream toRemote = channel.getInvertedIn()) {
+                    toRemote.write((stdin + "\n").getBytes(StandardCharsets.UTF_8));
+                    toRemote.flush();
+                }
+            }
             // Bounded wait: if CLOSED never arrives within the deadline the command is abandoned,
             // so a hung command can neither block Vaier nor leak the connection.
             Set<ClientChannelEvent> events = channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), timeout);

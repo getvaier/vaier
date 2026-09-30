@@ -114,6 +114,17 @@ class ForRunningSshCommandsAdapterTest {
         assertThat(elapsed).isLessThan(4000);
     }
 
+    /** cat only ends on EOF, so this also proves the input is closed after the line. */
+    @Test
+    void run_withStdin_feedsItAsOneLine_thenClosesTheInput() throws Exception {
+        int port = startServer();
+
+        CommandResult result = adapter.run(target(port, null), "cat", Duration.ofSeconds(20), "pw");
+
+        assertThat(result.timedOut()).isFalse();
+        assertThat(result.stdout()).isEqualTo("pw\n");
+    }
+
     @Test
     void run_cappedOutput_doesNotExceedCap() throws Exception {
         int port = startServer();

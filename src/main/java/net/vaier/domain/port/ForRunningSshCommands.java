@@ -35,4 +35,10 @@ public interface ForRunningSshCommands {
      * other caller paying for it in a raised global default.
      */
     CommandResult run(SshTarget target, String command, Duration timeout);
+
+    /**
+     * As {@link #run(SshTarget, String, Duration)}, with {@code stdin} written to the command as one line and
+     * the input then closed. The way to hand a command a secret: a command line shows in {@code ps} and logs.
+     */
+    CommandResult run(SshTarget target, String command, Duration timeout, String stdin);
 }

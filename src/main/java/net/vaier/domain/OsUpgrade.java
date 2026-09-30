@@ -14,15 +14,19 @@ import java.util.regex.Pattern;
  * SSH, as root. Everything the act decides lives here — whether Vaier may do it at all, the command for apt
  * or dnf, how long it may take, and how the result reads.
  *
- * <p>Root comes from logging in as root, or from passwordless {@code sudo}; Vaier never types a password.
- * The borg grant that {@link BorgClientSetupScript} installs covers borg alone, so it does not count.
+ * <p>Root comes from logging in as root, from passwordless {@code sudo}, or — for a password login — from
+ * {@code sudo} taking that login password on stdin, never on a command line. The borg grant that
+ * {@link BorgClientSetupScript} installs covers borg alone, so it does not count.
  *
- * <p>A plain {@code upgrade}, never {@code dist-upgrade}, {@code full-upgrade} or {@code autoremove}: nothing
- * is removed, and a config file the operator changed is kept. Vaier never reboots; it says when one is due.
+ * <p>A plain {@code upgrade} that may install new packages (a new kernel), never {@code dist-upgrade},
+ * {@code full-upgrade} or {@code autoremove}: nothing is removed, and a config file the operator changed is kept. Vaier never reboots; it says when one is due.
  */
-public record OsUpgrade(MachineId machineId, String machineName, PackageManager packageManager, boolean viaSudo) {
+public record OsUpgrade(MachineId machineId, String machineName, PackageManager packageManager, Root root) {
 
     public enum PackageManager { APT, DNF }
+
+    /** How Vaier becomes root there. The password itself is never held here; it is the target's login secret. */
+    public enum Root { LOGIN, PASSWORDLESS_SUDO, PASSWORD_SUDO }
 
     /** Minutes, not the exec default's seconds: a first upgrade in months downloads a lot over a home line. */
     public static final Duration UPGRADE_TIMEOUT = Duration.ofMinutes(30);
@@ -33,8 +37,12 @@ public record OsUpgrade(MachineId machineId, String machineName, PackageManager 
         + "command -v apt-get >/dev/null 2>&1 && echo pm=apt; "
         + "command -v dnf >/dev/null 2>&1 && echo pm=dnf; true";
 
+    /** Whether sudo takes the login password, fed on stdin; {@code -p ''} keeps the prompt out of the output. */
+    public static final String PASSWORD_SUDO_PROBE = "sudo -S -p '' true";
+    public static final Duration PASSWORD_SUDO_PROBE_TIMEOUT = Duration.ofSeconds(20);
+
     private static final String APT_UPGRADE = "export DEBIAN_FRONTEND=noninteractive && apt-get update"
-        + " && apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade";
+        + " && apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade --with-new-pkgs";
     private static final String DNF_UPGRADE = "dnf -y upgrade";
     private static final String REBOOT_REQUIRED = "REBOOT_REQUIRED";
 
@@ -69,19 +77,41 @@ public record OsUpgrade(MachineId machineId, String machineName, PackageManager 
             throw new ConflictException(machineName + " has neither apt nor dnf, the only package managers "
                 + "Vaier installs OS updates with.");
         }
-        boolean root = user.group(2).equals("0");
-        if (!root && !out.contains("sudo=yes")) {
-            String login = user.group(1);
+        return new OsUpgrade(machineId, machineName, packageManager, root(user, out, machineName, target, ssh));
+    }
+
+    private static Root root(Matcher user, String probed, String machineName, SshTarget target,
+                             ForRunningSshCommands ssh) {
+        if (user.group(2).equals("0")) {
+            return Root.LOGIN;
+        }
+        if (probed.contains("sudo=yes")) {
+            return Root.PASSWORDLESS_SUDO;
+        }
+        String login = user.group(1);
+        boolean hasPassword = target.authMethod() == AuthMethod.PASSWORD
+            && target.secret() != null && !target.secret().isEmpty();
+        if (!hasPassword) {
             throw new ConflictException("Vaier logs in to " + machineName + " as " + login + ", who cannot use "
                 + "sudo without a password, so it cannot install OS updates there. Log Vaier in as root, or give "
                 + login + " passwordless sudo.");
         }
-        return new OsUpgrade(machineId, machineName, packageManager, !root);
+        CommandResult sudo = ssh.run(target, PASSWORD_SUDO_PROBE, PASSWORD_SUDO_PROBE_TIMEOUT, target.secret());
+        if (sudo.timedOut() || sudo.exitCode() != 0) {
+            throw new ConflictException("Vaier logs in to " + machineName + " as " + login + ", who cannot use "
+                + "sudo with or without the login password, so it cannot install OS updates there. Log Vaier in "
+                + "as root, or give " + login + " sudo.");
+        }
+        return Root.PASSWORD_SUDO;
     }
 
     public String upgradeCommand() {
         String line = packageManager == PackageManager.APT ? APT_UPGRADE : DNF_UPGRADE;
-        return viaSudo ? "sudo -n sh -c '" + line + "'" : line;
+        return switch (root) {
+            case LOGIN -> line;
+            case PASSWORDLESS_SUDO -> "sudo -n sh -c '" + line + "'";
+            case PASSWORD_SUDO -> "sudo -S -p '' sh -c '" + line + "'";
+        };
     }
 
     /** Prints {@code REBOOT_REQUIRED} when the machine wants one. Needs no root. */
@@ -95,7 +125,9 @@ public record OsUpgrade(MachineId machineId, String machineName, PackageManager 
     /** Carry it out and rule how it ended — always; a throwing port reads as unreachable. */
     public Settlement carryOut(SshTarget target, ForRunningSshCommands ssh) {
         try {
-            CommandResult upgrade = ssh.run(target, upgradeCommand(), UPGRADE_TIMEOUT);
+            CommandResult upgrade = root == Root.PASSWORD_SUDO
+                ? ssh.run(target, upgradeCommand(), UPGRADE_TIMEOUT, target.secret())
+                : ssh.run(target, upgradeCommand(), UPGRADE_TIMEOUT);
             if (upgrade.timedOut()) {
                 return new Settlement(false, "Installing OS updates on " + machineName + " took over "
                     + UPGRADE_TIMEOUT.toMinutes() + " minutes, so Vaier stopped waiting. It may still be running "

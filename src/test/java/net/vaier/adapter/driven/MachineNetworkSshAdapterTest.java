@@ -53,6 +53,11 @@ class MachineNetworkSshAdapterTest {
         public CommandResult run(SshTarget target, String command, Duration timeout) {
             return run(target, command);
         }
+
+        @Override
+        public CommandResult run(SshTarget target, String command, Duration timeout, String stdin) {
+            return run(target, command);
+        }
     };
 
     private final Map<MachineId, String> pinned = new ConcurrentHashMap<>();

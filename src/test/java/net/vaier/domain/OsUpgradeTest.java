@@ -38,40 +38,69 @@ class OsUpgradeTest {
         return new CommandResult(0, stdout, "", false, "SHA256:pinned");
     }
 
+    private static final SshTarget KEY_TARGET =
+        new SshTarget("10.13.13.3", 22, "geir", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", null, null, MACHINE);
+
     private OsUpgrade probed(String probeOutput) {
-        reset(ssh);
-        when(ssh.run(TARGET, OsUpgrade.PROBE_COMMAND)).thenReturn(said(probeOutput));
-        return OsUpgrade.of(MACHINE, "Colina 27", TARGET, ssh, hostKeys);
+        return probed(probeOutput, TARGET, 1);
     }
 
-    /** Root comes from logging in as uid 0, or from passwordless sudo; anything else is refused by name. */
+    /** {@code passwordSudoExit}: how {@code sudo -S} answers the login password on stdin. */
+    private OsUpgrade probed(String probeOutput, SshTarget target, int passwordSudoExit) {
+        reset(ssh);
+        when(ssh.run(target, OsUpgrade.PROBE_COMMAND)).thenReturn(said(probeOutput));
+        when(ssh.run(target, OsUpgrade.PASSWORD_SUDO_PROBE, OsUpgrade.PASSWORD_SUDO_PROBE_TIMEOUT, "secret"))
+            .thenReturn(new CommandResult(passwordSudoExit, "", "", false, "SHA256:pinned"));
+        return OsUpgrade.of(MACHINE, "Colina 27", target, ssh, hostKeys);
+    }
+
+    /**
+     * Root comes from logging in as uid 0, from passwordless sudo, or — for a password login — from sudo taking
+     * that login password on stdin, never on a command line. Anything else is refused by name.
+     */
     @Test
     void itUpgradesOnlyWhereVaierCanGetRoot_andSaysWhyNotWhereItCannot() {
         OsUpgrade asRoot = probed("user=root uid=0\npm=apt\n");
         assertThat(asRoot.upgradeCommand()).isEqualTo("export DEBIAN_FRONTEND=noninteractive && apt-get update"
-            + " && apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade");
+            + " && apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade --with-new-pkgs");
         assertThat(asRoot.rebootRequiredCommand())
             .isEqualTo("test -f /var/run/reboot-required && echo REBOOT_REQUIRED; true");
 
         assertThat(probed("user=geir uid=1000\nsudo=yes\npm=apt\npm=dnf\n").upgradeCommand())
             .as("apt wins where both are present, and sudo wraps the whole line")
             .isEqualTo("sudo -n sh -c 'export DEBIAN_FRONTEND=noninteractive && apt-get update"
-                + " && apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade'");
+                + " && apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade --with-new-pkgs'");
         OsUpgrade fedora = probed("user=geir uid=1000\nsudo=yes\npm=dnf\n");
         assertThat(fedora.upgradeCommand()).isEqualTo("sudo -n sh -c 'dnf -y upgrade'");
         assertThat(fedora.rebootRequiredCommand()).contains("dnf needs-restarting -r").contains("REBOOT_REQUIRED");
         verify(hostKeys, atLeastOnce()).pin(MACHINE, "SHA256:pinned");
 
-        record Row(String probe, String refusal) {}
+        OsUpgrade withPassword = probed("user=geir uid=1000\npm=dnf\n", TARGET, 0);
+        assertThat(withPassword.upgradeCommand()).isEqualTo("sudo -S -p '' sh -c 'dnf -y upgrade'")
+            .doesNotContain("secret");
+        when(ssh.run(TARGET, withPassword.upgradeCommand(), OsUpgrade.UPGRADE_TIMEOUT, "secret"))
+            .thenReturn(said("Nothing to do.\n"));
+        when(ssh.run(TARGET, withPassword.rebootRequiredCommand())).thenReturn(said(""));
+        assertThat(withPassword.carryOut(TARGET, ssh).upgraded()).as("the password rides stdin").isTrue();
+
+        record Row(String probe, SshTarget target, String refusal) {}
         for (Row row : new Row[] {
-            new Row("user=geir uid=1000\npm=apt\n", "Vaier logs in to Colina 27 as geir, who cannot use sudo "
-                + "without a password, so it cannot install OS updates there. Log Vaier in as root, or give geir "
+            new Row("user=geir uid=1000\npm=apt\n", TARGET, "Vaier logs in to Colina 27 as geir, who cannot use "
+                + "sudo with or without the login password, so it cannot install OS updates there. Log Vaier in "
+                + "as root, or give geir sudo."),
+            new Row("user=geir uid=1000\npm=apt\n", KEY_TARGET, "Vaier logs in to Colina 27 as geir, who cannot "
+                + "use sudo without a password, so it cannot install OS updates there. Log Vaier in as root, or "
+                + "give geir passwordless sudo."),
+            // No password on file: nothing to offer sudo.
+            new Row("user=geir uid=1000\npm=apt\n", new SshTarget("10.13.13.3", 22, "geir", AuthMethod.PASSWORD,
+                null, null, null, MACHINE), "Vaier logs in to Colina 27 as geir, who cannot use sudo without a "
+                + "password, so it cannot install OS updates there. Log Vaier in as root, or give geir "
                 + "passwordless sudo."),
-            new Row("user=admin uid=1024\nsudo=yes\n", "Colina 27 has neither apt nor dnf, the only package "
-                + "managers Vaier installs OS updates with."),
-            new Row("", "Vaier could not ask Colina 27 how it installs OS updates."),
+            new Row("user=admin uid=1024\nsudo=yes\n", TARGET, "Colina 27 has neither apt nor dnf, the only "
+                + "package managers Vaier installs OS updates with."),
+            new Row("", TARGET, "Vaier could not ask Colina 27 how it installs OS updates."),
         }) {
-            assertThatThrownBy(() -> probed(row.probe())).as(row.probe())
+            assertThatThrownBy(() -> probed(row.probe(), row.target(), 1)).as(row.probe())
                 .isInstanceOf(ConflictException.class).hasMessage(row.refusal());
         }
     }
