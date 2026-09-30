@@ -58,6 +58,9 @@
         // something", which is all Vaier ever knows about one.
         key:     '<circle cx="5.4" cy="10.6" r="2.9"/><path d="M7.5 8.5l5.7-5.7"/><path d="M11.1 4.9l1.5 1.5M12.3 3.7l1.5 1.5"/>',
         shieldhalf: '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M3 8.3h10"/>',
+        // The Topology view: a lighthouse — the one shape in the picture that is Vaier itself.
+        expand: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',
+        topology: '<path d="M6.4 14l.8-8.6h1.6l.8 8.6z"/><path d="M6.6 3.6h2.8v1.8H6.6z"/><path d="M8 1.8v1.8"/><path d="M10.8 3.4l3-1M10.8 5.4l3 .8"/><path d="M3 14h10"/>',
         map:     '<path d="M8 1.7c-2.5 0-4.4 1.9-4.4 4.3 0 3.1 4.4 8.3 4.4 8.3s4.4-5.2 4.4-8.3c0-2.4-1.9-4.3-4.4-4.3z"/><circle cx="8" cy="6" r="1.6"/>',
         // A GPS crosshair — "find me" in every map app, so it is the one glyph that reads as "report where I
         // am" without borrowing the fleet's own map-pin icon (which already means something else: a place).
@@ -254,6 +257,7 @@
         }
         if (path.length === 2) {
             if (path[1] === 'map') return 'map';
+            if (path[1] === 'topology') return 'topology';
             return 'machine';
         }
         if (path[2] === 'backup') return path.length === 3 ? 'backup' : 'repo';
@@ -365,7 +369,8 @@
     function childrenOf(path) {
         const kind = kindOf(path);
         if (kind === 'fleet') {
-            return [{ name: 'map', kind: 'map', label: 'Map' }]
+            return [{ name: 'map', kind: 'map', label: 'Map' },
+                    { name: 'topology', kind: 'topology', label: 'Topology' }]
                 // The segment is the identity and the label is the name: the shell addresses a machine by
                 // what cannot change and shows what a person recognises.
                 .concat(sortedMachines().map((m) => ({ name: m.id, kind: 'machine', label: m.name })));
@@ -768,7 +773,8 @@
 
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
                        containers: 'box', container: 'box', services: 'route',
-                       service: 'route', disk: 'disk', backup: 'archive', repo: 'box', map: 'map' };
+                       service: 'route', disk: 'disk', backup: 'archive', repo: 'box', map: 'map',
+                       topology: 'topology' };
 
     // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
     // read off its device category. A category with no icon (or a machine not yet loaded) falls back to the
@@ -1058,7 +1064,7 @@
             let text = seg;
             if (i === 0 && seg !== 'fleet') {
                 text = (GLOBALS.find((g) => g.name === seg) || {}).label || seg;
-            } else if (i === 1 && S.path[0] === 'fleet' && seg !== 'map') {
+            } else if (i === 1 && S.path[0] === 'fleet' && seg !== 'map' && seg !== 'topology') {
                 text = nameOf(seg);
             }
             if (i === S.path.length - 1) {
@@ -1262,6 +1268,7 @@
     function drawPane(pane, kind) {
         if (kind === 'fleet') return renderFleet(pane);
         if (kind === 'map') return renderMap(pane);
+        if (kind === 'topology') return renderTopology(pane);
         if (kind === 'settings') return renderSettings(pane);
         if (kind === 'chat') return renderChat(pane);
         if (kind === 'security') return renderSecurity(pane);
@@ -1349,6 +1356,8 @@
         const views = el('div', 'ex-grid');
         views.appendChild(card(svg('map', 'ex-ico'), 'Map', 'Where the machines physically are',
             () => go(['fleet', 'map'])));
+        views.appendChild(card(svg('topology', 'ex-ico'), 'Topology', 'How the machines connect, drawn as a coast',
+            () => go(['fleet', 'topology'])));
         body.appendChild(views);
 
         // Adding a machine is a fleet-level act — it belongs on the fleet, not floating in the topbar over
@@ -1817,6 +1826,182 @@
         if (!coords.length) body.appendChild(note('No machine has a known location yet.', false));
         // The element has just been re-attached to a new body, so Leaflet has to measure it again.
         requestAnimationFrame(() => { try { _map.invalidateSize(); } catch (e) { /* gone */ } });
+    }
+
+    // The fleet drawn as a fjord at blue hour (explorer-topology.js does the drawing). The picture is built
+    // once and kept, like the map: renderPane empties the pane on every render, so its element is re-attached
+    // rather than redrawn, and it is repainted only when what it shows has changed — a redraw restarts the
+    // lanterns, and a liveness push lands every few seconds.
+    let _topo = null;       // { frame, svg, tip, drawn } — the picture's own elements, and what it last drew
+    let _fleetDomain = null;   // the base domain the fleet is named by, once read; '' when Vaier has none
+    let _fleetDomainAsked = false;
+
+    function renderTopology(pane) {
+        // The fleet is named by its base domain. Settings already holds it when it has been opened; otherwise
+        // it is read once, on the first visit here. Until it is known the pane carries no name at all.
+        const domain = (S.settings.config && S.settings.config.domain) || _fleetDomain || '';
+        if (!domain && !_fleetDomainAsked) {
+            _fleetDomainAsked = true;
+            fetch('/settings/config', { cache: 'no-store' })
+                .then((res) => (res.ok ? res.json() : null))
+                .then((cfg) => {
+                    _fleetDomain = (cfg && cfg.domain) || '';
+                    if (_fleetDomain && kindOf(S.path) === 'topology') render();
+                })
+                .catch(() => { _fleetDomain = ''; });
+        }
+        const head = paneHead(domain, false);
+        if (!domain) head.querySelector('.ex-pane-title').remove();
+        const acts = el('div', 'ex-pane-actions');
+        acts.appendChild(selVerb('expand', 'Full screen', 'ex-btn', () => setTopologyFull(true)));
+        head.appendChild(acts);
+        pane.appendChild(head);
+        const body = el('div', 'ex-pane-body ex-topo-body');
+        pane.appendChild(body);
+        if (!window.VaierTopology) { body.appendChild(note('The picture could not load.', true)); return; }
+        if (!_topo) {
+            const frame = el('div', 'ex-topo-frame');
+            const pic = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            pic.setAttribute('viewBox', '0 0 1600 900');
+            pic.setAttribute('role', 'group');
+            pic.classList.add('ex-topo');
+            frame.appendChild(pic);
+            const tip = el('div', 'ex-topo-tip');
+            tip.hidden = true;
+            frame.appendChild(tip);
+            const exit = selVerb('cross', 'Exit full screen', 'ex-btn ex-topo-exit', () => setTopologyFull(false));
+            frame.appendChild(exit);
+            _topo = { frame, svg: pic, tip, drawn: '', full: false };
+        }
+        _topo.tip.hidden = true;
+        _topo.svg.setAttribute('aria-label', (domain ? domain + ': the fleet' : 'The fleet')
+            + ' drawn as a coast, with the internet as the open sea');
+        // Full screen, the picture lives outside the pane (see setTopologyFull), so a re-render leaves it be.
+        if (!_topo.full) body.appendChild(_topo.frame);
+        paintTopology();
+        window.VaierTopology.resync(_topo.svg);
+    }
+
+    // Full screen. The frame moves to the top of the page first: every render re-seats the pane's contents, and a
+    // browser drops full screen the moment its element leaves the page. Where the browser has no element full
+    // screen (iPhone Safari), the frame fills the window instead.
+    function setTopologyFull(on) {
+        if (!_topo || on === _topo.full) return;
+        const frame = _topo.frame;
+        _topo.full = on;
+        _topo.tip.hidden = true;
+        if (on) {
+            document.body.appendChild(frame);
+            const native = frame.requestFullscreen ? frame.requestFullscreen() : null;
+            if (native) native.catch(() => frame.classList.add('is-full'));
+            else frame.classList.add('is-full');
+            document.addEventListener('keydown', topologyEscape);
+        } else {
+            if (document.fullscreenElement === frame) document.exitFullscreen().catch(() => {});
+            frame.classList.remove('is-full');
+            document.removeEventListener('keydown', topologyEscape);
+            render();
+        }
+        window.VaierTopology.resync(_topo.svg);
+    }
+    function topologyEscape(e) { if (e.key === 'Escape' && _topo && _topo.frame.classList.contains('is-full')) setTopologyFull(false); }
+    document.addEventListener('fullscreenchange', () => {
+        if (_topo && _topo.full && !document.fullscreenElement && !_topo.frame.classList.contains('is-full')) setTopologyFull(false);
+    });
+
+    // Repaint the picture if the Topology is showing and the fleet it shows has changed.
+    function paintTopology() {
+        if (!_topo || kindOf(S.path) !== 'topology' || !window.VaierTopology) return;
+        const fleet = topologyFleet();
+        // When a machine was last seen is read as the tooltip opens, so its ageing never counts as a change.
+        const look = JSON.stringify(fleet, (k, v) => (k === 'seen' ? undefined : v));
+        if (look === _topo.drawn) return;
+        _topo.drawn = look;
+        _topo.tip.hidden = true;
+        window.VaierTopology.draw(_topo.svg, _topo.tip, fleet,
+            { onOpen: (machineId) => go(['fleet', machineId]), onBan: () => go(['security']), ago: agoFromEpochSeconds });
+    }
+
+    // CrowdSec's remaining ban, "3h32m51s", in whole minutes.
+    function banMinutesLeft(duration) {
+        const m = String(duration || '').match(/^(?:(\d+)h)?(?:(\d+)m)?(?:[\d.]+s)?$/);
+        return m ? (Number(m[1] || 0) * 60 + Number(m[2] || 0)) : 0;
+    }
+
+    // The fleet as the picture needs it, read off what the shell already holds. A peer that reaches a LAN —
+    // or that a LAN server names as the machine it is reached through — is a village, with the LAN servers
+    // behind it as its houses. A LAN server on the Vaier server's own LAN stands on the lighthouse's skerry.
+    // Every other peer is a boat, except a backup server with no LAN, which is a stabbur of its own.
+    function topologyFleet() {
+        const backupId = S.backupServer ? S.backupServer.machineId : null;
+        const WORD = { 'is-down': 'offline', 'is-away': 'offline', 'is-idle': 'not checked yet', 'is-degraded': 'up, not well' };
+        const house = (m, role, address) => {
+            const l = livenessOf(m.id);
+            const stabbur = m.id === backupId;
+            const dark = l === 'is-down' || l === 'is-away';
+            // A peer that is offline says when its tunnel last answered, as its machine pane does.
+            const peer = S.peers.get(m.id);
+            return { id: m.id, name: m.name, role: stabbur ? role + ' \u00b7 backup server' : role,
+                     address: address || '', state: WORD[l] || '', dark, stabbur,
+                     seen: dark && peer && Number(peer.latestHandshake) ? peer.latestHandshake : null };
+        };
+        const sites = new Map();
+        const siteOf = (machineId, name) => {
+            if (!sites.has(machineId)) {
+                sites.set(machineId, { name: name || 'a peer', lan: [],
+                    peer: { id: null, name: name || 'a peer', role: 'peer', address: '', state: 'not in the fleet',
+                            dark: true, stabbur: false } });
+            }
+            return sites.get(machineId);
+        };
+        const skerry = [];
+        const boats = [];
+        S.machines.filter((m) => m.type === 'LAN_SERVER').forEach((m) => {
+            const s = S.lan.get(m.id);
+            if (!s) return;
+            if (!s.relayMachineId) {
+                skerry.push(house(m, 'LAN server on the Vaier server\u2019s own LAN', m.lanAddress || s.lanAddress));
+                return;
+            }
+            siteOf(s.relayMachineId, s.relayPeerName).lan.push(house(m, 'LAN server behind ' + s.relayPeerName,
+                m.lanAddress || s.lanAddress));
+        });
+        S.machines.filter((m) => !m.vaierServer && m.type !== 'LAN_SERVER').forEach((m) => {
+            const peer = S.peers.get(m.id);
+            const address = peer ? peer.tunnelIp : '';
+            if (sites.has(m.id) || (peer && peer.isRelay) || m.id === backupId) {
+                const site = siteOf(m.id, m.name);
+                site.name = m.name;
+                site.peer = house(m, peer && peer.isRelay ? 'peer \u00b7 reaches its LAN' : 'peer', address);
+                return;
+            }
+            const cat = String(m.deviceCategory || '').toLowerCase();
+            const kind = SERVER_TYPES.has(m.type) ? 'sjark'
+                : m.type === 'WINDOWS_CLIENT' || cat === 'laptop' || cat === 'desktop' ? 'sail' : 'faering';
+            boats.push(Object.assign(house(m, cat && cat !== 'generic' ? 'peer \u00b7 ' + cat : 'peer', address), { kind }));
+        });
+        const vaier = S.machines.find((m) => m.vaierServer);
+        if (vaier && vaier.id === backupId) skerry.push(house(vaier, 'the Vaier server', ''));
+        return {
+            server: { id: vaier ? vaier.id : null, name: vaier ? vaier.name : VAIER_SERVER,
+                      address: (S.serverLocation && S.serverLocation.publicHost) || '', published: S.services.length,
+                      country: (S.serverLocation && S.serverLocation.country) || '',
+                      place: (S.serverLocation && S.serverLocation.city) || '' },
+            // Every address the edge is banning right now, with the time its ban has left as CrowdSec reports it.
+            bans: S.threats.filter((d) => d.type === 'ban').map((d) => ({ ip: d.sourceIp, country: d.country || '',
+                scenario: d.scenario || '', left: banMinutesLeft(d.duration) })).filter((b) => b.left > 0),
+            // Where a village stands is where its peer is: the same estimate the Map draws a fixed-line peer at.
+            sites: Array.from(sites.entries()).map(([id, s]) => {
+                const peer = S.peers.get(id);
+                if (s.lan.length) {
+                    s.peer.role = s.peer.role.replace('reaches its LAN',
+                        s.lan.length + (s.lan.length === 1 ? ' machine on its LAN' : ' machines on its LAN'));
+                }
+                return { id, name: s.name, peer: s.peer, lan: s.lan,
+                         latitude: peer && peer.latitude != null ? peer.latitude : null,
+                         country: (peer && peer.country) || '' };
+            }),
+            skerry, boats };
     }
 
     // A peer answers at its tunnel address, a LAN server on its LAN — the same rule the SSH connection
@@ -6741,6 +6926,7 @@
         const kind = kindOf(S.path);
         if (kind === 'security') render();
         else if (kind === 'map') paintThreatLayer();
+        else if (kind === 'topology') paintTopology();
     }
 
     // The Map is the only screen that draws these, so it is the only one to repaint — and in place, for the
@@ -10329,6 +10515,7 @@
                     }
                 });
                 paintDots();
+                paintTopology();
             } catch (err) {
                 console.error('Failed to apply peers-stats update:', err);
             }
@@ -10337,7 +10524,7 @@
         // LanServerScrapeService publish this on the `vpn-peers` topic — the stream we are already holding
         // open — so LAN liveness costs no second connection, no new endpoint and no timer. Re-read the
         // statuses and repaint the dots where they stand, without re-rendering the pane under the operator.
-        events.addEventListener('lan-servers-updated', () => loadLanServers().then(paintDots));
+        events.addEventListener('lan-servers-updated', () => loadLanServers().then(() => { paintDots(); paintTopology(); }));
         // A LAN scan finished on the backend — re-read the discovered snapshot (it renders when it lands).
         events.addEventListener('lan-scan-updated', () => loadLanScan());
         // RemoteDiskWatcher's existing 5-minute sweep found (or stopped finding) an SSH server on a machine —

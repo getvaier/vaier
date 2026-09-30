@@ -144,6 +144,9 @@ class ExplorerShellTest {
         assertThat(js).contains("new EventSource('/vpn/peers/events')");
         assertThat(js).contains("peers-stats");
         assertThat(js).doesNotContain("setInterval");
+        // The Topology picture repaints from what the shell already holds: it never polls and never fetches.
+        assertThat(read("explorer.html")).contains("explorer-topology.js");
+        assertThat(read("explorer-topology.js")).doesNotContain("setInterval").doesNotContain("fetch(");
     }
 
     // --- 5. no endpoint was opened ----------------------------------------------------------------------
@@ -258,7 +261,7 @@ class ExplorerShellTest {
         // claude-sign-in.js is Explorer-adjacent shipped prose — the Explorer loads it for the machine
         // card's Claude mark — so it is held to the same vocabulary as the rest of the shell.
         for (String asset : List.of("explorer.html", "explorer-shell.js", "explorer-shell.css",
-                                    "explorer-listing.js", "claude-sign-in.js")) {
+                                    "explorer-listing.js", "claude-sign-in.js", "explorer-topology.js")) {
             assertThat(node.matcher(read(asset)).find()).as("\"node\" in %s", asset).isFalse();
         }
     }
@@ -283,6 +286,7 @@ class ExplorerShellTest {
         // window must not move it out of the guard, or the copy nobody re-reads is the copy that drifts.
         List<String> prose = new ArrayList<>(proseLiterals(read("explorer-shell.js")));
         prose.addAll(proseLiterals(read("claude-sign-in.js")));
+        prose.addAll(proseLiterals(read("explorer-topology.js")));
         for (String line : prose) {
             for (Map.Entry<String, String> term : banned.entrySet()) {
                 assertThat(Pattern.compile(term.getKey(), Pattern.CASE_INSENSITIVE).matcher(line).find())

@@ -1397,6 +1397,67 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
 .ex-joincode { font-family: var(--mono); font-size: 30px; letter-spacing: .2em; color: var(--text); margin: 4px 0 12px; }
 .ex-waiting { display: flex; align-items: center; gap: 9px; margin-top: 12px; font-size: 14px; color: var(--text-muted); }
 /* The fleet map fills the inspector; Leaflet paints inside it. */
+/* --- Topology: the fleet as a fjord at blue hour ---------------------------------------------------------
+   The picture keeps its own light in either theme: it is an illustration, and blue hour is the look. It may
+   scroll sideways inside its frame on a phone; the page never does. Place names are a serif italic, served
+   from /fonts like the display face; the small labels use the shell's own display face. */
+@font-face {
+    font-family: 'Cormorant Garamond';
+    font-style: italic;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/fonts/cormorant-garamond-italic.woff2') format('woff2');
+}
+.ex-topo-body { padding: 0; }
+.ex-topo-frame {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border-radius: var(--radius-1);
+    background: #0b1426;
+    box-shadow: var(--shadow-2);
+}
+.ex-topo { display: block; width: 100%; min-width: 880px; height: auto; }
+.ex-topo-frame { position: relative; }
+.ex-topo-exit { display: none; }
+.ex-topo-frame:fullscreen, .ex-topo-frame.is-full {
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; border-radius: var(--radius-0); box-shadow: none; background: #0b1426;
+}
+.ex-topo-frame.is-full { position: fixed; inset: 0; z-index: 1000; }
+.ex-topo-frame:fullscreen .ex-topo, .ex-topo-frame.is-full .ex-topo { width: 100%; height: 100%; min-width: 0; }
+.ex-topo-frame:fullscreen .ex-topo-exit, .ex-topo-frame.is-full .ex-topo-exit {
+    display: inline-flex; position: absolute;
+    top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+}
+.ex-topo .tp-label { font-family: 'Cormorant Garamond', 'Iowan Old Style', Georgia, serif; font-style: italic; font-weight: 600; fill: #e8edf4; }
+.ex-topo .is-off { fill: #7d8aa0; }
+.ex-topo .tp-hit { cursor: default; outline: none; }
+.ex-topo .tp-hit.is-open { cursor: pointer; }
+.ex-topo .tp-hit:focus-visible .tp-ring { stroke: #ffcf7a; stroke-width: 1.5; }
+/* The beam is the one moving light besides the lanterns; the scenery under it is a still image. */
+.ex-topo .tp-beam { animation: tp-sweep 9s ease-in-out infinite; }
+.ex-topo .tp-beam.is-up { animation: tp-sweep-up 11s ease-in-out infinite; }
+@keyframes tp-sweep { 0%, 100% { transform: rotate(-16deg); } 50% { transform: rotate(18deg); } }
+@keyframes tp-sweep-up { 0%, 100% { transform: rotate(-28deg); } 50% { transform: rotate(28deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .ex-topo .tp-anim { animation: none; }
+}
+.ex-topo-tip {
+    position: fixed;
+    z-index: 50;
+    pointer-events: none;
+    max-width: 260px;
+    padding: 8px 12px;
+    background: rgba(11, 20, 38, .94);
+    border: 1px solid rgba(232, 237, 244, .14);
+    border-radius: var(--radius-0);
+    color: #e8edf4;
+    font-size: 13px;
+    line-height: 1.35;
+}
+.ex-topo-tip strong { display: block; font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 600; font-size: 18px; }
+.ex-topo-tip span { color: #9aa8bd; }
+
 .ex-map-body { padding: 0; }
 .ex-map { width: 100%; height: 72vh; min-height: 360px; border-radius: var(--radius-1); overflow: hidden; }
 .ex-map .leaflet-popup-content { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }

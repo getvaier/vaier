@@ -122,6 +122,28 @@ Panning and zooming stick across live updates: a marker moves or updates in plac
 
 ---
 
+## Topology
+
+A **Topology** entry at the fleet root, beside the Map, draws how the fleet connects to the internet as one picture: a coast at blue hour, painted rather than diagrammed. It is named by the fleet's base domain (`VAIER_DOMAIN`), and it says nothing in words beyond place names. Hover or focus anything for what it is, and click a house or a boat to open that machine.
+
+- **The open sea is the internet.** The Vaier server is a lighthouse on a skerry out in it, the public edge. Its sweeping beam is Vaier's light, the services published to the internet; the lighthouse's tooltip counts them. While at least one is published, a coastal ship on the horizon stands for the public steering toward it.
+- **A village is a peer that reaches a LAN.** Its own house is the biggest one, at the end facing the sea, and each LAN server behind it is a house further along. The houses on one LAN are strung together by one line of lights. It stays lit past a machine that is down (only the bulb at that house's eave goes dark), and goes dark as a whole when the village's own peer is down. The backup server is a stabbur, wherever it stands. A LAN server on the Vaier server's own LAN stands on the lighthouse's skerry.
+- **Full screen** in the view's head fills the screen with the picture; **Exit full screen** (or Esc) brings it back. Where a browser has no full screen for a page element (iPhone Safari), it fills the window instead.
+- **Every tunnel is a wake** from the village's own house (or a boat) across the open sea to the lighthouse, with a lantern travelling along it. The machines behind a village have no wake of their own: they reach the internet through its house.
+- **Any other peer is a boat**: a phone is a rowing boat, a laptop a sailboat, a server a small fishing boat. While it is connected it sails the open sea with its lantern lit. While it is not, it lies moored at a quay out from the skerry, sail furled and lantern out, and its tooltip says when it was last seen.
+- **Every block decision is a pirate ship**: black sails, a single red lantern, the bow turned away from the lighthouse, flying the flag of the country the address was placed in. How far out it sits follows the time its ban has left, as CrowdSec reports it: a fresh ban sits close in and large, and as the ban runs down the ship drifts out toward the horizon, smaller and fainter, until it is gone. Distance is measured against CrowdSec's usual four-hour ban, so a longer hand block simply sits close in. Its tooltip gives the address, the country, what it was caught doing in plain words and how long it is kept out for; clicking it opens [Security](#security), where it can be let back in or trusted.
+- **Flags say where things are.** A village flies its country's flag beside its own house, and the lighthouse flies the Vaier server's on the skerry. The country comes from the same location data the Map uses. A country without a built-in flag design, or a place Vaier cannot locate, flies no flag; the picture never guesses one.
+- **Down is dark.** A machine that is down or away has dark windows and a dimmed name.
+
+**Where a village stands** follows where its peer is: the same estimate of its address the Map uses for a fixed-line peer. A village below 45° north is a Mediterranean one, whitewashed with terracotta roofs among cypresses and olive trees, under a low sun. Anywhere further north, or anywhere Vaier cannot place, is a Norwegian fjord coast with snow, spruce, red rorbuer and the aurora. When the fleet has villages in both, the picture is one panorama from north on the left to south on the right, with the sea and the lighthouse between them; otherwise it is a single coast with the sea beyond its mouth. 
+**Any fleet fits.** Villages that do not fit along the shore are set further up the coast, drawn smaller, and a crowded row is narrowed to fit. Boats spread over the open water and shrink when there are many. The same fleet always paints the same picture: every choice in it is seeded by a machine's own identity, never by chance.
+
+**It follows the fleet live.** A peer connecting or dropping, a LAN server's state changing, a machine joining or leaving, a service being published, or the edge's list of block decisions changing repaints the picture from the events the Explorer already listens to; it never polls, and it repaints only while you are looking at it and only when something it shows has changed.
+
+The picture keeps its blue-hour light in either theme. The scenery (sky, mountains, water, reflections) is painted once per repaint and shown as a still image, so the only things moving are the beam and the lanterns. With reduced motion turned on, those stand still too and the film grain is left out. On a narrow screen the picture scrolls sideways inside its own frame and the page does not.
+
+---
+
 ## Security
 
 A **Security** entry of Vaier's own — beside Settings in the topbar's **Vaier menu**, outside the fleet, since a blocked address belongs to no machine — lists every address the [edge's CrowdSec bouncer](NETWORKING.md#edge-hardening) is keeping out **right now** — the source address, where CrowdSec places it (country and network operator, when it can), the scenario that caught it, and how long the block lasts. Nothing blocked says so in words, and a read that failed says *that* instead — an empty list is never used to mean "all quiet".
