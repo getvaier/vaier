@@ -1,5 +1,6 @@
 package net.vaier.application;
 
 public interface DeletePeerUseCase {
-    void deletePeer(String peerIdentifier);
+    /** {@code callerIp} is where the request came from, or null when no browser asked. */
+    void deletePeer(String peerIdentifier, String callerIp);
 }

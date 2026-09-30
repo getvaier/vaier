@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PeerNotFoundException;
+import net.vaier.application.GetMyDeviceUseCase.TunnelMachine;
 import net.vaier.domain.ConflictException;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.GetPeerConfigUseCase.PeerConfigResult;
@@ -366,7 +367,7 @@ class VpnServiceTest {
     void deletePeer_byName_deletesDirectlyWithoutResolving() {
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(Optional.empty());
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         verify(vpnPeerDeleter).deletePeer("alice");
         verifyNoInteractions(forResolvingPeerIds);
@@ -377,17 +378,30 @@ class VpnServiceTest {
         when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("alice");
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(Optional.empty());
 
-        service.deletePeer("10.13.13.2");
+        service.deletePeer("10.13.13.2", null);
 
         verify(forResolvingPeerIds).resolvePeerIdByIp("10.13.13.2");
         verify(vpnPeerDeleter).deletePeer("alice");
+    }
+
+    /** Its answer would travel down the tunnel the removal cuts; the Vaier app's Leave disconnects first. */
+    @Test
+    void deletePeer_refusesAnAppDeviceAskingThroughItsOwnTunnel_andRemovesNothing() {
+        PeerConfiguration phone = enrolledPhone("ruten", DEVICE_KEY, PSK);
+        when(peerConfigProvider.getPeerConfigByName("ruten")).thenReturn(Optional.of(phone));
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.7")).thenReturn(Optional.of(phone));
+
+        assertThatThrownBy(() -> service.deletePeer("ruten", "10.13.13.7"))
+            .isInstanceOf(ConflictException.class);
+
+        verifyNoInteractions(vpnPeerDeleter, forPersistingReverseProxyRoutes);
     }
 
     @Test
     void deletePeer_ipNotResolved_throwsPeerNotFound() {
         when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.99")).thenReturn("10.13.13.99");
 
-        assertThatThrownBy(() -> service.deletePeer("10.13.13.99"))
+        assertThatThrownBy(() -> service.deletePeer("10.13.13.99", null))
             .isInstanceOf(PeerNotFoundException.class)
             .hasMessageContaining("10.13.13.99");
     }
@@ -396,7 +410,7 @@ class VpnServiceTest {
     void deletePeer_ipNotResolved_doesNotCallDeleter() {
         when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.99")).thenReturn("10.13.13.99");
 
-        assertThatThrownBy(() -> service.deletePeer("10.13.13.99"))
+        assertThatThrownBy(() -> service.deletePeer("10.13.13.99", null))
             .isInstanceOf(PeerNotFoundException.class);
 
         verifyNoInteractions(vpnPeerDeleter);
@@ -406,7 +420,7 @@ class VpnServiceTest {
     void deletePeer_ipLikeStringWithOutOfRangeOctets_isTreatedAsAPeerName() {
         // "999.999.999.999" is not a valid IPv4 literal, so it is taken as a peer name
         // directly — no IP-to-name resolution is attempted.
-        service.deletePeer("999.999.999.999");
+        service.deletePeer("999.999.999.999", null);
 
         verify(vpnPeerDeleter).deletePeer("999.999.999.999");
     }
@@ -420,7 +434,7 @@ class VpnServiceTest {
         ReverseProxyRoute otherRoute = new ReverseProxyRoute("other-router", "other.example.com", "10.13.13.3", 9090, "other-service", null);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(peerRoute, otherRoute));
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
         verify(deletePublishedServiceUseCase, never()).deleteService(eq("other.example.com"), any());
@@ -435,7 +449,7 @@ class VpnServiceTest {
         ReverseProxyRoute route2 = new ReverseProxyRoute("app2-router", "app2.example.com", "10.13.13.2", 9090, "app2-service", null);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route1, route2));
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         verify(deletePublishedServiceUseCase).deleteService("app1.example.com", null);
         verify(deletePublishedServiceUseCase).deleteService("app2.example.com", null);
@@ -451,7 +465,7 @@ class VpnServiceTest {
         ReverseProxyRoute dockerRoute = new ReverseProxyRoute("app@docker", "app.example.com", "10.13.13.2", 8080, "app-service", null);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(dockerRoute));
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         verify(vpnPeerDeleter).deletePeer("alice");
         verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
@@ -463,7 +477,7 @@ class VpnServiceTest {
             .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         verify(vpnPeerDeleter).deletePeer("alice");
         verifyNoInteractions(deletePublishedServiceUseCase);
@@ -473,7 +487,7 @@ class VpnServiceTest {
     void deletePeer_peerConfigNotFound_stillDeletesPeerWithoutCleaningServices() {
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(Optional.empty());
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         verify(vpnPeerDeleter).deletePeer("alice");
         verifyNoInteractions(deletePublishedServiceUseCase);
@@ -488,7 +502,7 @@ class VpnServiceTest {
         ReverseProxyRoute peerRoute = new ReverseProxyRoute("app-router", "app.example.com", "10.13.13.2", 8080, "app-service", null);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(peerRoute));
 
-        service.deletePeer("10.13.13.2");
+        service.deletePeer("10.13.13.2", null);
 
         verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
         verify(vpnPeerDeleter).deletePeer("alice");
@@ -502,7 +516,7 @@ class VpnServiceTest {
         ReverseProxyRoute peerRoute = new ReverseProxyRoute("app-router", "app.example.com", "10.13.13.2", 8080, "app-service", null);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(peerRoute));
 
-        service.deletePeer("alice");
+        service.deletePeer("alice", null);
 
         var order = inOrder(deletePublishedServiceUseCase, vpnPeerDeleter);
         order.verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
@@ -1802,6 +1816,26 @@ class VpnServiceTest {
 
         assertThat(service.myDevice(first.token())).isEmpty();
         assertThat(service.myDevice(second.token())).contains(mid("phone"));
+    }
+
+    @Test
+    void tunnelMachine_namesThePeerWhoseTunnelTheCallerComesThrough_withTheDomainsRemovalVerdict() {
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(phoneConfig()));
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.7"))
+            .thenReturn(Optional.of(enrolledPhone("ruten", DEVICE_KEY, PSK)));
+
+        assertThat(service.tunnelMachine("10.13.13.6")).contains(new TunnelMachine(mid("phone"), true));
+        assertThat(service.tunnelMachine("10.13.13.7")).contains(new TunnelMachine(mid("ruten"), false));
+        assertThat(service.tunnelMachine("203.0.113.9")).isEmpty();
+    }
+
+    /** A full-tunnel device's request hairpins and arrives wearing the server's own public address. */
+    @Test
+    void behindFullTunnel_isTrueOnlyForACallerWearingTheServersOwnPublicAddress() {
+        when(forResolvingPublicHost.resolvePublicIp()).thenReturn(Optional.of("52.29.74.114"));
+
+        assertThat(service.behindFullTunnel("52.29.74.114")).isTrue();
+        assertThat(service.behindFullTunnel("203.0.113.9")).isFalse();
     }
 
     /** Being on the tunnel lets a device report; it is not a claim, and must not read as one. */

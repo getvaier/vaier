@@ -6,6 +6,7 @@ import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.EnrolDeviceUseCase;
 import net.vaier.application.ForgetMyPositionUseCase;
 import net.vaier.application.GetMyDeviceUseCase;
+import net.vaier.application.GetMyDeviceUseCase.TunnelMachine;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
@@ -52,6 +53,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @RestController
@@ -218,15 +220,21 @@ public class VpnPeerRestController {
     }
 
     /**
-     * Which machine THIS browser has claimed, or null. The cookie is HttpOnly, so the browser cannot work
-     * this out for itself — and the answer belongs here rather than on the peer records, because a claim
-     * is a property of the browser asking, not of the machine.
+     * Which machine THIS browser has claimed, and which machine's tunnel it comes through — each null when
+     * none — or, when that tunnel hairpinned, only that it came through one. Both are properties of the browser asking, not of the machine, so they belong here rather than
+     * on the peer records.
      */
     @GetMapping("/my-device")
     public ResponseEntity<MyDeviceResponse> getMyDevice(
-            @CookieValue(name = CLAIM_COOKIE, required = false) String claimToken) {
+            @CookieValue(name = CLAIM_COOKIE, required = false) String claimToken,
+            HttpServletRequest httpRequest) {
+        String callerIp = resolveCallerIp(httpRequest);
+        Optional<TunnelMachine> tunnel = getMyDeviceUseCase.tunnelMachine(callerIp);
         return ResponseEntity.ok(new MyDeviceResponse(
-            getMyDeviceUseCase.myDevice(claimToken).map(MachineId::value).orElse(null)));
+            getMyDeviceUseCase.myDevice(claimToken).map(MachineId::value).orElse(null),
+            tunnel.map(t -> t.machineId().value()).orElse(null),
+            tunnel.map(TunnelMachine::removableFromHere).orElse(true),
+            getMyDeviceUseCase.behindFullTunnel(callerIp)));
     }
 
     /**
@@ -424,9 +432,9 @@ public class VpnPeerRestController {
     }
 
     @DeleteMapping("/{peerIdentifier}")
-    public ResponseEntity<Void> deletePeer(@PathVariable String peerIdentifier) {
+    public ResponseEntity<Void> deletePeer(@PathVariable String peerIdentifier, HttpServletRequest httpRequest) {
         log.info("Deleting VPN peer: {}", LogSafe.forLog(peerIdentifier));
-        deletePeerUseCase.deletePeer(peerIdentifier);
+        deletePeerUseCase.deletePeer(peerIdentifier, resolveCallerIp(httpRequest));
         forPublishingEvents.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.noContent().build();
     }
@@ -800,9 +808,17 @@ public class VpnPeerRestController {
             Double accuracyMetres
     ) {}
 
-    /** The machine this browser has claimed, or null when it holds no (unrevoked) claim. */
+    /**
+     * @param machineId       the machine this browser has claimed, or null when it holds no (unrevoked) claim.
+     * @param tunnelMachineId the machine whose tunnel this browser comes through, or null when off the tunnel.
+     * @param tunnelMachineRemovable false when that machine must leave from its Vaier app instead.
+     * @param behindFullTunnel true when this browser comes through a full-tunnel device Vaier cannot name.
+     */
     public record MyDeviceResponse(
-            String machineId
+            String machineId,
+            String tunnelMachineId,
+            boolean tunnelMachineRemovable,
+            boolean behindFullTunnel
     ) {}
 
     /**

@@ -52,10 +52,13 @@ import net.vaier.domain.ReportedPosition;
 import net.vaier.domain.UnidentifiedDeviceException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PeerNotFoundException;
+import net.vaier.domain.Cidr;
+import net.vaier.domain.ServerPublicAddress;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.PeerSetupScript;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ServerLocationResolver;
+import net.vaier.domain.ServerLocationResolver.ResolvedHost;
 import net.vaier.domain.TunnelCaller;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.VpnClient;
@@ -371,7 +374,7 @@ public class VpnService implements
                                  Double latitude, Double longitude, Double accuracyMetres) {
         // Say who is talking, never which machine to file it under: resolving that here would leave a gap
         // in which a Forget lands, and the report would then re-create the record it just erased.
-        forPersistingMachinePositions.recordReportedPosition(tunnelMachine(callerIp), claimToken,
+        forPersistingMachinePositions.recordReportedPosition(tunnelCaller(callerIp).orElse(null), claimToken,
                 ReportedPosition.report(latitude, longitude, accuracyMetres, Instant.now()))
             .orElseThrow(UnidentifiedDeviceException::becauseNothingIdentifiesTheDevice);
     }
@@ -382,7 +385,7 @@ public class VpnService implements
         // Resolving here is safe in a way reporting is not: a Forget racing another write can only ever
         // erase, never file something under an identity that has just stopped existing.
         MachineId machineId = forPersistingMachinePositions.getAll()
-            .reportingMachine(tunnelMachine(callerIp), claimToken)
+            .reportingMachine(tunnelCaller(callerIp).orElse(null), claimToken)
             .orElseThrow(UnidentifiedDeviceException::becauseNothingIdentifiesTheDevice);
         forPersistingMachinePositions.remove(machineId);
     }
@@ -407,11 +410,25 @@ public class VpnService implements
     }
 
     /**
-     * The machine holding {@code callerIp} as its tunnel IP, or null when that address is not one — the
-     * rule is {@link TunnelCaller}'s, this only supplies the subnet and the peer store it reads.
+     * The machine holding {@code callerIp} as its tunnel IP — the rule is {@link TunnelCaller}'s, this only
+     * supplies the subnet and the peer store it reads.
      */
-    private MachineId tunnelMachine(String callerIp) {
-        return TunnelCaller.machineFor(callerIp, vpnSubnet, peerConfigProvider).orElse(null);
+    private Optional<MachineId> tunnelCaller(String callerIp) {
+        return TunnelCaller.machineFor(callerIp, vpnSubnet, peerConfigProvider);
+    }
+
+    @Override
+    public Optional<TunnelMachine> tunnelMachine(String callerIp) {
+        return TunnelCaller.peerFor(callerIp, vpnSubnet, peerConfigProvider)
+            .map(peer -> new TunnelMachine(peer.machineId(), peer.removableBy(Optional.of(peer.machineId()))));
+    }
+
+    @Override
+    public boolean behindFullTunnel(String callerIp) {
+        return ServerPublicAddress.of(ServerLocationResolver
+                .resolve(forResolvingPublicHost, this::resolveHostnameToIp, configResolver.getDomain())
+                .map(ResolvedHost::publicIp).orElse(null))
+            .isHairpin(callerIp);
     }
 
     /**
@@ -466,7 +483,7 @@ public class VpnService implements
         log.info("Fetching config for peer: {}", peerIdentifier);
 
         Optional<ForGettingPeerConfigurations.PeerConfiguration> config;
-        if (net.vaier.domain.Cidr.isIpv4(peerIdentifier)) {
+        if (Cidr.isIpv4(peerIdentifier)) {
             config = peerConfigProvider.getPeerConfigByIp(peerIdentifier);
         } else {
             config = peerConfigProvider.getPeerConfigByName(peerIdentifier);
@@ -549,11 +566,16 @@ public class VpnService implements
     // --- DeletePeerUseCase ---
 
     @Override
-    public void deletePeer(String peerIdentifier) {
-        log.info("Deleting VPN peer: {}", peerIdentifier);
+    public void deletePeer(String peerIdentifier, String callerIp) {
+        String peerId = resolvePeerId(peerIdentifier);
+        peerConfigProvider.getPeerConfigByName(peerId)
+            .ifPresent(peer -> peer.refuseRemovalBy(tunnelCaller(callerIp)));
+        removePeer(peerId);
+    }
 
+    private String resolvePeerId(String peerIdentifier) {
         String peerId = peerIdentifier;
-        if (net.vaier.domain.Cidr.isIpv4(peerIdentifier)) {
+        if (Cidr.isIpv4(peerIdentifier)) {
             String resolved = forResolvingPeerIds.resolvePeerIdByIp(peerIdentifier);
             if (resolved.equals(peerIdentifier)) {
                 log.error("Could not find a peer for IP: {}", peerIdentifier);
@@ -562,7 +584,11 @@ public class VpnService implements
             peerId = resolved;
             log.info("Resolved IP {} to peer id: {}", peerIdentifier, peerId);
         }
+        return peerId;
+    }
 
+    private void removePeer(String peerId) {
+        log.info("Deleting VPN peer: {}", peerId);
         deletePublishedServicesForPeer(peerId);
 
         vpnPeerDeleter.deletePeer(peerId);
@@ -778,7 +804,7 @@ public class VpnService implements
             return false;
         }
         log.info("Peer {} is leaving the fleet at its own request", peer.get().id());
-        deletePeer(peer.get().id());
+        removePeer(peer.get().id());
         return true;
     }
 

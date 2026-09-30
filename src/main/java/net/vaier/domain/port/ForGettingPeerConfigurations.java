@@ -1,5 +1,6 @@
 package net.vaier.domain.port;
 
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineId;
@@ -131,6 +132,22 @@ public interface ForGettingPeerConfigurations {
          */
         public boolean deviceHeldKey() {
             return publicKey != null && !publicKey.isBlank();
+        }
+
+        /**
+         * Refuses removing a Vaier-app device from a browser coming through that device's own tunnel: the
+         * answer would travel down the tunnel the removal cuts. The app's Leave disconnects first.
+         */
+        public void refuseRemovalBy(Optional<MachineId> tunnelCaller) {
+            if (!removableBy(tunnelCaller)) {
+                throw new ConflictException(name + " is the device you are using. Remove it with Leave Vaier "
+                    + "in its Vaier app, which disconnects first.");
+            }
+        }
+
+        /** Whether {@code tunnelCaller} may remove this peer — see {@link #refuseRemovalBy}. */
+        public boolean removableBy(Optional<MachineId> tunnelCaller) {
+            return !(deviceHeldKey() && tunnelCaller.filter(machineId::equals).isPresent());
         }
 
         /** True when an explicit device-category override is pinned (rather than auto-detected). */

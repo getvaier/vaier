@@ -29,6 +29,7 @@ import net.vaier.application.LeaveFleetUseCase;
 import net.vaier.application.ClaimDeviceUseCase;
 import net.vaier.application.ForgetMyPositionUseCase;
 import net.vaier.application.GetMyDeviceUseCase;
+import net.vaier.application.GetMyDeviceUseCase.TunnelMachine;
 import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ReportMyPositionUseCase;
@@ -873,7 +874,7 @@ class VpnPeerRestControllerTest {
         MachineId phone = identityOf("phone");
         when(getMyDeviceUseCase.myDevice("claim-token")).thenReturn(Optional.of(phone));
 
-        var response = controller.getMyDevice("claim-token");
+        var response = controller.getMyDevice("claim-token", callerAt("203.0.113.9"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().machineId()).isEqualTo(phone.value());
@@ -888,16 +889,48 @@ class VpnPeerRestControllerTest {
         when(getMyDeviceUseCase.myDevice(null)).thenReturn(Optional.empty());
         when(getMyDeviceUseCase.myDevice("revoked-or-superseded")).thenReturn(Optional.empty());
 
-        assertThat(controller.getMyDevice(null).getBody().machineId()).isNull();
-        assertThat(controller.getMyDevice("revoked-or-superseded").getBody().machineId()).isNull();
+        assertThat(controller.getMyDevice(null, callerAt("203.0.113.9")).getBody().machineId()).isNull();
+        assertThat(controller.getMyDevice("revoked-or-superseded", callerAt("203.0.113.9")).getBody().machineId()).isNull();
     }
 
-    /** Off the tunnel is the ordinary case, so this must never consult the caller's address. */
+    /**
+     * The tunnel names the machine this browser comes through — a separate answer from the claim, which
+     * the tunnel must never stand in for.
+     */
     @Test
-    void getMyDevice_needsNoRequestAtAll_soItCannotDependOnTheTunnel() {
-        when(getMyDeviceUseCase.myDevice("claim-token")).thenReturn(Optional.of(identityOf("phone")));
+    void getMyDevice_namesTheMachineWhoseTunnelThisBrowserComesThrough_apartFromTheClaim() {
+        ReflectionTestUtils.setField(controller, "trustedProxyCidr", "172.20.0.0/16");
+        MachineId laptop = identityOf("laptop");
+        when(getMyDeviceUseCase.myDevice(null)).thenReturn(Optional.empty());
+        when(getMyDeviceUseCase.tunnelMachine("10.13.13.8")).thenReturn(Optional.of(new TunnelMachine(laptop, false)));
 
-        assertThat(controller.getMyDevice("claim-token").getBody().machineId()).isNotNull();
+        var body = controller.getMyDevice(null, proxiedFrom("172.20.0.5", "10.13.13.8")).getBody();
+
+        assertThat(body.tunnelMachineId()).isEqualTo(laptop.value());
+        assertThat(body.tunnelMachineRemovable()).isFalse();
+        assertThat(body.machineId()).isNull();
+    }
+
+    @Test
+    void getMyDevice_saysWhenThisBrowserComesThroughAFullTunnelDeviceVaierCannotName() {
+        ReflectionTestUtils.setField(controller, "trustedProxyCidr", "172.20.0.0/16");
+        when(getMyDeviceUseCase.myDevice(null)).thenReturn(Optional.empty());
+        when(getMyDeviceUseCase.behindFullTunnel("52.29.74.114")).thenReturn(true);
+
+        var body = controller.getMyDevice(null, proxiedFrom("172.20.0.5", "52.29.74.114")).getBody();
+
+        assertThat(body.behindFullTunnel()).isTrue();
+        assertThat(body.tunnelMachineId()).isNull();
+    }
+
+    @Test
+    void deletePeer_handsTheCallersRealAddressToTheUseCase() {
+        ReflectionTestUtils.setField(controller, "trustedProxyCidr", "172.20.0.0/16");
+
+        var response = controller.deletePeer("laptop", proxiedFrom("172.20.0.5", "10.13.13.8"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(deletePeerUseCase).deletePeer("laptop", "10.13.13.8");
     }
 
     @Test

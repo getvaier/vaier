@@ -8,6 +8,7 @@ import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.ReissuePeerConfigUseCase.ReissuedPeerUco;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerNotFoundException;
 import net.vaier.domain.PositionTrail;
 import net.vaier.domain.ReportedPosition;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
@@ -176,13 +177,13 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
         mockMvc.perform(delete("/vpn/peers/peer1"))
                .andExpect(status().isNoContent());
 
-        verify(deletePeerUseCase).deletePeer("peer1");
+        verify(deletePeerUseCase).deletePeer(eq("peer1"), any());
     }
 
     @Test
     void deletePeer_returns404WhenNotFound() throws Exception {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: peer1"))
-                .when(deletePeerUseCase).deletePeer(eq("peer1"));
+        doThrow(new PeerNotFoundException("Peer not found: peer1"))
+                .when(deletePeerUseCase).deletePeer(eq("peer1"), any());
 
         mockMvc.perform(delete("/vpn/peers/peer1"))
                .andExpect(status().isNotFound());
@@ -191,7 +192,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void deletePeer_returns500OnUnexpectedError() throws Exception {
         doThrow(new RuntimeException("Unexpected error"))
-                .when(deletePeerUseCase).deletePeer(eq("peer1"));
+                .when(deletePeerUseCase).deletePeer(eq("peer1"), any());
 
         mockMvc.perform(delete("/vpn/peers/peer1"))
                .andExpect(status().isInternalServerError());
@@ -350,7 +351,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void reissuePeer_returns404WhenPeerNotFound() throws Exception {
         when(reissuePeerConfigUseCase.reissuePeerConfig("ghost"))
-                .thenThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"));
+                .thenThrow(new PeerNotFoundException("Peer not found: ghost"));
 
         mockMvc.perform(post("/vpn/peers/ghost/reissue"))
                .andExpect(status().isNotFound());

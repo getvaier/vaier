@@ -4,8 +4,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.DnsRecordType;
@@ -18,17 +22,28 @@ public class PublicHostResolverAdapter implements ForResolvingPublicHost {
 
     private static final String IMDS_BASE = "http://169.254.169.254/latest";
     private static final Duration IMDS_TIMEOUT = Duration.ofSeconds(2);
+    /** How long a metadata answer, empty included, is reused — page loads ask, and off EC2 each ask times out. */
+    static final Duration METADATA_MEMO = Duration.ofMinutes(5);
 
     private final Function<String, String> envLookup;
     private final HttpClient httpClient;
+    private final Clock clock;
+    private final Map<String, MetadataRead> lastReads = new ConcurrentHashMap<>();
+
+    private record MetadataRead(Instant at, Optional<String> value) {}
 
     public PublicHostResolverAdapter() {
         this(System::getenv, HttpClient.newBuilder().connectTimeout(IMDS_TIMEOUT).build());
     }
 
     PublicHostResolverAdapter(Function<String, String> envLookup, HttpClient httpClient) {
+        this(envLookup, httpClient, Clock.systemUTC());
+    }
+
+    PublicHostResolverAdapter(Function<String, String> envLookup, HttpClient httpClient, Clock clock) {
         this.envLookup = envLookup;
         this.httpClient = httpClient;
+        this.clock = clock;
     }
 
     @Override
@@ -59,6 +74,15 @@ public class PublicHostResolverAdapter implements ForResolvingPublicHost {
     }
 
     private Optional<String> fetchEc2Metadata(String path) {
+        Instant now = clock.instant();
+        MetadataRead memo = lastReads.get(path);
+        if (memo != null && now.isBefore(memo.at().plus(METADATA_MEMO))) return memo.value();
+        Optional<String> value = readEc2Metadata(path);
+        lastReads.put(path, new MetadataRead(now, value));
+        return value;
+    }
+
+    private Optional<String> readEc2Metadata(String path) {
         try {
             HttpRequest tokenReq = HttpRequest.newBuilder()
                 .uri(URI.create(IMDS_BASE + "/api/token"))

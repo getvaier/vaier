@@ -225,6 +225,9 @@
         credentials: { state: 'idle', list: [], error: '' },
         myDeviceMachineId: null,         // GET /vpn/peers/my-device — the ONE machine THIS browser's cookie
                                           //   claims, server-decided; never "some browser claims this machine"
+        tunnelMachineId: null,           // the same read — the machine whose tunnel THIS browser comes through,
+        tunnelMachineRemovable: true,    //   and whether the server lets this browser remove it
+        behindFullTunnel: false,         // …or only that it came through some device's full tunnel (hairpin)
     };
 
     // A file large enough to be worth a second thought before it crosses the fleet over WireGuard. The
@@ -2309,11 +2312,18 @@
             } else if (deviceHeld) {
                 adv.appendChild(hint('This machine made its own key when it enrolled, so there is no config '
                     + 'here to reissue or regenerate — the private half only ever existed on the device. '
-                    + 'To replace the key, remove the machine and enrol it again from the app.'));
+                    + 'To replace the key, leave Vaier in its Vaier app and join again (removing it here '
+                    + 'from another device works too).'));
             }
-            const rm = el('div', 'ex-lactions is-static');
-            rm.appendChild(selVerb('trash', 'Remove machine', 'ex-btn is-danger', () => removeMachine(m)));
-            adv.appendChild(rm);
+            // Removing the device this browser comes through would cut the tunnel carrying the answer.
+            if (S.tunnelMachineId === m.id && !S.tunnelMachineRemovable) {
+                adv.appendChild(hint('This is the device you are using. Remove it with Leave Vaier in its '
+                    + 'Vaier app, which disconnects first.'));
+            } else {
+                const rm = el('div', 'ex-lactions is-static');
+                rm.appendChild(selVerb('trash', 'Remove machine', 'ex-btn is-danger', () => removeMachine(m)));
+                adv.appendChild(rm);
+            }
             body.appendChild(adv);
         }
         pane.appendChild(body);
@@ -3887,17 +3897,39 @@
 
     async function removeMachine(m) {
         const isPeer = S.peers.has(m.id);
+        const viaThisTunnel = isPeer && S.tunnelMachineId === m.id;
+        // A hairpinned request hides which device it came through; warn on every app device instead.
+        const maybeThisDevice = !viaThisTunnel && S.behindFullTunnel && !!(S.peers.get(m.id) || {}).deviceHeldKey;
         const ok = await confirmTyped('Remove ' + m.name + '?',
             'This deletes ' + m.name + ' from the fleet — its ' + (isPeer ? 'WireGuard peer' : 'registration')
-            + ' is removed and it can no longer reach the VPN. This cannot be undone. Type the machine name to '
-            + 'confirm.', m.name, 'Remove');
+            + ' is removed and it can no longer reach the VPN. This cannot be undone. '
+            + (viaThisTunnel ? 'This browser reaches Vaier through ' + m.name + '’s tunnel, so it loses Vaier '
+                + 'the moment it is removed — turn the tunnel off in the WireGuard app afterwards. ' : '')
+            + (maybeThisDevice ? 'If you are using ' + m.name + ' right now, use Leave Vaier in its Vaier app '
+                + 'instead — removing it from here cuts this browser off. ' : '')
+            + 'Type the machine name to confirm.', m.name, 'Remove');
         if (!ok) return;
         const url = isPeer ? '/vpn/peers/' + encodeURIComponent(S.peers.get(m.id).id)
                            : '/lan-servers/' + encodeURIComponent(m.id);
         try {
             const res = await fetch(url, { method: 'DELETE' });
+            if (res.status === 409) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not remove ' + m.name + '.');
+                return;
+            }
             if (!res.ok && res.status !== 204) { toast('Vaier could not remove ' + m.name + '.'); return; }
-        } catch (e) { toast('Vaier could not remove ' + m.name + '.'); return; }
+        } catch (e) {
+            // The answer to our own tunnel's removal never arrives; the page already said so.
+            toast(viaThisTunnel
+                ? 'Vaier stopped answering, as expected once ' + m.name + ' is removed. Turn the tunnel off in '
+                    + 'the WireGuard app.'
+                : maybeThisDevice
+                    ? 'Vaier stopped answering — if this browser runs on ' + m.name + ', it was removed and '
+                        + 'took this browser’s tunnel with it.'
+                    : 'Vaier could not remove ' + m.name + '.');
+            return;
+        }
         await loadFleet();
         toast(m.name + ' removed.');
         go(['fleet']);
@@ -10324,8 +10356,15 @@
     async function loadMyDevice() {
         try {
             const res = await fetch('/vpn/peers/my-device');
-            S.myDeviceMachineId = res.ok ? (await res.json()).machineId : null;
-        } catch (e) { S.myDeviceMachineId = null; }
+            const me = res.ok ? await res.json() : {};
+            S.myDeviceMachineId = me.machineId || null;
+            S.tunnelMachineId = me.tunnelMachineId || null;
+            S.tunnelMachineRemovable = me.tunnelMachineRemovable !== false;
+            S.behindFullTunnel = me.behindFullTunnel === true;
+        } catch (e) {
+            S.myDeviceMachineId = null; S.tunnelMachineId = null; S.tunnelMachineRemovable = true;
+            S.behindFullTunnel = false;
+        }
     }
 
     // The discovered-machines snapshot — read when the fleet is looked at, and again whenever a scan settles

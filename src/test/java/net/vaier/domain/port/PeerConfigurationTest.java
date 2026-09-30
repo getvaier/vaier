@@ -1,14 +1,19 @@
 package net.vaier.domain.port;
 
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PeerConfigurationTest {
 
@@ -65,6 +70,32 @@ class PeerConfigurationTest {
     @Test
     void isPeerMachine_isFalseForNoMachineIdAtAll() {
         assertThat(PeerConfiguration.isPeerMachine(List.of(peerFor("phone")), null)).isFalse();
+    }
+
+    // --- removal from the machine's own tunnel ---
+
+    @Test
+    void removableBy_isFalseOnlyForAnAppDeviceRemovingItselfThroughItsOwnTunnel_whichIsRefused() {
+        PeerConfiguration appDevice = new PeerConfiguration("laptop", "Laptop", "10.13.13.8", "",
+            MachineType.WINDOWS_CLIENT, null, null, null, null, null, TestMachineIds.of("laptop"), "DEVICE_KEY");
+        PeerConfiguration wireGuardAppDevice = peerFor("phone");
+
+        assertThat(appDevice.removableBy(Optional.of(appDevice.machineId()))).isFalse();
+        assertThatThrownBy(() -> appDevice.refuseRemovalBy(Optional.of(appDevice.machineId())))
+            .isInstanceOf(ConflictException.class)
+            .hasMessageContaining("Laptop").hasMessageContaining("Leave Vaier");
+
+        record Row(String label, PeerConfiguration peer, Optional<MachineId> caller) {}
+        for (Row row : new Row[] {
+            new Row("app device, removed from another machine", appDevice, Optional.of(TestMachineIds.of("other"))),
+            new Row("app device, removed from off the tunnel", appDevice, Optional.empty()),
+            // The page already warned this browser it will lose Vaier; the removal itself still works.
+            new Row("WireGuard-app peer removing itself", wireGuardAppDevice,
+                Optional.of(wireGuardAppDevice.machineId())),
+        }) {
+            assertThat(row.peer().removableBy(row.caller())).as(row.label()).isTrue();
+            assertThatCode(() -> row.peer().refuseRemovalBy(row.caller())).as(row.label()).doesNotThrowAnyException();
+        }
     }
 
     private static PeerConfiguration peerFor(String name) {

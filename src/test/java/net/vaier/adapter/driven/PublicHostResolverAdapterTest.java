@@ -1,6 +1,11 @@
 package net.vaier.adapter.driven;
 
 import java.io.IOException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -15,6 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PublicHostResolverAdapterTest {
@@ -91,6 +98,37 @@ class PublicHostResolverAdapterTest {
         var adapter = new PublicHostResolverAdapter(env::get, httpClient);
 
         assertThat(adapter.resolve()).isEmpty();
+    }
+
+    /**
+     * The fleet page asks on every load; off EC2 each ask is a metadata timeout. Unreachable is an answer
+     * too, remembered for the same window.
+     */
+    @Test
+    void asksInstanceMetadataOncePerWindow() throws Exception {
+        HttpClient httpClient = mock(HttpClient.class);
+        when(httpClient.send(any(HttpRequest.class), any())).thenThrow(new IOException("no route to host"));
+        MutableClock clock = new MutableClock();
+        var adapter = new PublicHostResolverAdapter(k -> null, httpClient, clock);
+
+        adapter.resolvePublicIp();
+        adapter.resolvePublicIp();
+        verify(httpClient, times(1)).send(argThat(isPutToken()), any());
+
+        clock.advance(PublicHostResolverAdapter.METADATA_MEMO);
+        adapter.resolvePublicIp();
+        verify(httpClient, times(2)).send(argThat(isPutToken()), any());
+    }
+
+    /** The house pattern for a clock a test can step (see {@code RegistryV2ImageAdapterTest}). */
+    private static class MutableClock extends Clock {
+        private Instant now = Instant.parse("2026-09-30T18:00:00Z");
+
+        void advance(Duration by) { now = now.plus(by); }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
     }
 
     private static ArgumentMatcher<HttpRequest> isPutToken() {

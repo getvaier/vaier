@@ -4245,7 +4245,7 @@ class ExplorerShellTest {
         assertThat(body).as("a device-held key is never reissuable")
             .containsPattern("canReissue = [^;]*!deviceHeld");
         assertThat(body).as("and the fold says why, and what to do instead")
-            .contains("enrol it again from the app");
+            .contains("leave Vaier in its Vaier app and join again");
     }
 
     // --- Ask: the fleet, answered in sentences (#360 slice 1) --------------------------------------------

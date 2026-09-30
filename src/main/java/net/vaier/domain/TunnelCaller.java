@@ -1,6 +1,7 @@
 package net.vaier.domain;
 
 import net.vaier.domain.port.ForGettingPeerConfigurations;
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 
 import java.util.Optional;
 
@@ -34,11 +35,16 @@ public final class TunnelCaller {
      */
     public static Optional<MachineId> machineFor(String callerIp, String vpnSubnet,
                                                  ForGettingPeerConfigurations peers) {
+        return peerFor(callerIp, vpnSubnet, peers).map(PeerConfiguration::machineId);
+    }
+
+    /** The peer behind {@link #machineFor}, for a caller that needs more of it than its identity. */
+    public static Optional<PeerConfiguration> peerFor(String callerIp, String vpnSubnet,
+                                                      ForGettingPeerConfigurations peers) {
         if (peers == null || !onTheTunnel(callerIp, vpnSubnet)) {
             return Optional.empty();
         }
-        return peers.getPeerConfigByIp(callerIp)
-            .map(ForGettingPeerConfigurations.PeerConfiguration::machineId);
+        return peers.getPeerConfigByIp(callerIp);
     }
 
     private static boolean onTheTunnel(String callerIp, String vpnSubnet) {
