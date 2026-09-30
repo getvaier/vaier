@@ -306,8 +306,9 @@
     }
 
     // The same door Duplicate uses, on the orphan's own pane id: the new window adopts the id into the pane store,
-    // so the shell is owned again and closing that window later ends it properly.
+    // so the shell is owned again and closing that window later ends it properly. It becomes the primary too.
     function reattachShell(pid) {
+        VaierPanes.makePrimary(machineId, pid, machine);
         const w = window.open('terminal.html?machine=' + encodeURIComponent(machine)
             + '&id=' + encodeURIComponent(machineId) + '&pane=' + encodeURIComponent(pid),
             'vaier-shell-' + encodeURIComponent(pid), 'popup,width=1024,height=680');

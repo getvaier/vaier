@@ -27,18 +27,20 @@ class TerminalRestControllerTest {
     private static final String M1 = "3826a934-1d23-4bc0-9f1e-0c2d4e6f8a10";
 
     @Test
-    void listShells_saysWhatEachShellRuns_andHowLongInSeconds() {
+    void listShells_saysWhatEachShellRuns_howLongInSeconds_andWhichToReturnTo() {
         when(listPersistentShells.listShells(MachineId.of(M1))).thenReturn(List.of(
-            new RunningShell("p1", "claude", Duration.ofHours(3), Duration.ofMinutes(19), false)));
+            new RunningShell("p1", "claude", Duration.ofHours(3), Duration.ofMinutes(19), false),
+            new RunningShell("p2", "bash", Duration.ofHours(4), Duration.ofMinutes(2), false)));
 
         List<TerminalRestController.RunningShellResponse> body = controller.listShells(M1);
 
-        assertThat(body).hasSize(1);
+        assertThat(body).hasSize(2);
         assertThat(body.get(0).paneId()).isEqualTo("p1");
         assertThat(body.get(0).running()).isEqualTo("claude");
         assertThat(body.get(0).ageSeconds()).isEqualTo(10800);
         assertThat(body.get(0).sinceAttachedSeconds()).isEqualTo(1140);
         assertThat(body.get(0).attached()).isFalse();
+        assertThat(body).extracting(TerminalRestController.RunningShellResponse::returnTo).containsExactly(false, true);
     }
 
     @Test

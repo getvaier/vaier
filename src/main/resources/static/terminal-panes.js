@@ -23,9 +23,8 @@
     // The dock shipped with this key; keep it so shells open before pop-out existed still reattach.
     const OWNED = 'vaier.terminal.panes';
     const LIVE = 'vaier.terminal.live';
-    // A machine's one *primary* shell — the session "Open shell window" always returns to. Stored so it is the
-    // same id every time, on this browser, across reloads and redeploys: a machine's shell should be one place
-    // you go back to, never a fresh shell one time and an old one the next.
+    // A machine's *primary* shell on this browser — where "Open shell window" goes when the host cannot say which
+    // shell was used last. Stored so it is the same id every time, across reloads and redeploys.
     const PRIMARY = 'vaier.terminal.primary';
     // Longer than the beat interval (5s) with room for a backgrounded tab that beats late, short enough that a
     // closed window's session is reattachable within a few seconds.
@@ -103,6 +102,15 @@
         return pid;
     }
 
+    // Make this session the machine's primary on this browser — the one "Open shell window" returns to.
+    function makePrimary(machineId, paneId, machineName) {
+        migrateLegacyName(machineId, machineName);
+        const store = read(PRIMARY);
+        store[machineId] = paneId;
+        write(PRIMARY, store);
+        adopt(machineId, paneId);
+    }
+
     // Ensure the store owns this (machine, paneId). Used when a window is opened on an id handed to it in its
     // URL (a pop-out, or a reload), so the browser keeps the session even if that window later goes away.
     function adopt(machineId, paneId, machineName) {
@@ -129,5 +137,5 @@
     function beat(paneId) { const l = read(LIVE); l[paneId] = Date.now(); write(LIVE, l); }
     function stopBeat(paneId) { const l = read(LIVE); if (l[paneId] != null) { delete l[paneId]; write(LIVE, l); } }
 
-    window.VaierPanes = { claim, primary, adopt, release, beat, stopBeat, newId, isLive };
+    window.VaierPanes = { claim, primary, makePrimary, adopt, release, beat, stopBeat, newId, isLive };
 })();

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The persistent shells already running on a machine, and the way to end one from outside its own window.
@@ -30,17 +31,19 @@ public class TerminalRestController {
     private final EndTerminalSessionUseCase endTerminalSessionUseCase;
 
     public record RunningShellResponse(String paneId, String running, long ageSeconds, long sinceAttachedSeconds,
-                                       boolean attached) {
-        static RunningShellResponse of(RunningShell s) {
+                                       boolean attached, boolean returnTo) {
+        static RunningShellResponse of(RunningShell s, boolean returnTo) {
             return new RunningShellResponse(s.paneId(), s.running(), s.age().toSeconds(),
-                s.sinceAttached().toSeconds(), s.attached());
+                s.sinceAttached().toSeconds(), s.attached(), returnTo);
         }
     }
 
     @GetMapping
     public List<RunningShellResponse> listShells(@PathVariable String machineId) {
-        return listPersistentShellsUseCase.listShells(MachineId.of(machineId)).stream()
-            .map(RunningShellResponse::of)
+        List<RunningShell> shells = listPersistentShellsUseCase.listShells(MachineId.of(machineId));
+        Optional<RunningShell> returnTo = RunningShell.returnTo(shells);
+        return shells.stream()
+            .map(s -> RunningShellResponse.of(s, returnTo.filter(s::equals).isPresent()))
             .toList();
     }
 

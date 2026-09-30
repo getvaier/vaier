@@ -6576,17 +6576,28 @@
         // while the first sat there holding the live session.
         const w = window.open('', 'vaier-shell-' + encodeURIComponent(machineId), features);
         if (!w) { toast('Your browser blocked the shell window. Allow pop-ups for Vaier and try again.'); return; }
-        // A fresh window lands on about:blank — point it at the terminal, carrying the machine's *stable* primary
-        // pane id so it reattaches to the same session every time (never a random orphan, and never a surprise
-        // fresh shell). One that is already there is only focused, so its live session is never navigated away.
+        // A fresh window lands on about:blank — point it at the shell the host says was used last, so every
+        // device returns to the same one; this browser's primary only when the host cannot say. One that is
+        // already there is only focused, so its live session is never navigated away.
         let href = '';
         try { href = w.location.href; } catch (e) { href = ''; }
         if (!href || href === 'about:blank') {
-            const pane = (window.VaierPanes && VaierPanes.primary)
-                ? VaierPanes.primary(machineId, machineName) : '';
-            w.location.href = 'terminal.html?machine=' + encodeURIComponent(machineName)
-                + '&id=' + encodeURIComponent(machineId)
-                + (pane ? '&pane=' + encodeURIComponent(pane) : '');
+            const go = (pane) => {
+                w.location.href = 'terminal.html?machine=' + encodeURIComponent(machineName)
+                    + '&id=' + encodeURIComponent(machineId)
+                    + (pane ? '&pane=' + encodeURIComponent(pane) : '');
+            };
+            const fallback = () => go((window.VaierPanes && VaierPanes.primary)
+                ? VaierPanes.primary(machineId, machineName) : '');
+            fetch('/machines/' + encodeURIComponent(machineId) + '/shells')
+                .then((r) => r.ok ? r.json() : [])
+                .then((shells) => {
+                    const last = (shells || []).find((sh) => sh.returnTo);
+                    if (!last || !window.VaierPanes) { fallback(); return; }
+                    VaierPanes.makePrimary(machineId, last.paneId, machineName);
+                    go(last.paneId);
+                })
+                .catch(fallback);
         }
         w.focus();
     }
