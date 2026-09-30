@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
  * {@link BorgClientSetupScript} installs covers borg alone, so it does not count.
  *
  * <p>A plain {@code upgrade} that may install new packages (a new kernel), never {@code dist-upgrade},
- * {@code full-upgrade} or {@code autoremove}: nothing is removed, and a config file the operator changed is kept. Vaier never reboots; it says when one is due.
+ * {@code full-upgrade} or {@code autoremove}: nothing is removed, and a config file the operator changed is
+ * kept. Vaier never reboots; it says when one is due.
  */
 public record OsUpgrade(MachineId machineId, String machineName, PackageManager packageManager, Root root) {
 
@@ -31,11 +32,12 @@ public record OsUpgrade(MachineId machineId, String machineName, PackageManager 
     /** Minutes, not the exec default's seconds: a first upgrade in months downloads a lot over a home line. */
     public static final Duration UPGRADE_TIMEOUT = Duration.ofMinutes(30);
 
-    /** Who Vaier is there, whether sudo asks for a password, and which package managers exist. Never fails. */
+    /** Who Vaier is there, whether sudo asks for a password, which package managers exist, and if one is busy. */
     public static final String PROBE_COMMAND = "echo \"user=$(id -un) uid=$(id -u)\"; "
         + "sudo -n true 2>/dev/null && echo sudo=yes; "
         + "command -v apt-get >/dev/null 2>&1 && echo pm=apt; "
-        + "command -v dnf >/dev/null 2>&1 && echo pm=dnf; true";
+        + "command -v dnf >/dev/null 2>&1 && echo pm=dnf; "
+        + "pgrep -x 'apt|apt-get|dpkg|dnf' >/dev/null 2>&1 && echo busy=yes; true";
 
     /** Whether sudo takes the login password, fed on stdin; {@code -p ''} keeps the prompt out of the output. */
     public static final String PASSWORD_SUDO_PROBE = "sudo -S -p '' true";
@@ -57,7 +59,8 @@ public record OsUpgrade(MachineId machineId, String machineName, PackageManager 
     /**
      * Ask the machine how it would be upgraded, and judge the answer. Runs one short probe.
      *
-     * @throws ConflictException naming why, where Vaier cannot get root or the machine has neither apt nor dnf
+     * @throws ConflictException naming why, where Vaier cannot get root, the machine has neither apt nor dnf,
+     *     or one is already running
      */
     public static OsUpgrade of(MachineId machineId, String machineName, SshTarget target,
                                ForRunningSshCommands ssh, ForTrackingHostKeys hostKeys) {
@@ -76,6 +79,10 @@ public record OsUpgrade(MachineId machineId, String machineName, PackageManager 
         } else {
             throw new ConflictException(machineName + " has neither apt nor dnf, the only package managers "
                 + "Vaier installs OS updates with.");
+        }
+        if (out.contains("busy=yes")) {
+            throw new ConflictException(machineName + " is already installing updates. Try again when it is "
+                + "done.");
         }
         return new OsUpgrade(machineId, machineName, packageManager, root(user, out, machineName, target, ssh));
     }

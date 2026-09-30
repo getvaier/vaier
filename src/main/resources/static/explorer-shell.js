@@ -1880,9 +1880,6 @@
                 acts.appendChild(selVerb('shell', 'Setup command', 'ex-btn', () => lanSetupScript(m.id)));
             }
         }
-        // Rides on SSH like the shell does, so it is offered only where a session could open at all. Whether
-        // Vaier can get root there is the server's to judge on the click, and its refusal says why.
-        if (reachable && m.sshAccess && m.hasCredential && !noSshServer) acts.appendChild(osUpgradeVerb(m));
         if (acts.childNodes.length) head.appendChild(acts);
         pane.appendChild(head);
 
@@ -2089,6 +2086,21 @@
         wireRows.push(['Docker', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No']);
         wires.appendChild(kv(wireRows));
         body.appendChild(wires);
+
+        // --- maintenance: rare, root on the whole machine, so folded rather than in the head ----------
+        //
+        // Rides on SSH like the shell does, so it is offered only where a session could open at all. Whether
+        // Vaier can get root there is the server's to judge on the click, and its refusal says why.
+        if (reachable && m.sshAccess && m.hasCredential && !noSshServer) {
+            const upkeep = disclosure('Install OS updates');
+            if (_upgradingOs.has(m.id)) upkeep.open = true;
+            const row = el('div', 'ex-lactions is-static');
+            row.appendChild(osUpgradeVerb(m));
+            upkeep.appendChild(row);
+            upkeep.appendChild(hint('Installs the pending package updates as root. Nothing is removed, and '
+                + 'Vaier never reboots; it says when a reboot is due.'));
+            body.appendChild(upkeep);
+        }
 
         // --- danger: rare, and able to undo work ------------------------------------------------------
         //
@@ -10296,6 +10308,7 @@
                 // reloaded is a worse lie than offering it again, and the containers we re-read below are the
                 // honest answer about what is actually running.
                 _updating.clear();
+                _upgradingOs.clear();
                 Promise.all([loadFleet(), loadLanServers(), loadDiskStandings(),
                     loadClaudeStandings(), loadContainers(), loadContainerStandings()])
                     .then(render);

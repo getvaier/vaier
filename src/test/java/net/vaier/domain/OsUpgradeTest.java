@@ -99,6 +99,8 @@ class OsUpgradeTest {
             new Row("user=admin uid=1024\nsudo=yes\n", TARGET, "Colina 27 has neither apt nor dnf, the only "
                 + "package managers Vaier installs OS updates with."),
             new Row("", TARGET, "Vaier could not ask Colina 27 how it installs OS updates."),
+            new Row("user=root uid=0\npm=apt\nbusy=yes\n", TARGET, "Colina 27 is already installing updates. "
+                + "Try again when it is done."),
         }) {
             assertThatThrownBy(() -> probed(row.probe(), row.target(), 1)).as(row.probe())
                 .isInstanceOf(ConflictException.class).hasMessage(row.refusal());
