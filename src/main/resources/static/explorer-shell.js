@@ -1981,10 +1981,26 @@
             const cat = String(m.deviceCategory || '').toLowerCase();
             const kind = SERVER_TYPES.has(m.type) ? 'sjark'
                 : m.type === 'WINDOWS_CLIENT' || cat === 'laptop' || cat === 'desktop' ? 'sail' : 'faering';
-            boats.push(Object.assign(house(m, cat && cat !== 'generic' ? 'peer \u00b7 ' + cat : 'peer', address), { kind }));
+            // Where it was last seen: a boat that is offline moors at that coast.
+            boats.push(Object.assign(house(m, cat && cat !== 'generic' ? 'peer \u00b7 ' + cat : 'peer', address), { kind,
+                latitude: peer && peer.latitude != null ? peer.latitude : null,
+                longitude: peer && peer.longitude != null ? peer.longitude : null,
+                country: (peer && peer.country) || '' }));
         });
         const vaier = S.machines.find((m) => m.vaierServer);
         if (vaier && vaier.id === backupId) skerry.push(house(vaier, 'the Vaier server', ''));
+        // Where a village stands is where its peer is: the same estimate the Map draws a fixed-line peer at.
+        const placed = Array.from(sites.entries()).map(([id, s]) => {
+            const peer = S.peers.get(id);
+            if (s.lan.length) {
+                s.peer.role = s.peer.role.replace('reaches its LAN',
+                    s.lan.length + (s.lan.length === 1 ? ' machine on its LAN' : ' machines on its LAN'));
+            }
+            return { id, name: s.name, peer: s.peer, lan: s.lan,
+                     latitude: peer && peer.latitude != null ? peer.latitude : null,
+                     longitude: peer && peer.longitude != null ? peer.longitude : null,
+                     country: (peer && peer.country) || '' };
+        });
         return {
             server: { id: vaier ? vaier.id : null, name: vaier ? vaier.name : VAIER_SERVER,
                       address: (S.serverLocation && S.serverLocation.publicHost) || '', published: S.services.length,
@@ -1996,18 +2012,10 @@
                 .filter((b) => b.left > 0)
                 .map(({ d, left }) => ({ ip: d.sourceIp, country: d.country || '', scenario: d.scenario || '',
                     drift: Math.ceil(left / 30) * 30, until: Date.now() + left * 60000 })),
-            // Where a village stands is where its peer is: the same estimate the Map draws a fixed-line peer at.
-            sites: Array.from(sites.entries()).map(([id, s]) => {
-                const peer = S.peers.get(id);
-                if (s.lan.length) {
-                    s.peer.role = s.peer.role.replace('reaches its LAN',
-                        s.lan.length + (s.lan.length === 1 ? ' machine on its LAN' : ' machines on its LAN'));
-                }
-                return { id, name: s.name, peer: s.peer, lan: s.lan,
-                         latitude: peer && peer.latitude != null ? peer.latitude : null,
-                         country: (peer && peer.country) || '' };
-            }),
-            skerry, boats };
+            sites: placed, skerry, boats,
+            // Each coast under the sun over it right now. Riding in the fleet, a coast's look changing is what
+            // repaints the picture, on the next peer-stats push.
+            sky: window.VaierTopology.skyOver(placed, new Date()) };
     }
 
     // A peer answers at its tunnel address, a LAN server on its LAN — the same rule the SSH connection
