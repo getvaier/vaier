@@ -49,13 +49,13 @@ public final class OperatorGlossary {
                     "Vaier uses it to tell which discovered machines are genuinely on your LAN."),
                 Concept.of("Reissue",
                     "Generate a fresh VPN config for a peer, keeping its identity.",
-                    "Do this when a peer lost its config file and you need to hand it a new one."),
+                    "Do this when a server lost its config file. Phones and PCs join through the Vaier app, which keeps its own key, so there is nothing to reissue."),
                 Concept.of("Regenerate",
                     "Replace a peer's keys with brand-new ones, invalidating the old config.",
-                    "Use it if a peer's keys may be compromised — the old config stops working."),
+                    "Use it if a server's keys may be compromised — the old config stops working. For a phone or PC, remove it and join again from its Vaier app."),
                 Concept.of("Out-of-date config",
                     "A peer whose downloaded config no longer matches what the server expects.",
-                    "It flags a peer that will fail to connect until you reissue its config."))),
+                    "It flags a server that will fail to connect until you reissue its config. Phones and PCs on the Vaier app are never out of date."))),
 
             new ConceptGroup("Services", List.of(
                 Concept.of("Service",

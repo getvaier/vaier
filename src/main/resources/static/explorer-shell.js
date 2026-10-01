@@ -3839,7 +3839,7 @@
             'This deletes ' + m.name + ' from the fleet — its ' + (isPeer ? 'WireGuard peer' : 'registration')
             + ' is removed and it can no longer reach the VPN. This cannot be undone. '
             + (viaThisTunnel ? 'This browser reaches Vaier through ' + m.name + '’s tunnel, so it loses Vaier '
-                + 'the moment it is removed — turn the tunnel off in the WireGuard app afterwards. ' : '')
+                + 'the moment it is removed — stop its tunnel on ' + m.name + ' afterwards. ' : '')
             + (maybeThisDevice ? 'If you are using ' + m.name + ' right now, use Leave Vaier in its Vaier app '
                 + 'instead — removing it from here cuts this browser off. ' : '')
             + 'Type the machine name to confirm.', m.name, 'Remove');
@@ -3857,8 +3857,8 @@
         } catch (e) {
             // The answer to our own tunnel's removal never arrives; the page already said so.
             toast(viaThisTunnel
-                ? 'Vaier stopped answering, as expected once ' + m.name + ' is removed. Turn the tunnel off in '
-                    + 'the WireGuard app.'
+                ? 'Vaier stopped answering, as expected once ' + m.name + ' is removed. Stop its tunnel on '
+                    + m.name + '.'
                 : maybeThisDevice
                     ? 'Vaier stopped answering — if this browser runs on ' + m.name + ', it was removed and '
                         + 'took this browser’s tunnel with it.'
