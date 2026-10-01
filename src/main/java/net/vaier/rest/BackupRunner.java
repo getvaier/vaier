@@ -37,6 +37,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Fleet-backup orchestrator: runs one {@link BackupJob} over SSH and records the resulting
@@ -114,6 +116,9 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase, L
      */
     private final BackupFailureTracker failureTracker = new BackupFailureTracker();
 
+    /** Machines whose run is being launched right now, before its RUNNING record exists. */
+    private final Set<MachineId> launching = ConcurrentHashMap.newKeySet();
+
     public BackupRunner(GetMachinesUseCase machines,
                         GetHostCredentialUseCase credentials,
                         RunRemoteCommandUseCase remoteCommand,
@@ -158,6 +163,18 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase, L
      * or an SSH error) is recorded {@code FAILED} rather than left as a phantom RUNNING run.
      */
     public BackupRun runJob(BackupJob job, BackupRepository repo, String runId) {
+        if (!launching.add(job.machineId())) {
+            throw job.alreadyRunning();
+        }
+        try {
+            job.refuseStartWhileRunning(runs.latestForMachine(job.machineId()));
+            return launch(job, repo, runId);
+        } finally {
+            launching.remove(job.machineId());
+        }
+    }
+
+    private BackupRun launch(BackupJob job, BackupRepository repo, String runId) {
         Optional<Machine> machine = findMachine(job.machineId());
         if (machine.isEmpty()) {
             // The job names its machine by identity, so there is no name left to print for a machine that is

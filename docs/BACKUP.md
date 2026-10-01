@@ -66,7 +66,7 @@ Be clear-eyed about what you are granting: **a passwordless `sudo borg` is root-
 
 ### Running
 
-Run any job on demand with **Run now** from its machine's `backup` entry in the **Explorer**, or let the **nightly schedule** run every enabled job once a day. The schedule hour (0–23, default 2) is set on the ungated **Settings** surface, alongside the disk-pressure threshold.
+Run any job on demand with **Run now** from its machine's `backup` entry in the **Explorer**, or let the **nightly schedule** run every enabled job once a day. A machine runs one backup at a time: while one is in flight, another **Run now** is refused rather than launched to die on the repository lock. The schedule hour (0–23, default 2) is set on the ungated **Settings** surface, alongside the disk-pressure threshold.
 
 Each execution is a **backup run** with a status (running, success, warnings, **incomplete**, failed, or unknown); a failed run emails every admin, reusing the same SMTP configuration as the other alerts. Two outcomes share borg's exit 1, and Vaier tells them apart by reading the run's own output. A run that **could not read some of its source files** settles **incomplete** — the archive was written but is missing data, which is the worst way a backup can fail (it looks fine until you need it), so it counts as a **failure**: it reads red in the Explorer and emails every admin with a subject that says *Backup incomplete*, naming how many files were lost, a sample of their paths, and the **Back up as root** setting that would have read them. A run that merely grumbled without losing anything (a file changed while borg read it) still settles to **warnings** — its archive is complete, so it is not a failure and does not page anyone.
 

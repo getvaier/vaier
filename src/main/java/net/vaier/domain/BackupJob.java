@@ -278,6 +278,21 @@ public record BackupJob(
             .orElse(true);
     }
 
+    /**
+     * Refuses a new run while {@code latestRun} is still in flight: a second borg on the same repository dies
+     * on its lock, and its record would replace the real run's, which then settles unseen.
+     */
+    public void refuseStartWhileRunning(Optional<BackupRun> latestRun) {
+        if (latestRun.filter(run -> run.status() == BackupRunStatus.RUNNING).isPresent()) {
+            throw alreadyRunning();
+        }
+    }
+
+    /** The refusal for a run that is already in flight, however that was noticed. */
+    public ConflictException alreadyRunning() {
+        return new ConflictException("A backup of " + name + " is already running");
+    }
+
     private static LocalDate localDateOf(Instant instant, ZoneId zone) {
         return instant.atZone(zone).toLocalDate();
     }

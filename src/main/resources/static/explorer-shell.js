@@ -199,6 +199,7 @@
         repoArchives: new Map(),         // repo name -> { state, list, error }: the archives in a repository, read when looked at
         backupJobs: [],                  // GET /backup-jobs — the jobs, each backing one machine up to a repository
         jobRuns: new Map(),              // machine identity -> { state, run }: its last run, read on view and on the run-settled push
+        starting: new Set(),             // machine identities whose Back up now is on its way, so a second tap cannot fire
         preparing: new Set(),            // machine identities Vaier is readying to back up (first back-up), cleared on prepare-client-settled
         rootAfterGrant: new Set(),       // machine identities whose "back up as root" is waiting on the sudoers grant to land;
                                          //   the prepare-client-settled push asks once more, then drops them (never a loop)
@@ -6460,9 +6461,10 @@
             if (S.preparing.has(machineId)) ready.disabled = true;
             acts.appendChild(ready);
         }
-        const run = selVerb('refresh', running ? 'Backing up…' : 'Back up now',
+        const busy = running || S.starting.has(machineId);
+        const run = selVerb('refresh', busy ? 'Backing up…' : 'Back up now',
             needsReady ? 'ex-btn' : 'ex-btn is-accent', () => runNow(job));
-        if (running) run.disabled = true;
+        if (busy) run.disabled = true;
         // Protecting more is done where the files are: tick and Back up. This only opens that door (#335).
         const more = selVerb('archive', 'Back up more', 'ex-btn', () => go(['fleet', machineId, 'files']));
         acts.append(run, more);
@@ -6595,21 +6597,29 @@
     // Start a run now. The POST returns the RUNNING run at once; the outcome arrives on the backups stream
     // (watchBackups) as run-settled, so this shows RUNNING and never waits or polls for the end.
     async function runNow(job) {
+        // The launch takes a second or two over SSH; answer the tap now so it is never tapped twice.
+        if (S.starting.has(job.machineId)) return;
+        S.starting.add(job.machineId);
+        render();
         try {
             const res = await fetch('/backup-jobs/' + encodeURIComponent(job.machineId) + '/runs', { method: 'POST' });
             if (!res.ok) {
                 toast(res.status === 404
                     ? 'Cannot start the backup — Vaier can’t find where this machine’s backups are kept.'
-                    : 'Vaier could not start the backup.');
+                    : res.status === 409
+                        ? job.machineName + ' is already being backed up.'
+                        : 'Vaier could not start the backup.');
                 return;
             }
             const started = await res.json();                                     // RUNNING
             S.jobRuns.set(job.machineId, { state: 'ready', run: started });
             noteRunStatus(job.machineId, started.status);   // the card goes amber-idle while it runs, from here
             toast('Backing up ' + job.machineName + '…');
-            render();
         } catch (e) {
             toast('Vaier could not start the backup.');
+        } finally {
+            S.starting.delete(job.machineId);
+            render();
         }
     }
 

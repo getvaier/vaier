@@ -18,6 +18,7 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.CommandResult;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
@@ -36,6 +37,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -164,6 +168,46 @@ class BackupRunnerTest {
         assertThat(runs.getAll()).hasSize(1);
         assertThat(runs.getAll().get(0).status()).isEqualTo(BackupRunStatus.RUNNING);
         assertThat(runs.getAll().get(0).jobName()).isEqualTo("colina-home");
+    }
+
+    @Test
+    void runJobRefusesWhileTheMachinesLatestRunIsRunning_andLeavesThatRunRecorded() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        seedRunning("run-1");
+
+        assertThatThrownBy(() -> backupRunner.runJob(job(), repo(), "run-2"))
+            .isInstanceOf(ConflictException.class);
+
+        verify(runner, never()).run(any(), contains("nohup"));
+        assertThat(runs.getAll()).extracting(BackupRun::runId).containsExactly("run-1");
+    }
+
+    @Test
+    void runJobRefusesASecondLaunchWhileTheFirstIsStillBeingLaunched() throws Exception {
+        // A double tap on Back up now: both requests arrived before the first launch had recorded RUNNING,
+        // so the second borg died on the repository lock and its FAILED record replaced the real run.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        CountDownLatch launching = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(runner.run(eq(mid("Colina 27")), any())).thenAnswer(inv -> {
+            launching.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return new CommandResult(0, "STARTED 1234", "", false, "SHA256:x");
+        });
+        borgPresentOn("Colina 27");
+
+        CompletableFuture<BackupRun> first = CompletableFuture.supplyAsync(
+            () -> backupRunner.runJob(job(), repo(), "run-1"));
+        assertThat(launching.await(5, TimeUnit.SECONDS)).isTrue();
+
+        assertThatThrownBy(() -> backupRunner.runJob(job(), repo(), "run-2"))
+            .isInstanceOf(ConflictException.class);
+        release.countDown();
+
+        assertThat(first.get(5, TimeUnit.SECONDS).status()).isEqualTo(BackupRunStatus.RUNNING);
+        assertThat(runs.getAll()).extracting(BackupRun::runId).containsExactly("run-1");
     }
 
     // --- Back up as root: the run escalates to sudo, and refuses rather than escalating blindly ---

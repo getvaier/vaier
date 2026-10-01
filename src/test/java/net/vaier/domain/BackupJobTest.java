@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -256,6 +257,18 @@ class BackupJobTest {
         assertThat(enabledJob().isDue(TODAY, ZONE, Optional.of(failedOn(TODAY)))).isFalse();
         // But a failure on a previous day does not block today's scheduled attempt.
         assertThat(enabledJob().isDue(TODAY, ZONE, Optional.of(failedOn(TODAY.minusDays(1))))).isTrue();
+    }
+
+    @Test
+    void refuseStartWhileRunning_refusesOnlyWhileTheLatestRunIsInFlight() {
+        // A second borg on one repository dies on its lock — and its record would replace the real run's.
+        assertThatThrownBy(() -> enabledJob().refuseStartWhileRunning(Optional.of(runningOn(TODAY))))
+            .isInstanceOf(ConflictException.class)
+            .hasMessageContaining("already running");
+        for (Optional<BackupRun> latest : List.of(Optional.<BackupRun>empty(),
+                Optional.of(succeededOn(TODAY)), Optional.of(failedOn(TODAY)))) {
+            enabledJob().refuseStartWhileRunning(latest);
+        }
     }
 
     // --- The first-back-up readying DECISION lives here on the entity, not in the service ---
