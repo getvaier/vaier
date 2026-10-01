@@ -1428,8 +1428,6 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
     display: inline-flex; position: absolute;
     top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
 }
-.ex-topo .tp-label { font-family: 'Cormorant Garamond', 'Iowan Old Style', Georgia, serif; font-style: italic; font-weight: 600; fill: #e8edf4; }
-.ex-topo .is-off { fill: #7d8aa0; }
 .ex-topo .tp-hit { cursor: default; outline: none; }
 .ex-topo .tp-hit.is-open { cursor: pointer; }
 .ex-topo .tp-hit:focus-visible .tp-ring { stroke: #ffcf7a; stroke-width: 1.5; }

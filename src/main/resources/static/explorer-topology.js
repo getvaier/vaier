@@ -134,9 +134,12 @@
     }
 
     // opts: onOpen(machineId) when a machine is chosen; ago(epochSeconds) for "last seen", read when shown.
-    function draw(svg, tip, fleet, opts) {
+    function draw(live, tip, fleet, opts) {
         const onOpen = opts.onOpen, ago = opts.ago || (() => '');
-        svg.textContent = '';
+        // Drawn off the page and swapped in once its scenery has decoded: emptying the live picture first
+        // showed it without a background for a few frames on every update.
+        const mine = ++drawing;
+        const svg = document.createElementNS(NS, 'svg');
         const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
         function el(tag, attrs, parent) {
@@ -401,7 +404,8 @@
             g.setAttribute('tabindex', '0');
             const words = () => {
                 const seen = info.seen ? ago(info.seen) : '';
-                return [info.role, info.address, info.state + (info.state && seen ? ', last seen ' + seen : '')]
+                const state = typeof info.state === 'function' ? info.state() : info.state;
+                return [info.role, info.address, state + (state && seen ? ', last seen ' + seen : '')]
                     .filter(Boolean).join(' \u00b7 ');
             };
             const line = words();
@@ -551,11 +555,6 @@
             return band === 'med' ? casa(parent, x, houseWidth(h), houseHeight(h) + 4, h, h.isPeer, smear)
                                   : rorbu(parent, x, houseWidth(h), houseHeight(h), h, h.isPeer, smear);
         }
-        function text(x, y, words, cls, size, parent) {
-            const t = el('text', { x, y, class: cls, 'text-anchor': 'middle', 'font-size': size }, parent);
-            t.textContent = words;
-            return t;
-        }
 
         // --- villages -------------------------------------------------------------------------------------
         // Rows along each coast: the near shore first, then further up the coast, drawn smaller and set on a
@@ -644,7 +643,6 @@
                             if (lit) el('circle', { cx: bx.toFixed(1), cy: by.toFixed(1), r: 4, fill: 'url(#tp-glow)', opacity: 0.5 }, lights);
                         }
                     }
-                    text(v.natural / 2, -96, v.site.name, 'tp-label' + (v.site.peer.dark ? ' is-off' : ''), 30, g);
                     // The tunnel leaves from the village's own peer; the machines behind it reach the
                     // internet through that house and have no wake of their own.
                     villageWake(peerX, ri === 0 ? SHORE + 10 : R.base + 4, wakeIndex++, v.site.peer.dark,
@@ -703,7 +701,6 @@
             const b = p.house.stabbur ? stabbur(g, 6, p.house, null) : rorbu(g, 6, 32, 26, p.house, false, null);
             hoverable(b, p.house, p.house.id);
         });
-        text(X, 692, fleet.server.name, 'tp-label', 30, lh);
         const rightmost = Math.max(X + 62, ...skerryPlaced.filter((p) => p.x > X).map((p) => p.x + p.w + 10));
         flagpole(lh, rightmost, 604, fleet.server.country, 'where the Vaier server stands', fleet.server.place);
 
@@ -794,8 +791,8 @@
         // Spread over the whole water, clear of the lighthouse, its quay and each other.
         const pirates = el('g', {});
         const placed = sailing.map((b) => ({ x: b.at.x, y: b.at.y }));
-        fleet.bans.slice().sort((a, b) => a.left - b.left || a.ip.localeCompare(b.ip)).forEach((ban) => {
-            const t = Math.min(1, ban.left / 240);
+        fleet.bans.slice().sort((a, b) => a.drift - b.drift || a.ip.localeCompare(b.ip)).forEach((ban) => {
+            const t = Math.min(1, ban.drift / 240);
             const hr = rng(hash(ban.ip));
             const y = SHORE + 60 + t * 250 + (hr() - 0.5) * 40;
             const k = 0.3 + t * 0.4;
@@ -829,10 +826,12 @@
                 el('line', { x1: -6 * away, y1: -64, x2: -6 * away, y2: -80, stroke: '#1b1a1a', 'stroke-width': 2 }, outer);
                 cloth(outer, -6 * away + 1, -80, ban.country, 1.3);
             }
-            const hrs = Math.floor(ban.left / 60), mins = ban.left % 60;
             const said = [ban.country, triedWords(ban.scenario)].filter(Boolean).join(', ');
-            hoverable(outer, { name: ban.ip, role: said,
-                state: 'kept out for ' + (hrs ? hrs + ' h ' : '') + mins + ' min more' }, null);
+            hoverable(outer, { name: ban.ip, role: said, state: () => {
+                const left = Math.max(1, Math.round((ban.until - Date.now()) / 60000));
+                const hrs = Math.floor(left / 60), mins = left % 60;
+                return 'kept out for ' + (hrs ? hrs + ' h ' : '') + mins + ' min more';
+            } }, null);
             outer.classList.add('is-open');
             outer.setAttribute('role', 'link');
             outer.addEventListener('click', () => { tip.hidden = true; if (opts.onBan) opts.onBan(); });
@@ -908,11 +907,10 @@
         el('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#tp-vig)', 'pointer-events': 'none' });
 
         // The scenery is complete now the villages have added their smears: paint it once, under everything.
-        urls.forEach((u) => URL.revokeObjectURL(u));
-        urls = [];
+        const fresh = [];
         const picture = (root) => {
             const u = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(root)], { type: 'image/svg+xml' }));
-            urls.push(u);
+            fresh.push(u);
             return u;
         };
         svg.insertBefore(el('image', { href: picture(scene), x: 0, y: 0, width: W, height: H, 'pointer-events': 'none' }),
@@ -932,16 +930,35 @@
             el('image', { href: picture(grain), x: 0, y: 0, width: W, height: H, opacity: 0.035,
                 'pointer-events': 'none', style: 'mix-blend-mode: overlay' });
         }
-        resync(svg);
+        Promise.all(fresh.map(decoded)).then(() => {
+            if (mine !== drawing) { fresh.forEach((u) => URL.revokeObjectURL(u)); return; }
+            live.replaceChildren(...svg.childNodes);
+            // An animation keeps the clock of the picture it was made in, and the buffer's never runs.
+            live.querySelectorAll('animateMotion').forEach((a) => a.replaceWith(a.cloneNode(true)));
+            urls.forEach((u) => URL.revokeObjectURL(u));
+            urls = fresh;
+            resync(live);
+        });
     }
 
+    // Resolves once the browser holds the picture decoded, so the swap shows it at once.
+    function decoded(url) {
+        const img = new Image();
+        img.src = url;
+        return img.decode().catch(() => {});
+    }
+
+    let drawing = 0;   // the latest repaint; an older one still decoding is dropped
     let urls = [];   // the painted scenery of the last repaint, released on the next
 
     // Everything that moves keeps time by the wall clock, so a picture taken out of the page and put back (every
     // Explorer re-render does that) or redrawn carries on where it was instead of jumping to its start.
     function resync(svg) {
         const now = Date.now() / 1000;
-        try { svg.setCurrentTime(now % 86400); } catch (e) { /* not attached yet */ }
+        // Only a clock that restarted needs setting; nudging one that runs true is itself a stutter.
+        try {
+            if (Math.abs(svg.getCurrentTime() - now % 86400) > 0.25) svg.setCurrentTime(now % 86400);
+        } catch (e) { /* not attached yet */ }
         svg.querySelectorAll('.tp-beam').forEach((b) => {
             b.style.animationDelay = -(now % (b.classList.contains('is-up') ? 11 : 9)).toFixed(3) + 's';
         });

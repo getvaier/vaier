@@ -1916,8 +1916,8 @@
     function paintTopology() {
         if (!_topo || kindOf(S.path) !== 'topology' || !window.VaierTopology) return;
         const fleet = topologyFleet();
-        // When a machine was last seen is read as the tooltip opens, so its ageing never counts as a change.
-        const look = JSON.stringify(fleet, (k, v) => (k === 'seen' ? undefined : v));
+        // When a machine was last seen, or a ban ends, is read as the tooltip opens: neither ageing is a change.
+        const look = JSON.stringify(fleet, (k, v) => (k === 'seen' || k === 'until' ? undefined : v));
         if (look === _topo.drawn) return;
         _topo.drawn = look;
         _topo.tip.hidden = true;
@@ -1990,9 +1990,12 @@
                       address: (S.serverLocation && S.serverLocation.publicHost) || '', published: S.services.length,
                       country: (S.serverLocation && S.serverLocation.country) || '',
                       place: (S.serverLocation && S.serverLocation.city) || '' },
-            // Every address the edge is banning right now, with the time its ban has left as CrowdSec reports it.
-            bans: S.threats.filter((d) => d.type === 'ban').map((d) => ({ ip: d.sourceIp, country: d.country || '',
-                scenario: d.scenario || '', left: banMinutesLeft(d.duration) })).filter((b) => b.left > 0),
+            // Every address the edge is banning right now. Its ship drifts out in half-hour steps; the exact time
+            // left is read as the tooltip opens, so a ban ticking down never redraws the whole picture.
+            bans: S.threats.filter((d) => d.type === 'ban').map((d) => ({ d, left: banMinutesLeft(d.duration) }))
+                .filter((b) => b.left > 0)
+                .map(({ d, left }) => ({ ip: d.sourceIp, country: d.country || '', scenario: d.scenario || '',
+                    drift: Math.ceil(left / 30) * 30, until: Date.now() + left * 60000 })),
             // Where a village stands is where its peer is: the same estimate the Map draws a fixed-line peer at.
             sites: Array.from(sites.entries()).map(([id, s]) => {
                 const peer = S.peers.get(id);
