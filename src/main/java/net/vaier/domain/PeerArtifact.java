@@ -11,7 +11,6 @@ import java.util.Set;
  *
  * <ul>
  *   <li>{@link #WG_CONFIG}      — the {@code .conf} file every WG-backed peer gets</li>
- *   <li>{@link #QR_CODE}        — a QR-coded config, useful only for the mobile client</li>
  *   <li>{@link #DOCKER_COMPOSE} — Docker Compose template for running the peer as a container —
  *                                only useful on server-class hosts</li>
  *   <li>{@link #SETUP_SCRIPT}   — host-bootstrap setup script, currently Ubuntu-only</li>
@@ -19,7 +18,6 @@ import java.util.Set;
  */
 public enum PeerArtifact {
     WG_CONFIG,
-    QR_CODE,
     DOCKER_COMPOSE,
     SETUP_SCRIPT;
 
@@ -37,9 +35,11 @@ public enum PeerArtifact {
 
     /** As {@link #forPeer} for a peer that is known not to hold its own key — or where there is no peer. */
     public static Set<PeerArtifact> forPeerType(MachineType peerType) {
-        if (peerType == null || !peerType.isVpnPeer()) return EnumSet.noneOf(PeerArtifact.class);
+        // A personal device joins through the Vaier app with its own key: nothing to hand out.
+        if (peerType == null || !peerType.isVpnPeer() || peerType.joinsThroughVaierApp()) {
+            return EnumSet.noneOf(PeerArtifact.class);
+        }
         EnumSet<PeerArtifact> out = EnumSet.of(WG_CONFIG);
-        if (peerType == MachineType.MOBILE_CLIENT) out.add(QR_CODE);
         if (peerType.isServerType()) out.add(DOCKER_COMPOSE);
         if (peerType == MachineType.UBUNTU_SERVER) out.add(SETUP_SCRIPT);
         return out;

@@ -35,18 +35,24 @@ public class Device
     {
         DeviceStore.WantsConnected = true;
         TunnelService.Up(m.ConfigFile);
+        _ = Greet(m);
     }));
 
-    public Task Disconnect() => Only(() => Act(m =>
+    /// <summary>The goodbye goes through the tunnel, so it is said before the teardown.</summary>
+    public Task Disconnect() => Only(async () =>
     {
+        if (DeviceStore.Load() is not { } membership) return;
         DeviceStore.WantsConnected = false;
-        TunnelService.Down(m.ConfigFile);
-    }));
+        if (TunnelService.IsUp(membership.ConfigFile)) await _vaier.SayGoodbye(membership);
+        TunnelService.Down(membership.ConfigFile);
+    });
 
     /// <summary>Puts the tunnel back when the person wants it on and it is not — after an update, say.</summary>
     public Task KeepAsWanted() => Only(() => Act(m =>
     {
-        if (DeviceStore.WantsConnected && !TunnelService.IsUp(m.ConfigFile)) TunnelService.Up(m.ConfigFile);
+        if (!DeviceStore.WantsConnected || TunnelService.IsUp(m.ConfigFile)) return;
+        TunnelService.Up(m.ConfigFile);
+        _ = Greet(m);
     }));
 
     /// <summary>Asks to join; the answer is waited for here, so closing the window does not lose it.</summary>
@@ -157,6 +163,23 @@ public class Device
         {
             if (_pending == pending) _pending = null;
             if (notice is not null) DeviceStore.LeaveNotice(notice);
+        }
+    }
+
+    // Says hello only once the tunnel has shaken hands; before that it would leave by the ordinary route.
+    private async Task Greet(Membership membership)
+    {
+        try
+        {
+            for (var waited = 0; TunnelService.Peer(membership.ConfigFile)?.LastHandshake is not { } at || at == default; waited += 250)
+            {
+                if (waited >= 5000) return;
+                await Task.Delay(250);
+            }
+            await _vaier.SayHello(membership);
+        }
+        catch (Exception)
+        {
         }
     }
 

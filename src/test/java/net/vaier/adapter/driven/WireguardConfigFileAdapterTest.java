@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 class WireguardConfigFileAdapterTest {
 
@@ -229,6 +230,18 @@ class WireguardConfigFileAdapterTest {
         assertThat(result).isPresent();
         assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.MachineType.MOBILE_CLIENT);
         assertThat(result.get().lanCidr()).isNull();
+    }
+
+    @Test
+    void aRetiredWindowsServerPeer_stillLoads_asAnUbuntuServer() throws IOException {
+        // WINDOWS_SERVER was dropped; a peer stored with it must not vanish, and stays a split-tunnel server.
+        createPeerConfWithVaierMetadata("winbox", "10.13.13.9", "{\"peerType\":\"WINDOWS_SERVER\"}");
+
+        List<ILoggingEvent> warnings = whileCapturingWarnings(() ->
+            assertThat(adapter.getAllPeerConfigs()).extracting(PeerConfiguration::id, PeerConfiguration::peerType)
+                .contains(tuple("winbox", MachineType.UBUNTU_SERVER)));
+
+        assertThat(warnings).as("a known legacy type, not an unknown one").isEmpty();
     }
 
     @Test

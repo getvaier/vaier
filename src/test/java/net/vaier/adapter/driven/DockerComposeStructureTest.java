@@ -157,6 +157,9 @@ class DockerComposeStructureTest {
         assertThat(rule).contains("PathRegexp(`^/vpn/enrolments/[A-Za-z0-9_-]{43}/events$`)");
         assertThat(rule).contains("Path(`/vpn/peers/leave`) && Method(`POST`)");
         assertThat(rule).contains("Path(`/vpn/peers/standing`) && Method(`POST`)");
+        // Hello and goodbye come through the tunnel, never from the internet.
+        assertThat(rule).doesNotContain("/vpn/peers/goodbye");
+        assertThat(rule).doesNotContain("/vpn/peers/hello");
 
         // Nothing else on /vpn may be anonymous — most of all not the admin list, the approve or the
         // refuse, which are what decide who gets into the fleet.
@@ -204,6 +207,32 @@ class DockerComposeStructureTest {
         assertThat(publicRule).doesNotContain("/vpn/enrolments");
         assertThat(publicRule).doesNotContain("/vpn/peers/leave");
         assertThat(publicRule).doesNotContain("/vpn/peers/standing");
+        assertThat(publicRule).doesNotContain("/vpn/peers/goodbye");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void helloAndGoodbye_haveATunnelOnlyDoor_thatCarriesNothingElse() throws Exception {
+        Map<String, Object> services = (Map<String, Object>) ((Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")))).get("services");
+        Map<String, Object> traefik = (Map<String, Object>) services.get("traefik");
+        List<String> command = (List<String>) traefik.get("command");
+
+        // A fixed bridge address the apps can name, and a port no host publishes.
+        Map<String, Object> network = (Map<String, Object>) ((Map<String, Object>) traefik.get("networks"))
+            .get("vaier-network");
+        assertThat(network.get("ipv4_address")).isEqualTo("172.20.0.251");
+        assertThat(command).contains("--entrypoints.tunnel.address=:8090");
+        assertThat((List<String>) traefik.get("ports")).noneMatch(port -> port.contains("8090"));
+        // A router that names no entrypoint must never land on the tunnel door.
+        assertThat(command).contains("--entrypoints.web.asDefault=true", "--entrypoints.websecure.asDefault=true");
+
+        Map<String, String> labels = vaierLabels();
+        assertThat(labels.get("traefik.http.routers.vaier-tunnel.entrypoints")).isEqualTo("tunnel");
+        assertThat(labels.get("traefik.http.routers.vaier-tunnel.rule"))
+            .isEqualTo("Method(`POST`) && (Path(`/vpn/peers/hello`) || Path(`/vpn/peers/goodbye`))");
+        assertThat(labels.entrySet()).filteredOn(e -> e.getKey().endsWith(".entrypoints"))
+            .filteredOn(e -> e.getValue().contains("tunnel")).hasSize(1);
     }
 
     @Test

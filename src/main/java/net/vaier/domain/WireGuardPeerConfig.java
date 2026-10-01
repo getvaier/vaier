@@ -287,6 +287,8 @@ public final class WireGuardPeerConfig {
         // A Device-held key is never out of date: a Reissue of one is refused, so the mark would name a
         // divergence with no action behind it — and nothing is marked that nobody can act on.
         if (deviceHeldKey(existingContent)) return false;
+        // Nor is a legacy personal device whose key Vaier minted: it is never reissued any more.
+        if (peerType != null && peerType.joinsThroughVaierApp()) return false;
         // The "# VAIER:" comment is pure Vaier-side metadata — never installed into the WireGuard
         // tunnel — and is written by Jackson (different field order, may carry a deviceCategory key
         // that generate() omits). Out-of-date must reflect divergence in the real tunnel directives

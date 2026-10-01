@@ -97,10 +97,10 @@ class PeerConnectivityWatcherTest {
     }
 
     @Test
-    void windowsServerTransition_isNotified() {
-        when(peerIdResolver.resolvePeerIdByIp("10.0.0.5")).thenReturn("win-server");
+    void serverPeerTransitionsToConnected_notifiesAdmins() {
+        when(peerIdResolver.resolvePeerIdByIp("10.0.0.5")).thenReturn("server-b");
         when(peerConfigs.getPeerConfigByIp("10.0.0.5"))
-                .thenReturn(Optional.of(configResult("win-server", "10.0.0.5", MachineType.WINDOWS_SERVER)));
+                .thenReturn(Optional.of(configResult("server-b", "10.0.0.5", MachineType.UBUNTU_SERVER)));
 
         when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.5/32", "0")));
         watcher.checkConnectivity();
@@ -111,7 +111,7 @@ class PeerConnectivityWatcherTest {
         ArgumentCaptor<PeerSnapshot> captor = ArgumentCaptor.forClass(PeerSnapshot.class);
         verify(notifier).notifyAdmins(captor.capture());
         assertThat(captor.getValue().connected()).isTrue();
-        assertThat(captor.getValue().peerType()).isEqualTo(MachineType.WINDOWS_SERVER);
+        assertThat(captor.getValue().peerType()).isEqualTo(MachineType.UBUNTU_SERVER);
     }
 
     @Test

@@ -440,6 +440,33 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
+    void apiRoutes_aRouterThatMatchesNoHost_isNotARoute() throws IOException {
+        // The tunnel door's router matches on path alone; as a route with no domain it took the launchpad down.
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/http/routers", exchange -> respond(exchange, """
+            [{"name":"api-router@file","rule":"Host(`api.example.com`)","service":"api-service@file",
+              "provider":"file","entryPoints":["websecure"]},
+             {"name":"vaier-tunnel@docker","rule":"Method(`POST`) && Path(`/vpn/peers/hello`)",
+              "service":"api-service@file","provider":"docker","entryPoints":["tunnel"]}]
+            """));
+        server.createContext("/api/http/services", exchange -> respond(exchange, """
+            [{"name":"api-service@file","loadBalancer":{"servers":[{"url":"http://10.0.0.9:7000"}]}}]
+            """));
+        server.createContext("/api/tcp/routers", exchange -> respond(exchange, "[]"));
+        server.createContext("/api/tcp/services", exchange -> respond(exchange, "[]"));
+        server.start();
+        try {
+            TraefikReverseProxyAdapter apiAdapter = new TraefikReverseProxyAdapter(
+                tempDir.resolve("remote-apps.yml").toString(),
+                "http://localhost:" + server.getAddress().getPort(), "example.com");
+            assertThat(apiAdapter.getReverseProxyRoutes()).extracting(ReverseProxyRoute::getDomainName)
+                .containsExactly("api.example.com");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void apiRoutes_bouncerNamedForwardAuth_doesNotMakeAPublicServiceReportAsAuthenticated() throws IOException {
         // "crowdsec-forwardauth@file" beat the old substring rule outright.
         assertThat(apiRouteWithMiddlewares("[\"crowdsec-forwardauth@file\",\"vaier-errors@file\"]").getAuthInfo())

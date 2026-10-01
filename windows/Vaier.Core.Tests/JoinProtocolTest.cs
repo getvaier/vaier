@@ -18,7 +18,7 @@ public class JoinProtocolTest
     }
 
     [Fact]
-    public void Leaving_and_asking_about_standing_prove_who_is_asking_with_both_keys()
+    public void Leaving_asking_about_standing_and_saying_hello_and_goodbye_prove_who_is_asking_with_both_keys()
     {
         var sent = JsonDocument.Parse(JoinProtocol.Proof("pub=", "psk=")).RootElement;
 

@@ -7,6 +7,8 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.EnrolDeviceUseCase;
 import net.vaier.application.CheckStandingUseCase;
+import net.vaier.application.SayGoodbyeUseCase;
+import net.vaier.application.SayHelloUseCase;
 import net.vaier.application.LeaveFleetUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.LookUpEnrolmentTicketUseCase;
@@ -71,6 +73,7 @@ import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForRecordingPeerSignals;
 import net.vaier.domain.port.ForHoldingEnrolmentRequests;
 import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForPersistingLanServers;
@@ -114,6 +117,8 @@ public class VpnService implements
     LookUpEnrolmentTicketUseCase,
     LeaveFleetUseCase,
     CheckStandingUseCase,
+    SayGoodbyeUseCase,
+    SayHelloUseCase,
     DeletePeerUseCase,
     GetVpnClientsUseCase,
     GetVpnPeersUseCase,
@@ -167,6 +172,7 @@ public class VpnService implements
     private final ForPersistingLastServicesReached forPersistingLastServicesReached;
     private final ForHoldingEnrolmentRequests forHoldingEnrolmentRequests;
     private final ForGettingServerPublicKey forGettingServerPublicKey;
+    private final ForRecordingPeerSignals forRecordingPeerSignals;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -190,7 +196,8 @@ public class VpnService implements
                       ForPersistingMachinePositions forPersistingMachinePositions,
                       ForPersistingLastServicesReached forPersistingLastServicesReached,
                       ForHoldingEnrolmentRequests forHoldingEnrolmentRequests,
-                      ForGettingServerPublicKey forGettingServerPublicKey) {
+                      ForGettingServerPublicKey forGettingServerPublicKey,
+                      ForRecordingPeerSignals forRecordingPeerSignals) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerIds = forResolvingPeerIds;
@@ -213,6 +220,7 @@ public class VpnService implements
         this.forPersistingMachinePositions = forPersistingMachinePositions;
         this.forPersistingLastServicesReached = forPersistingLastServicesReached;
         this.forHoldingEnrolmentRequests = forHoldingEnrolmentRequests;
+        this.forRecordingPeerSignals = forRecordingPeerSignals;
         this.forGettingServerPublicKey = forGettingServerPublicKey;
     }
 
@@ -342,6 +350,7 @@ public class VpnService implements
             // itself travels too — it is what tells the pane a Reissue is refused for this machine.
             .availableArtifacts(PeerArtifact.forPeer(peerType, deviceHeldKey))
             .deviceHeldKey(deviceHeldKey)
+            .joinsThroughVaierApp(peerType.joinsThroughVaierApp())
             .lanCidr(lanCidr).lanAddress(lanAddress).description(description)
             .geoLocation(geo).configOutOfDate(configOutOfDate)
             .deviceCategory(deviceCategory).deviceCategoryOverridden(deviceCategoryOverridden)
@@ -498,11 +507,20 @@ public class VpnService implements
                 .map(c -> new PeerConfigResult(c.id(), c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress(), c.description(), c.deviceHeldKey()));
     }
 
+    @Override
+    public Optional<PeerConfigResult> retrievePeerConfig(String peerIdentifier) {
+        Optional<PeerConfigResult> config = getPeerConfig(peerIdentifier);
+        config.ifPresent(c -> c.peerType().requireVaierMintedConfig(c.name()));
+        return config;
+    }
+
     // --- GenerateDockerComposeUseCase ---
 
     @Override
     public String generateWireguardClientDockerCompose(String peerId, String serverUrl, String serverPort) {
         log.info("Generating docker-compose for peer: {}", peerId);
+        peerConfigProvider.getPeerConfigByName(peerId)
+            .ifPresent(c -> c.peerType().requireVaierMintedConfig(c.name()));
         ForGeneratingDockerComposeFiles.DockerComposeConfig config =
             new ForGeneratingDockerComposeFiles.DockerComposeConfig(peerId, serverUrl, serverPort);
         return dockerComposeGenerator.generateWireguardClientDockerCompose(config);
@@ -514,7 +532,7 @@ public class VpnService implements
     public Optional<String> generateSetupScript(String peerId, String serverUrl, String serverPort) {
         log.info("Generating setup script for peer: {}", peerId);
 
-        return getPeerConfig(peerId).map(peerConfig -> PeerSetupScript.generate(
+        return retrievePeerConfig(peerId).map(peerConfig -> PeerSetupScript.generate(
             peerId, peerConfig.ipAddress(), serverUrl, serverPort,
             peerConfig.configContent(), peerConfig.lanCidr(), vpnSubnet));
     }
@@ -639,6 +657,7 @@ public class VpnService implements
             net.vaier.domain.Cidr.validateLanCidr(lanCidr);
         }
         MachineType resolvedType = peerType != null ? peerType : MachineType.defaultType();
+        resolvedType.requireVaierMintedConfig(name);
         // Read the peer configs once (a filesystem scan), for id generation.
         List<ForGettingPeerConfigurations.PeerConfiguration> allPeers = peerConfigProvider.getAllPeerConfigs();
         // A machine's name no longer has to be free (§6.22): it is a label, and every record that used to
@@ -817,6 +836,32 @@ public class VpnService implements
             .isPresent();
     }
 
+    // --- SayHelloUseCase / SayGoodbyeUseCase: an app speaks through its tunnel ---
+
+    @Override
+    public boolean sayHello(String publicKey, String presharedKey) {
+        Optional<ForGettingPeerConfigurations.PeerConfiguration> peer = provedPeer(publicKey, presharedKey);
+        peer.ifPresent(p -> {
+            log.info("Peer {} said hello", p.id());
+            forRecordingPeerSignals.recordHello(publicKey);
+        });
+        return peer.isPresent();
+    }
+
+    @Override
+    public boolean sayGoodbye(String publicKey, String presharedKey) {
+        Optional<ForGettingPeerConfigurations.PeerConfiguration> peer = provedPeer(publicKey, presharedKey);
+        peer.ifPresent(p -> {
+            log.info("Peer {} said goodbye", p.id());
+            forRecordingPeerSignals.recordGoodbye(publicKey);
+        });
+        return peer.isPresent();
+    }
+
+    private Optional<ForGettingPeerConfigurations.PeerConfiguration> provedPeer(String publicKey, String presharedKey) {
+        return PeerProof.of(publicKey, presharedKey).whichPeer(peerConfigProvider.getAllPeerConfigs());
+    }
+
     /**
      * Everything a peer about to join needs that is the same whether Vaier minted its keypair or the
      * device did: its tunnel address, its preshared key, the server's key and endpoint, and the identity
@@ -862,6 +907,7 @@ public class VpnService implements
             throw new ConflictException(peer.name() + " made its own key, so there is no config to "
                 + "reissue. Remove it and enrol it again from the app to replace the key.");
         }
+        peer.peerType().requireVaierMintedConfig(peer.name());
         String serverPublicKey = forGettingServerPublicKey.getServerPublicKey();
         String serverEndpoint = extractServerEndpoint();
         String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);

@@ -342,6 +342,11 @@ services:
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # The tunnel door: hello and goodbye from the Vaier app, reachable only through WireGuard (no host
+      # port). The public entrypoints are the default, so a router naming none never lands here.
+      - --entrypoints.tunnel.address=:8090
+      - --entrypoints.web.asDefault=true
+      - --entrypoints.websecure.asDefault=true
       # Every Vaier router is websecure-only, so a schemeless hostname (which browsers request as
       # http://) would hit no router and get Traefik's default 404. Globally redirect web->websecure.
       # Traefik serves the ACME HTTP-01 challenge below at higher priority than this redirect, so
@@ -406,6 +411,8 @@ services:
           - vaier.${VAIER_DOMAIN}
           - oauth2.${VAIER_DOMAIN}
           - dex.${VAIER_DOMAIN}
+        # Pinned so the Vaier app can name the tunnel door; high in the subnet like WireGuard's .250.
+        ipv4_address: 172.20.0.251
 
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.4.2
@@ -758,6 +765,15 @@ services:
       - traefik.http.middlewares.vaier-enrolment-ratelimit.ratelimit.average=10
       - traefik.http.middlewares.vaier-enrolment-ratelimit.ratelimit.period=1m
       - traefik.http.middlewares.vaier-enrolment-ratelimit.ratelimit.burst=5
+      # Hello and goodbye, on the tunnel door only. Every peer reaches it from WireGuard's one address, so
+      # the bucket is shared and generous; the proof in the body is what says who is talking.
+      - traefik.http.routers.vaier-tunnel.rule=Method(`POST`) && (Path(`/vpn/peers/hello`) || Path(`/vpn/peers/goodbye`))
+      - traefik.http.routers.vaier-tunnel.entrypoints=tunnel
+      - traefik.http.routers.vaier-tunnel.service=vaier
+      - traefik.http.routers.vaier-tunnel.middlewares=crowdsec-bouncer@file,vaier-tunnel-ratelimit
+      - traefik.http.middlewares.vaier-tunnel-ratelimit.ratelimit.average=60
+      - traefik.http.middlewares.vaier-tunnel-ratelimit.ratelimit.period=1m
+      - traefik.http.middlewares.vaier-tunnel-ratelimit.ratelimit.burst=30
       # Tier 2 — IDENTITY-OPTIONAL router: the viewer-adaptive endpoints. oauth2-authn only — it
       # injects the identity headers (X-Auth-Request-*) when a session exists, and returns 401 for an
       # anonymous caller (the page treats that as anonymous and falls back to /launchpad/services).

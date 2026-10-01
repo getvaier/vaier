@@ -26,23 +26,20 @@ Every published service resolves to the single Vaier server through your one `*.
 
 ## Adding a VPN peer
 
-Add a peer from the **Explorer** — **Add a machine → A peer**. Vaier asks only *intent*, in plain terms, and generates everything else (tunnel address, keys, config); you never pick a raw routing type. Four small in-modal steps:
+Add a peer from the **Explorer** — **Add a machine → A peer**. Vaier asks only *intent*, in plain terms, and generates everything else (tunnel address, keys, config); you never pick a raw routing type. The first question splits the two kinds of peer:
 
-1. **What is this?** — **A server** (runs around the clock, can host services — a split-tunnel peer that can route its LAN) or **A personal device** (a phone, laptop or desktop that just needs to reach the fleet — a full-tunnel client).
-2. **Which OS / device?** — a server asks **Ubuntu** or **Windows**; a personal device asks **Phone / Mac / Linux** or **Windows PC**. Windows is the only detail that changes the routing type within an intent.
-3. **Name** — the one thing Vaier can't generate.
-4. **Handoff** — the config, shown once, with the steps to get it onto the machine.
+- **A server** (runs around the clock, can host services — a split-tunnel peer that can route its LAN) goes straight to its **name**, the one thing Vaier can't generate, and then the **handoff**: the config, shown once, with the steps to get it onto the machine.
+- **A personal device** (an Android phone or a Windows PC that needs to reach the fleet — a full-tunnel client) opens **Add a personal device**, which says how it joins instead: on the device, open your Vaier's address and install the **Vaier app** from the card on the launchpad, join from the app to get a four-digit code, and approve it under **Waiting to join** on the fleet page. See [Enrolment from the Vaier app](#enrolment-from-the-vaier-app).
 
-Your answers resolve to one of the four peer types, and each has its own handoff:
+| What | Peer type | Default routing | Handoff |
+|------|-----------|-----------------|---------|
+| A server | Ubuntu server | VPN subnet only | **No-sudo setup link** — log in as yourself, paste one `curl -fsSL '…/vpn/peers/<id>/setup?t=<token>' \| bash` line, and it pulls the config and starts WireGuard in a container (Docker only, no root); the link is single-use and short-lived. Copying the `vaier-up.sh` script by hand stays as a fallback, plus the docker-compose download |
+| A personal device — Android | Mobile client | All traffic | The Vaier app and a join code — Vaier makes no config |
+| A personal device — Windows PC | Windows client | All traffic | The Vaier app and a join code — Vaier makes no config |
 
-| What / OS | Peer type | Default routing | Handoff |
-|-----------|-----------|-----------------|---------|
-| A server / Ubuntu | Ubuntu server | VPN subnet only | **No-sudo setup link** — log in as yourself, paste one `curl -fsSL '…/vpn/peers/<id>/setup?t=<token>' \| bash` line, and it pulls the config and starts WireGuard in a container (Docker only, no root); the link is single-use and short-lived. Copying the `vaier-up.sh` script by hand stays as a fallback, plus the docker-compose download |
-| A server / Windows | Windows server | VPN subnet only | `.conf` + docker-compose + brief WireGuard-for-Windows import steps |
-| A personal device / Phone · Mac · Linux | Mobile client | All traffic | QR code + `.conf` |
-| A personal device / Windows PC | Windows client | All traffic | `.conf` + WireGuard-app import steps |
+**Only Vaier's own clients join as personal devices.** A phone or a Windows PC joins only through the Vaier app, with a key it makes itself; Vaier refuses to create, reissue or regenerate a config for one, and every config download refuses it. There is no QR code and no WireGuard-app route any more. A personal device added the old way, with a key Vaier minted, keeps working — it just gets nothing new; to change its key, remove it and join again from the app. A server always runs Vaier's own WireGuard client in Docker, so there is no separate Windows server type: a peer stored as one reads as an Ubuntu server.
 
-The handoff is shown **once**, in the same modal, and each variant shows a live "waiting for first handshake — turns green on its own" indicator. A server's routed LAN isn't asked here — set it later from the machine's pane once the peer is up. When you do, you're never asked for a CIDR: Vaier reads the network the machine sits on — over the SSH connection it already has — and asks only whether the fleet should reach it, naming the machine and the interface it read it from.
+A server's handoff is shown **once**, in the same modal, with a live "waiting for first handshake — turns green on its own" indicator. A server's routed LAN isn't asked here — set it later from the machine's pane once the peer is up. When you do, you're never asked for a CIDR: Vaier reads the network the machine sits on — over the SSH connection it already has — and asks only whether the fleet should reach it, naming the machine and the interface it read it from.
 
 **A full-tunnel client can't reach a LAN it is sitting on.** A personal device routes *all traffic* into the tunnel, and the WireGuard clients pair that with a kill-switch: untunneled traffic is blocked outright. But the operating system still prefers its own on-link route for the local subnet, so packets aimed at a machine on the network the device is physically plugged into leave *outside* the tunnel — and the kill-switch drops them. The device reaches the whole fleet and loses only the LAN under its feet. On Windows the signature is unmistakable: `tracert` to the local address reports `General failure` on the first hop, meaning the packet never left the machine, where a genuinely unreachable host would time out instead.
 
@@ -73,22 +70,24 @@ Every machine carries a **status colour** on its icon in the **Explorer** tree, 
 
 The fleet's machines live as entries in the **Explorer** tree; a **Map** entry at the fleet root plots each machine at its geographic location on a world map.
 
-After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
+After creating a server peer, run its setup link on the machine. Vaier shows the peer's handshake status.
 
 ### Show-once peer config
 
-The WireGuard config for a peer is delivered **exactly once**, at create time: the create-success modal shows the config text, an inline QR code, and download buttons for `.conf` / `docker-compose.yml` / setup script as appropriate. Save what you need before closing the modal — the five secret-bearing endpoints (`/config`, `/config-file`, `/qr-code`, `/docker-compose`, `/setup-script`) return `410 Gone` once the budget is burned.
+The WireGuard config for a peer is delivered **exactly once**, at create time: the create-success modal shows the config text and download buttons for `.conf` / `docker-compose.yml` / setup script. Save what you need before closing the modal — the four secret-bearing endpoints (`/config`, `/config-file`, `/docker-compose`, `/setup-script`) return `410 Gone` once the budget is burned. A personal device has no such config at all: those endpoints refuse it without spending the budget.
 
-To get a fresh config for an existing peer, the machine's pane in the **Explorer** offers two actions (folded under **Advanced**):
+To get a fresh config for an existing server peer, the machine's pane in the **Explorer** offers two actions (folded under **Advanced**):
 
 - **Reissue config** — re-renders the config from the *current* generation logic while **keeping the peer's keypair**, then re-opens the one-shot delivery. Use this to **recover a lost config** without disrupting the tunnel — the keys are preserved, though the re-rendered contents may differ from the original (e.g. updated `AllowedIPs`) — or to refresh one that's gone **out of date** because what Vaier would generate now no longer matches the installed config (the machine's pane shows a ⚠ **out-of-date config** badge). The live tunnel keeps working; reinstall the reissued config on the peer machine to apply it.
 - **Regenerate** — deletes and recreates the peer with the same name, **rotating the keypair** as a side effect. Use this if the key may be compromised; the old config stops working immediately.
+
+Neither is offered for a personal device, which only ever holds a key it made itself.
 
 Why show-once: WireGuard has no session concept, no server-side revocation, and the same config works on any number of devices. A leaked screenshot or `.conf` would otherwise be a permanent backdoor.
 
 ### Enrolment from the Vaier app
 
-A phone running the **Vaier app** joins without meeting the WireGuard app at all. It makes its own key on the phone and asks to join, showing a four-digit **join code** on screen while it waits — you let it in from wherever you're already signed in, your own laptop or the phone itself, and the moment you do, the phone connects on its own. You don't have to be watching the fleet page to catch it: admins get a mail with the code and the one link that lets it in. The private half of the key never leaves the phone — Vaier only ever sees the public half — so there is no config to save, no QR to photograph, and nothing to download for that phone ever again.
+This is the only way a phone or a Windows PC joins. A phone running the **Vaier app** never meets the WireGuard app. It makes its own key on the phone and asks to join, showing a four-digit **join code** on screen while it waits — you let it in from wherever you're already signed in, your own laptop or the phone itself, and the moment you do, the phone connects on its own. You don't have to be watching the fleet page to catch it: admins get a mail with the code and the one link that lets it in. The private half of the key never leaves the phone — Vaier only ever sees the public half — so there is no config to save and nothing to download for that phone ever again.
 
 **Get the app from your own Vaier.** Open the launchpad on the phone and an **Install card** offers it — no store and no account. The card appears only on a device that can take the app — an Android phone or a Windows computer — and only when your Vaier is actually carrying a copy. The copy you download has your Vaier's own address written into it, so the app already knows where it came from and never asks you to type one.
 
@@ -104,7 +103,11 @@ A phone running the **Vaier app** joins without meeting the WireGuard app at all
 
 **Leave Vaier** sits in the app's ⋯ menu and works as it does on the phone: the tunnel goes down first, then the computer takes itself out of the fleet. A computer you remove from your end notices on its own, too. The manager service watches the tunnel; after three minutes without a handshake (and at most once every five minutes) it takes the tunnel down, asks your Vaier over ordinary internet whether this computer is still a member, and either puts the tunnel back or forgets the membership and says so in a Windows notification, which the window repeats the next time it opens. Opening the window with the tunnel off asks once, too. The question needs the tunnel down because a laptop routing all its traffic through the tunnel, behind WireGuard's kill switch, can reach nothing else — so a removed laptop sits offline for roughly four to five minutes before it notices, and that is why the watch is a service of its own rather than part of the tunnel.
 
-Removing a machine from a browser running on that same machine cuts the tunnel carrying Vaier's answer, so the fleet page tries to stop you — but it can only be exact when Vaier sees the request arrive from that machine's tunnel address. When it does, a device that joined through the Vaier app gets no **Remove** at all — the page points you to **Leave Vaier** in the app, which disconnects first — and Vaier refuses such a removal if one arrives anyway; a machine using the WireGuard app keeps **Remove**, and the confirmation says the browser loses Vaier at once and to turn the tunnel off in the WireGuard app afterwards.
+**Connecting and disconnecting show at once.** WireGuard never says hello or goodbye: a device normally reads as connected for up to three minutes after its last handshake, and a fresh connect waits for Vaier's next look at the tunnel, up to ten seconds. The Vaier app says both itself, through the tunnel. When you disconnect on purpose — the switch or the Quick Settings tile on Android, Disconnect on Windows — the app sends a **goodbye** just *before* it takes the tunnel down (waiting at most two seconds, then disconnecting regardless), and the fleet shows it disconnected straight away. Right after it connects it sends a **hello** — at once on Android, after the first handshake on Windows (at most five seconds) — and Vaier reads the tunnel afresh and shows it connected within about a second. Both carry the same proof as Leave, because Vaier cannot see which device is talking: the WireGuard container masquerades tunnel traffic, so every device arrives from the same address.
+
+They go to a **tunnel door**: a Traefik entrypoint on port 8090 of Vaier's internal network (Traefik is pinned at `172.20.0.251` so the apps can name it), with no host port, so it answers only what arrives through WireGuard and never the internet. It carries those two messages and nothing else, behind the CrowdSec bouncer and a rate limit of its own; the public enrolment router does not carry them. It is best-effort: Leave, the removal watch, a Windows shutdown or uninstall send no goodbye, a device that simply drops off (lost signal, a flat battery) or a peer not running a Vaier app still takes the three minutes, and so does every device for a while after Vaier restarts, since goodbyes are held only in memory. It needs Android app 0.8 or Windows app 0.6.2.
+
+Removing a machine from a browser running on that same machine cuts the tunnel carrying Vaier's answer, so the fleet page tries to stop you — but it can only be exact when Vaier sees the request arrive from that machine's tunnel address. When it does, a device that joined through the Vaier app gets no **Remove** at all — the page points you to **Leave Vaier** in the app, which disconnects first — and Vaier refuses such a removal if one arrives anyway; any other machine — a server, or a personal device added before the Vaier app, with a key Vaier minted — keeps **Remove**, and the confirmation says the browser loses Vaier at once and to turn its tunnel off afterwards.
 
 Today a device that routes all its traffic through Vaier (a phone or a Windows computer) usually reaches Vaier's own page the long way round: the request leaves the server for Vaier's public address and comes back in wearing that address, not the device's tunnel address. Vaier can then tell only that the browser sits behind *some* such device, not which one. In that case every machine keeps **Remove**, and removing a Vaier-app device adds a warning to the confirmation: if you are using it right now, use **Leave Vaier** in its app instead.
 
@@ -114,7 +117,7 @@ The Windows app is not yet signed, so Windows SmartScreen warns before the first
 
 ### Fleet DNS
 
-Every personal device's config — whether from the show-once download or the Vaier app — names `DNS = 172.20.0.53`: **Pi-hole**, which is part of Vaier's own stack. Server peers get no DNS line; they keep their own resolver, since they only send the fleet's addresses into the tunnel.
+Every personal device's config — from the Vaier app, or from a show-once download for one added before it — names `DNS = 172.20.0.53`: **Pi-hole**, which is part of Vaier's own stack. Server peers get no DNS line; they keep their own resolver, since they only send the fleet's addresses into the tunnel.
 
 Pi-hole sits at that fixed address on Vaier's internal network and publishes no host port, so it answers only what arrives through the tunnel — never the internet. Its data lives in `./pihole/` in your install directory. Before it shipped with Vaier it was a stack you ran yourself, and a fresh install without one left every phone and laptop with a tunnel and no working DNS.
 

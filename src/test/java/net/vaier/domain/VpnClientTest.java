@@ -28,6 +28,25 @@ class VpnClientTest {
     }
 
     @Test
+    void isConnected_endsAtAGoodbye_untilTheNextHandshake() {
+        // WireGuard never says goodbye, so without one a disconnect reads as connected for 180 s.
+        record Row(String description, long goodbyeAgo, boolean expected) {}
+        long now = System.currentTimeMillis() / 1000;
+        String handshake = String.valueOf(now - 60);
+        List<Row> rows = List.of(
+            new Row("goodbye after the latest handshake", 10, false),
+            new Row("goodbye in the same second as the handshake", 60, false),
+            new Row("handshake since the goodbye: it reconnected", 120, true)
+        );
+
+        for (Row row : rows) {
+            VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", handshake, "0", "0")
+                .withGoodbyeAt(now - row.goodbyeAgo());
+            assertThat(client.isConnected()).as(row.description()).isEqualTo(row.expected());
+        }
+    }
+
+    @Test
     void latestHandshakeEpoch_parsesOrDefaultsToZero() {
         record Row(String description, String handshake, long expected) {}
         List<Row> rows = List.of(

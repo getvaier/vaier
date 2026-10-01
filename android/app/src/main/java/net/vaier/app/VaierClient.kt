@@ -136,6 +136,33 @@ class VaierClient {
             }
         }
 
+    /** Says, through the tunnel, that this phone has just connected. A few tries: the first can race the tunnel. */
+    fun hello(publicKey: String, presharedKey: String) {
+        repeat(HELLO_ATTEMPTS) { attempt ->
+            if (tell("hello", JoinProtocol.helloRequest(publicKey, presharedKey), HELLO_TIMEOUT_MILLIS)) return
+            if (attempt < HELLO_ATTEMPTS - 1) Thread.sleep(RETRY_MILLIS)
+        }
+    }
+
+    /** Says, through the tunnel, that this phone is about to disconnect. One brief try. */
+    fun goodbye(publicKey: String, presharedKey: String) {
+        tell("goodbye", JoinProtocol.goodbyeRequest(publicKey, presharedKey), GOODBYE_TIMEOUT_MILLIS)
+    }
+
+    // True once Vaier answered at all. Never pooled: a connection opened through an earlier tunnel is dead.
+    private fun tell(route: String, body: String, timeoutMillis: Int): Boolean {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = post("${TunnelDoor.ADDRESS}/vpn/peers/$route", body, timeoutMillis, keepAlive = false)
+            connection.responseCode
+            true
+        } catch (e: IOException) {
+            false
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     private fun verdictIn(reader: BufferedReader): Verdict {
         val events = EventStream()
         while (true) {
@@ -148,11 +175,12 @@ class VaierClient {
         }
     }
 
-    private fun post(url: String, body: String): HttpURLConnection =
+    private fun post(url: String, body: String, timeoutMillis: Int = TIMEOUT_MILLIS, keepAlive: Boolean = true): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = TIMEOUT_MILLIS
-            readTimeout = TIMEOUT_MILLIS
+            if (!keepAlive) setRequestProperty("Connection", "close")
+            connectTimeout = timeoutMillis
+            readTimeout = timeoutMillis
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json")
@@ -164,6 +192,10 @@ class VaierClient {
 
     private companion object {
         const val TIMEOUT_MILLIS = 15_000
+        const val HELLO_TIMEOUT_MILLIS = 3_000
+        const val HELLO_ATTEMPTS = 3
+        const val RETRY_MILLIS = 1_000L
+        const val GOODBYE_TIMEOUT_MILLIS = 2_000
         const val IDLE_MILLIS = 65_000
         const val TOO_MANY_REQUESTS = 429
         const val UNREACHABLE = "Vaier could not be reached. Check the connection and try again."

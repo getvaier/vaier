@@ -63,7 +63,7 @@ public enum DeviceCategory {
         return switch (t) {
             case MOBILE_CLIENT -> PHONE;
             case WINDOWS_CLIENT -> LAPTOP;
-            case UBUNTU_SERVER, WINDOWS_SERVER -> SERVER;
+            case UBUNTU_SERVER -> SERVER;
             case LAN_SERVER -> GENERIC;
         };
     }

@@ -20,6 +20,11 @@ object JoinProtocol {
     /** Asking whether this phone is still in Vaier proves who is asking exactly as leaving does. */
     fun standingRequest(publicKey: String, presharedKey: String): String = proof(publicKey, presharedKey)
 
+    /** Hello and goodbye, said through the tunnel, prove who is saying them the same way. */
+    fun helloRequest(publicKey: String, presharedKey: String): String = proof(publicKey, presharedKey)
+
+    fun goodbyeRequest(publicKey: String, presharedKey: String): String = proof(publicKey, presharedKey)
+
     private fun proof(publicKey: String, presharedKey: String): String =
         JSONObject().put("publicKey", publicKey).put("presharedKey", presharedKey).toString()
 

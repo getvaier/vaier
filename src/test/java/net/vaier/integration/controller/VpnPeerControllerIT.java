@@ -201,7 +201,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void downloadConfigFile_returnsFileAsAttachment() throws Exception {
         when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(true);
-        when(getPeerConfigUseCase.getPeerConfig("peer1"))
+        when(getPeerConfigUseCase.retrievePeerConfig("peer1"))
                 .thenReturn(Optional.of(new PeerConfigResult(
                         "peer1", "10.13.13.2", "[Interface]\nAddress = 10.13.13.2/32", MachineType.UBUNTU_SERVER)));
 
@@ -234,20 +234,20 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getPeerConfig_returns200WithJsonConfig() throws Exception {
         when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(true);
-        when(getPeerConfigUseCase.getPeerConfig("peer1"))
+        when(getPeerConfigUseCase.retrievePeerConfig("peer1"))
                 .thenReturn(Optional.of(new PeerConfigResult(
-                        "peer1", "10.13.13.2", "[Interface]", MachineType.MOBILE_CLIENT)));
+                        "peer1", "10.13.13.2", "[Interface]", MachineType.UBUNTU_SERVER)));
 
         mockMvc.perform(get("/vpn/peers/peer1/config"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.name").value("peer1"))
                .andExpect(jsonPath("$.ipAddress").value("10.13.13.2"))
-               .andExpect(jsonPath("$.peerType").value("MOBILE_CLIENT"));
+               .andExpect(jsonPath("$.peerType").value("UBUNTU_SERVER"));
     }
 
     @Test
     void getPeerConfig_returns404WhenPeerNotFound() throws Exception {
-        when(getPeerConfigUseCase.getPeerConfig("unknown")).thenReturn(Optional.empty());
+        when(getPeerConfigUseCase.retrievePeerConfig("unknown")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/vpn/peers/unknown/config"))
                .andExpect(status().isNotFound());
@@ -255,9 +255,9 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void getPeerConfig_returns410WhenAlreadyViewed() throws Exception {
-        when(getPeerConfigUseCase.getPeerConfig("peer1"))
+        when(getPeerConfigUseCase.retrievePeerConfig("peer1"))
                 .thenReturn(Optional.of(new PeerConfigResult(
-                        "peer1", "10.13.13.2", "[Interface]", MachineType.MOBILE_CLIENT)));
+                        "peer1", "10.13.13.2", "[Interface]", MachineType.UBUNTU_SERVER)));
         when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(false);
 
         mockMvc.perform(get("/vpn/peers/peer1/config"))
@@ -268,24 +268,15 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void getPeerConfig_byIp_resolvesToPeerIdAndMarksUnderThatKey() throws Exception {
-        when(getPeerConfigUseCase.getPeerConfig("10.13.13.2"))
+        when(getPeerConfigUseCase.retrievePeerConfig("10.13.13.2"))
                 .thenReturn(Optional.of(new PeerConfigResult(
-                        "peer1", "10.13.13.2", "[Interface]", MachineType.MOBILE_CLIENT)));
+                        "peer1", "10.13.13.2", "[Interface]", MachineType.UBUNTU_SERVER)));
         when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(true);
 
         mockMvc.perform(get("/vpn/peers/10.13.13.2/config"))
                .andExpect(status().isOk());
 
         verify(forTrackingPeerConfigRetrieval).markViewedIfNotAlready("peer1");
-    }
-
-    @Test
-    void getPeerQrCode_returns410WhenAlreadyViewed() throws Exception {
-        when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(false);
-
-        mockMvc.perform(get("/vpn/peers/peer1/qr-code"))
-               .andExpect(status().isGone())
-               .andExpect(jsonPath("$.reason").value("already-viewed"));
     }
 
     @Test
@@ -321,7 +312,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        // The create response IS one delivery of the secret (inline configFile + QR), but the
+        // The create response IS one delivery of the secret (inline configFile), but the
         // gate is only consulted on the five GET endpoints — so a single follow-up GET (e.g. a
         // raw curl) is still allowed before the budget is burned forever.
         verify(forTrackingPeerConfigRetrieval, never()).markViewedIfNotAlready(any());
@@ -337,7 +328,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
         when(reissuePeerConfigUseCase.reissuePeerConfig("peer1")).thenReturn(reissued);
         // After reissue the gate is reset; the use case owns that. A subsequent GET is allowed once.
         when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(true);
-        when(getPeerConfigUseCase.getPeerConfig("peer1")).thenReturn(Optional.of(new PeerConfigResult(
+        when(getPeerConfigUseCase.retrievePeerConfig("peer1")).thenReturn(Optional.of(new PeerConfigResult(
                 "peer1", "10.13.13.6", reissued.clientConfigFile(), MachineType.UBUNTU_SERVER)));
 
         mockMvc.perform(post("/vpn/peers/peer1/reissue"))
@@ -355,23 +346,5 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
 
         mockMvc.perform(post("/vpn/peers/ghost/reissue"))
                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    void createPeer_responseIncludesInlineQrPng() throws Exception {
-        CreatedPeerUco created = new CreatedPeerUco(
-                "peer1", TestMachineIds.of("peer1"), "peer1", "10.13.13.2", "pubkey", "privkey",
-                "[Interface]\nPrivateKey = abc\n", MachineType.MOBILE_CLIENT);
-        when(createPeerUseCase.createPeer(eq("peer1"), eq(MachineType.MOBILE_CLIENT), any(), any(), any()))
-                .thenReturn(created);
-
-        mockMvc.perform(post("/vpn/peers")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"name":"peer1","peerType":"MOBILE_CLIENT"}
-                           """))
-               .andExpect(status().isOk())
-               // PNG signature in base64 always starts with "iVBORw0KGgo".
-               .andExpect(jsonPath("$.qrCodePngBase64").value(org.hamcrest.Matchers.startsWith("iVBORw0KGgo")));
     }
 }

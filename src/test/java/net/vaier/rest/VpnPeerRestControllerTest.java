@@ -25,6 +25,8 @@ import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.CheckStandingUseCase;
+import net.vaier.application.SayGoodbyeUseCase;
+import net.vaier.application.SayHelloUseCase;
 import net.vaier.application.LeaveFleetUseCase;
 import net.vaier.application.ClaimDeviceUseCase;
 import net.vaier.application.ForgetMyPositionUseCase;
@@ -43,6 +45,7 @@ import net.vaier.domain.SetupToken;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForVendingSetupTokens;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -83,6 +86,8 @@ class VpnPeerRestControllerTest {
     @Mock EnrolDeviceUseCase enrolDeviceUseCase;
     @Mock LeaveFleetUseCase leaveFleetUseCase;
     @Mock CheckStandingUseCase checkStandingUseCase;
+    @Mock SayGoodbyeUseCase sayGoodbyeUseCase;
+    @Mock SayHelloUseCase sayHelloUseCase;
     @Mock GenerateDockerComposeUseCase generateDockerComposeUseCase;
     @Mock GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     @Mock UpdateLanCidrUseCase updateLanCidrUseCase;
@@ -1001,34 +1006,31 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void theListedPeer_saysWhetherItHoldsItsOwnKey() {
+    void theListedPeer_saysWhetherItHoldsItsOwnKey_andWhetherItJoinsThroughTheVaierApp() {
         // The pane decides from this whether to offer a Reissue or a regeneration at all, so the fact has
         // to reach the browser in its own right — an empty artefact list says something narrower.
         when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
             viewBuilder("ruten", "Ruten", true, "203.0.113.10", MachineType.MOBILE_CLIENT, null)
-                .availableArtifacts(Set.of()).deviceHeldKey(true).build(),
+                .availableArtifacts(Set.of()).deviceHeldKey(true).joinsThroughVaierApp(true).build(),
             viewBuilder("nuc", "NUC 02", true, "203.0.113.11", MachineType.UBUNTU_SERVER, null).build()));
 
         var peers = controller.listPeers().getBody();
 
         assertThat(peers).extracting(
                 VpnPeerRestController.VpnPeerResponse::id,
-                VpnPeerRestController.VpnPeerResponse::deviceHeldKey)
-            .containsExactly(tuple("ruten", true), tuple("nuc", false));
+                VpnPeerRestController.VpnPeerResponse::deviceHeldKey,
+                VpnPeerRestController.VpnPeerResponse::joinsThroughVaierApp)
+            .containsExactly(tuple("ruten", true, true), tuple("nuc", false, false));
     }
 
     @Test
-    void theConfigEndpoint_listsNoArtefactsForAnEnrolledPeer() {
-        // In practice this endpoint answers 410 for such a peer, because enrolment spends the one-shot
-        // budget. It must still be honest if it is ever reached: the rule is the domain's, at every edge.
-        when(getPeerConfigUseCase.getPeerConfig("phone")).thenReturn(Optional.of(new PeerConfigResult(
-            "phone", "phone", "10.13.13.7", "[Interface]\n", MachineType.MOBILE_CLIENT,
-            null, null, null, true)));
-        when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("phone")).thenReturn(true);
-
-        var body = (VpnPeerRestController.PeerConfigResponse) controller.getPeerConfig("phone").getBody();
-
-        assertThat(body.availableArtifacts()).isEmpty();
+    void theConfigEndpoints_askForAConfigToHandOut_andARefusalSpendsNothing() {
+        // The refusal of a personal device is the use case's; the controller must not burn the budget first.
+        when(getPeerConfigUseCase.retrievePeerConfig("phone"))
+            .thenThrow(new ConflictException("Phone joins through the Vaier app"));
+        assertThatThrownBy(() -> controller.getPeerConfig("phone")).isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> controller.downloadConfigFile("phone")).isInstanceOf(ConflictException.class);
+        verifyNoInteractions(forTrackingPeerConfigRetrieval);
     }
 
     // --- POST /vpn/peers/leave: a phone removes itself from the fleet (#359 slice 1b) ---
@@ -1089,5 +1091,49 @@ class VpnPeerRestControllerTest {
         var response = controller.standing(new VpnPeerRestController.StandingRequest(DEVICE_KEY, "wrong"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
+    // --- POST /vpn/peers/goodbye: an app says it has disconnected ---
+
+    @Test
+    void goodbye_aProvedPeerIs204_andTheFleetRepaintsNow() {
+        when(sayGoodbyeUseCase.sayGoodbye(DEVICE_KEY, LEAVE_PSK)).thenReturn(true);
+
+        var response = controller.goodbye(new VpnPeerRestController.StandingRequest(DEVICE_KEY, LEAVE_PSK));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void goodbye_whenNothingIsProved_is404_andSaysNothing() {
+        when(sayGoodbyeUseCase.sayGoodbye(DEVICE_KEY, "wrong")).thenReturn(false);
+
+        var response = controller.goodbye(new VpnPeerRestController.StandingRequest(DEVICE_KEY, "wrong"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        verify(forPublishingEvents, never()).publish(anyString(), anyString(), anyString());
+    }
+
+    // --- POST /vpn/peers/hello: an app says, through its tunnel, that it has connected ---
+
+    @Test
+    void hello_aProvedPeerIs204_andTheFleetRepaintsNow() {
+        when(sayHelloUseCase.sayHello(DEVICE_KEY, LEAVE_PSK)).thenReturn(true);
+
+        var response = controller.hello(new VpnPeerRestController.StandingRequest(DEVICE_KEY, LEAVE_PSK));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void hello_whenNothingIsProved_is404_andSaysNothing() {
+        when(sayHelloUseCase.sayHello(DEVICE_KEY, "wrong")).thenReturn(false);
+
+        var response = controller.hello(new VpnPeerRestController.StandingRequest(DEVICE_KEY, "wrong"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        verify(forPublishingEvents, never()).publish(anyString(), anyString(), anyString());
     }
 }

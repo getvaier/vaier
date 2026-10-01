@@ -79,16 +79,6 @@ class WireGuardPeerConfigTest {
     }
 
     @Test
-    void generate_windowsServerWithServerLanCidr_appendsToClientAllowedIps() {
-        String config = WireGuardPeerConfig.generate(
-                "privateKey", "10.13.13.4", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.WINDOWS_SERVER, null, null, "10.13.13.0/24",
-                null, null, "172.31.0.0/16");
-
-        assertThat(config).contains("AllowedIPs = 10.13.13.0/24,172.31.0.0/16");
-    }
-
-    @Test
     void generate_mobileClientWithServerLanCidr_doesNotChangeAllowedIps() {
         // Mobile/Windows clients already route everything (0.0.0.0/0) — appending the server LAN
         // CIDR would be redundant and could confuse wg-quick's route installation.
@@ -136,16 +126,6 @@ class WireGuardPeerConfigTest {
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24,172.31.0.0/16");
         assertThat(config).doesNotContain("192.168.1.0/24,172.31.0.0/16");
         assertThat(config).contains("\"lanCidr\":\"192.168.1.0/24\"");
-    }
-
-    @Test
-    void generate_windowsServer_routesOnlyVpnTraffic() {
-        String config = WireGuardPeerConfig.generate(
-                "privateKey", "10.13.13.4", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.WINDOWS_SERVER, null, null, "10.13.13.0/24", null, null);
-
-        assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
-        assertThat(config).contains("\"peerType\":\"WINDOWS_SERVER\"");
     }
 
     @Test
@@ -443,7 +423,7 @@ class WireGuardPeerConfigTest {
             // Colina 27 on the live fleet: exactly the line that was hand-edited on 2026-07-09.
             new Row("relay, own LAN left out", MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.118",
                 "10.13.13.0/24,172.31.16.0/20,10.0.5.0/24,192.168.3.0/24"),
-            new Row("server peer on no relay's LAN", MachineType.WINDOWS_SERVER, null, null,
+            new Row("server peer on no relay's LAN", MachineType.UBUNTU_SERVER, null, null,
                 "10.13.13.0/24,172.31.16.0/20,10.0.5.0/24,192.168.1.0/24,192.168.3.0/24"),
             // A server peer physically on Apalveien's LAN would route its own network into the tunnel.
             new Row("server peer sitting on a relay's LAN", MachineType.UBUNTU_SERVER, null, "192.168.3.40",
@@ -796,14 +776,21 @@ class WireGuardPeerConfigTest {
     }
 
     @Test
-    void isOutOfDate_anOrdinaryPeerWhoseServerMoved_isOutOfDate() {
-        // The counterpart, so the carve-out above cannot quietly swallow the whole mark.
-        String existing = WireGuardPeerConfig.generate("privkey", "10.13.13.9", "oldpub", "psk",
-            "old.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24",
-            null, "phone", null, null, MachineId.generate());
+    void isOutOfDate_aVaierMintedPeerWhoseServerMoved_isOutOfDate_unlessItJoinsThroughTheVaierApp() {
+        // The counterpart, so the carve-out above cannot quietly swallow the whole mark. A legacy personal
+        // device Vaier once minted a key for is never reissued any more, so it is never marked either.
+        record Row(MachineType type, boolean outOfDate) {}
+        for (Row row : List.of(new Row(MachineType.UBUNTU_SERVER, true),
+                               new Row(MachineType.MOBILE_CLIENT, false),
+                               new Row(MachineType.WINDOWS_CLIENT, false))) {
+            String existing = WireGuardPeerConfig.generate("privkey", "10.13.13.9", "oldpub", "psk",
+                "old.example.com:51820", row.type(), null, null, "10.13.13.0/24",
+                null, "peer", null, null, MachineId.generate());
 
-        assertThat(WireGuardPeerConfig.isOutOfDate(existing, MachineType.MOBILE_CLIENT, null, null,
-            null, "phone", "newpub", "new.example.com:51820", "10.13.13.0/24", null)).isTrue();
+            assertThat(WireGuardPeerConfig.isOutOfDate(existing, row.type(), null, null,
+                null, "peer", "newpub", "new.example.com:51820", "10.13.13.0/24", null))
+                .as(row.type().name()).isEqualTo(row.outOfDate());
+        }
     }
 
     @Test

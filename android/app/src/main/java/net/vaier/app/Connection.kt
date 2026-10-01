@@ -13,6 +13,7 @@ class Connection(
     private val store: VaierStore,
     private val tunnels: TunnelController,
     private val watchdog: StandingWatchdog,
+    private val vaier: VaierClient,
 ) {
 
     fun connect() {
@@ -23,16 +24,31 @@ class Connection(
         } finally {
             refreshTile()
         }
+        // Only a tunnel that has handshaken can carry the hello.
+        val deadline = System.currentTimeMillis() + HANDSHAKE_WAIT_MILLIS
+        while (tunnels.status().latestHandshakeEpochMillis == 0L && System.currentTimeMillis() < deadline) {
+            Thread.sleep(POLL_MILLIS)
+        }
+        vaier.hello(store.publicKey.orEmpty(), EnrolmentPayload.presharedKeyIn(membership.configText))
     }
 
     fun disconnect() {
         val membership = store.membership ?: return
         try {
             watchdog.rest()
+            // Through the tunnel, so it has to go before the tunnel does.
+            if (tunnels.status().up) {
+                vaier.goodbye(store.publicKey.orEmpty(), EnrolmentPayload.presharedKeyIn(membership.configText))
+            }
             tunnels.setDown(tunnels.configOf(membership.configText))
         } finally {
             refreshTile()
         }
+    }
+
+    private companion object {
+        const val HANDSHAKE_WAIT_MILLIS = 5_000L
+        const val POLL_MILLIS = 250L
     }
 
     private fun refreshTile() {

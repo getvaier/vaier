@@ -12,6 +12,7 @@ import static org.mockito.Mockito.times;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForExecutingInContainer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,6 +91,34 @@ class WireGuardVpnAdapterTest {
         adapter.deletePeer("Ruten");
         adapter.getClients();
         verify(exec, times(4)).execute("wireguard", "wg", "show", "wg0", "dump");
+    }
+
+    @Test
+    void aGoodbye_ridesEveryReadOfThatPeer_evenInsideTheTicksMemo() {
+        when(exec.execute("wireguard", "wg", "show", "interfaces")).thenReturn("wg0\n");
+        when(exec.execute("wireguard", "wg", "show", "wg0", "dump")).thenReturn(DUMP_HEADER + RUTEN);
+        when(exec.execute("wireguard", "wg", "show", "wg0", "public-key")).thenReturn("srvpub\n");
+        adapter.getClients();
+
+        adapter.recordGoodbye("rutenkey");
+
+        assertThat(adapter.getClients()).singleElement()
+            .extracting(VpnClient::goodbyeEpoch).isEqualTo(clock.instant().getEpochSecond());
+    }
+
+    @Test
+    void aHello_makesTheNextReadFresh_andClearsThatPeersGoodbye() {
+        // The app only gets a hello through once its handshake is done, so the tick's memo is already stale.
+        when(exec.execute("wireguard", "wg", "show", "interfaces")).thenReturn("wg0\n");
+        when(exec.execute("wireguard", "wg", "show", "wg0", "dump")).thenReturn(DUMP_HEADER + RUTEN);
+        when(exec.execute("wireguard", "wg", "show", "wg0", "public-key")).thenReturn("srvpub\n");
+        adapter.recordGoodbye("rutenkey");
+        adapter.getClients();
+
+        adapter.recordHello("rutenkey");
+
+        assertThat(adapter.getClients()).singleElement().extracting(VpnClient::goodbyeEpoch).isEqualTo(0L);
+        verify(exec, times(2)).execute("wireguard", "wg", "show", "wg0", "dump");
     }
 
     @Test

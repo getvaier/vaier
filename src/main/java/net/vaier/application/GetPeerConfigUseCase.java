@@ -11,6 +11,9 @@ public interface GetPeerConfigUseCase {
 
     Optional<PeerConfigResult> getPeerConfigByIp(String ipAddress);
 
+    /** As {@link #getPeerConfig}, for handing the config out: refused for a personal device. */
+    Optional<PeerConfigResult> retrievePeerConfig(String peerIdentifier);
+
     /**
      * @param id   the peer's immutable identifier (WireGuard config directory name).
      * @param name the operator-facing display label.

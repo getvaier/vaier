@@ -8,7 +8,7 @@ class PeerArtifactTest {
 
     @Test
     void ubuntuServer_getsConfigComposeAndScript() {
-        assertThat(PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER))
+        assertThat(PeerArtifact.forPeer(MachineType.UBUNTU_SERVER, false))
             .containsExactlyInAnyOrder(
                 PeerArtifact.WG_CONFIG,
                 PeerArtifact.DOCKER_COMPOSE,
@@ -16,26 +16,11 @@ class PeerArtifactTest {
     }
 
     @Test
-    void windowsServer_getsConfigAndCompose_butNoSetupScript() {
-        // The bootstrap script is bash-only; Windows servers don't get one.
-        assertThat(PeerArtifact.forPeerType(MachineType.WINDOWS_SERVER))
-            .containsExactlyInAnyOrder(
-                PeerArtifact.WG_CONFIG,
-                PeerArtifact.DOCKER_COMPOSE);
-    }
-
-    @Test
-    void mobileClient_getsConfigAndQrCode() {
-        assertThat(PeerArtifact.forPeerType(MachineType.MOBILE_CLIENT))
-            .containsExactlyInAnyOrder(
-                PeerArtifact.WG_CONFIG,
-                PeerArtifact.QR_CODE);
-    }
-
-    @Test
-    void windowsClient_getsOnlyConfig() {
-        assertThat(PeerArtifact.forPeerType(MachineType.WINDOWS_CLIENT))
-            .containsExactly(PeerArtifact.WG_CONFIG);
+    void aPersonalDevice_getsNothing_evenWithAKeyVaierMinted() {
+        // It joins through the Vaier app, which makes its own key: Vaier hands out no config or QR for it.
+        for (MachineType type : new MachineType[] { MachineType.MOBILE_CLIENT, MachineType.WINDOWS_CLIENT }) {
+            assertThat(PeerArtifact.forPeer(type, false)).as(type.name()).isEmpty();
+        }
     }
 
     @Test
@@ -50,22 +35,6 @@ class PeerArtifactTest {
     }
 
     // --- a device-held key: nothing to download (#359) ---
-
-    @Test
-    void aPeerWhoseKeyWasBornOnTheDevice_hasNothingToDownload() {
-        // The private key was minted on the phone and has never existed in Vaier, so there is no
-        // installable config to hand out, no QR to photograph, and nothing to leak.
-        assertThat(PeerArtifact.forPeer(MachineType.MOBILE_CLIENT, true)).isEmpty();
-    }
-
-    @Test
-    void aPeerWhoseKeyVaierMinted_getsWhatItsTypeAlwaysGot() {
-        assertThat(PeerArtifact.forPeer(MachineType.MOBILE_CLIENT, false))
-            .containsExactlyInAnyOrder(PeerArtifact.WG_CONFIG, PeerArtifact.QR_CODE);
-        assertThat(PeerArtifact.forPeer(MachineType.UBUNTU_SERVER, false))
-            .containsExactlyInAnyOrder(PeerArtifact.WG_CONFIG, PeerArtifact.DOCKER_COMPOSE,
-                PeerArtifact.SETUP_SCRIPT);
-    }
 
     @Test
     void aDeviceHeldKeyOverridesEveryPeerType() {

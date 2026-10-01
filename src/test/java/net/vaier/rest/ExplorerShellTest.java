@@ -4205,27 +4205,21 @@ class ExplorerShellTest {
     }
 
     @Test
-    void aPhoneIsToldToInstallTheVaierAppBeforeItIsHandedAQrCode() throws IOException {
-        // #359: a phone that runs the Vaier app mints its own key and enrols over the operator's session —
-        // strictly better than photographing a config off a screen. So the app comes first and the QR stays
-        // underneath as the fallback for the WireGuard app.
-        //
-        // The instruction has to be actionable on the device that will run it. A link would open on the
-        // operator's desktop, which is the wrong machine, so the sentence names the address to open on the
-        // phone and the button to tap once the launchpad is up.
+    void aPersonalDevice_isAddedOnlyThroughTheVaierApp_neverWithAConfigOrAQr() throws IOException {
+        // Only Vaier's own clients join the VPN. The add flow sends a phone or PC to the Vaier app and its
+        // join code; it never asks Vaier for a personal device's config, and no QR is painted anywhere.
         String js = read("explorer-shell.js");
 
-        int from = js.indexOf("function peerHandoffMobile(");
+        int from = js.indexOf("function paintPeerApp(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n        }", from));
-
-        assertThat(body).as("the address to open, on the phone itself").contains("location.host");
+        assertThat(body).as("the address to open, on the device itself").contains("location.host");
         assertThat(body).as("and the button to tap there").contains("tap Install");
-        assertThat(body).as("no link — it would open on the wrong machine").doesNotContain("launchpad.html");
-        assertThat(body).as("and what the operator does next").contains("enrol");
-        assertThat(body).as("above the QR, not below it")
-            .satisfies(b -> assertThat(b.indexOf("tap Install")).isLessThan(b.indexOf("Scan it into WireGuard")));
-        assertThat(body).as("the QR is still there for the WireGuard app").contains("qr: true");
+        assertThat(body).as("where its join code turns up").contains("Waiting to join");
+        assertThat(body).doesNotContain("fetch(");
+
+        assertThat(js).doesNotContain("qrCodePngBase64").doesNotContain("WINDOWS_SERVER")
+            .doesNotContain("function peerHandoffMobile(").doesNotContain("function peerHandoffWindows(");
     }
 
     @Test
@@ -4244,6 +4238,8 @@ class ExplorerShellTest {
             .contains("deviceHeldKey");
         assertThat(body).as("a device-held key is never reissuable")
             .containsPattern("canReissue = [^;]*!deviceHeld");
+        assertThat(body).as("nor is any machine that joins through the Vaier app")
+            .contains("joinsThroughVaierApp").containsPattern("canReissue = [^;]*!viaApp");
         assertThat(body).as("and the fold says why, and what to do instead")
             .contains("leave Vaier in its Vaier app and join again");
     }

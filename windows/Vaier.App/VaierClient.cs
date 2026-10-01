@@ -74,13 +74,46 @@ public class VaierClient
         };
     }
 
-    private static async Task<HttpResponseMessage?> Prove(Membership membership, string route)
+    /// <summary>Tells Vaier, through the tunnel, that it just connected. A few tries, since the first can race the tunnel.</summary>
+    public Task SayHello(Membership membership) => Tell(membership, "hello", TimeSpan.FromSeconds(3), attempts: 3);
+
+    /// <summary>Tells Vaier, through the tunnel, that it is going down on purpose. One try, never more.</summary>
+    public Task SayGoodbye(Membership membership) => Tell(membership, "goodbye", TimeSpan.FromSeconds(2), attempts: 1);
+
+    // Never over the open internet, and never on a pooled connection: one opened through an earlier tunnel is dead.
+    private static async Task Tell(Membership membership, string route, TimeSpan patience, int attempts)
+    {
+        var saved = membership.Saved;
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(patience);
+                using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(TunnelDoor.Address, $"/vpn/peers/{route}"))
+                {
+                    Content = new StringContent(JoinProtocol.Proof(saved.PublicKey, saved.PresharedKey), Encoding.UTF8, "application/json"),
+                };
+                request.Headers.ConnectionClose = true;
+                using var _ = await Http.SendAsync(request, timeout.Token);
+                return;
+            }
+            catch (Exception)
+            {
+                if (attempt < attempts) await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        }
+    }
+
+    private static Task<HttpResponseMessage?> Prove(Membership membership, string route) =>
+        Prove(new Uri($"https://{membership.Address}/vpn/peers/{route}"), membership, TimeSpan.FromSeconds(20));
+
+    private static async Task<HttpResponseMessage?> Prove(Uri to, Membership membership, TimeSpan patience)
     {
         var saved = membership.Saved;
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            return await Http.PostAsync($"https://{membership.Address}/vpn/peers/{route}",
+            using var timeout = new CancellationTokenSource(patience);
+            return await Http.PostAsync(to,
                 new StringContent(JoinProtocol.Proof(saved.PublicKey, saved.PresharedKey), Encoding.UTF8, "application/json"),
                 timeout.Token);
         }

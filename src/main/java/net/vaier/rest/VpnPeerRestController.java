@@ -14,6 +14,8 @@ import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.CheckStandingUseCase;
+import net.vaier.application.SayGoodbyeUseCase;
+import net.vaier.application.SayHelloUseCase;
 import net.vaier.application.LeaveFleetUseCase;
 import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
@@ -69,6 +71,8 @@ public class VpnPeerRestController {
     private final EnrolDeviceUseCase enrolDeviceUseCase;
     private final LeaveFleetUseCase leaveFleetUseCase;
     private final CheckStandingUseCase checkStandingUseCase;
+    private final SayGoodbyeUseCase sayGoodbyeUseCase;
+    private final SayHelloUseCase sayHelloUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     private final UpdateLanCidrUseCase updateLanCidrUseCase;
@@ -135,7 +139,7 @@ public class VpnPeerRestController {
             v.connected(), v.transferRx(), v.transferTx(),
             v.peerType().name(), v.isServer(), v.isClient(), v.isRelay(),
             v.availableArtifacts().stream().map(Enum::name).sorted().toList(),
-            v.deviceHeldKey(),
+            v.deviceHeldKey(), v.joinsThroughVaierApp(),
             v.lanCidr(), v.lanAddress(), v.description(),
             v.geoLocation().map(GeoLocation::latitude).orElse(null),
             v.geoLocation().map(GeoLocation::longitude).orElse(null),
@@ -292,7 +296,7 @@ public class VpnPeerRestController {
                 request.description()
         );
 
-        // Inline every artefact so the create-success modal renders config + QR + download buttons
+        // Inline every artefact so the create-success modal renders config + download buttons
         // in one response, without follow-up GETs. The five GET endpoints are gated by a one-shot
         // marker (#202); the marker is set on first GET, NOT on create. The UI uses only the
         // inline payload so it never burns the budget; a raw curl GET can still recover any one
@@ -363,6 +367,30 @@ public class VpnPeerRestController {
     }
 
     /**
+     * TUNNEL ONLY: reachable on Traefik's tunnel entrypoint, never from the internet. A Vaier app says it
+     * has just connected, so the fleet shows it now. Same proof as {@code /standing}, same {@code 404}.
+     */
+    @PostMapping("/hello")
+    public ResponseEntity<Void> hello(@RequestBody StandingRequest request) {
+        return signal(sayHelloUseCase.sayHello(request.publicKey(), request.presharedKey()));
+    }
+
+    /**
+     * TUNNEL ONLY, like {@code /hello}. A Vaier app says it is about to disconnect, so the fleet stops
+     * showing it connected now instead of in three minutes.
+     */
+    @PostMapping("/goodbye")
+    public ResponseEntity<Void> goodbye(@RequestBody StandingRequest request) {
+        return signal(sayGoodbyeUseCase.sayGoodbye(request.publicKey(), request.presharedKey()));
+    }
+
+    private ResponseEntity<Void> signal(boolean proved) {
+        if (!proved) return ResponseEntity.notFound().build();
+        forPublishingEvents.publish("vpn-peers", "peers-updated", "");
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * Reissues a peer's config (#247): re-renders it from current generation logic with the
      * keypair preserved, persists it, re-opens the one-shot retrieval budget, and returns the
      * fresh config + artefacts inline — the same shape as create, so the UI reuses the
@@ -385,7 +413,7 @@ public class VpnPeerRestController {
     }
 
     /**
-     * Builds the inline config-delivery payload (config text + QR + docker-compose + setup script)
+     * Builds the inline config-delivery payload (config text + docker-compose + setup script)
      * shared by create and reissue. The five GET endpoints stay gated by the one-shot marker (#202);
      * the UI consumes only this inline payload so it never burns the budget.
      */
@@ -395,9 +423,6 @@ public class VpnPeerRestController {
         // a reissue of an enrolled peer is refused before anything is rendered.
         Set<PeerArtifact> artefacts = PeerArtifact.forPeerType(peerType);
 
-        String qrCodePngBase64 = artefacts.contains(PeerArtifact.QR_CODE)
-            ? tryEncodeQrCodeBase64(configFile, name)
-            : null;
         String dockerCompose = artefacts.contains(PeerArtifact.DOCKER_COMPOSE)
             ? generateDockerComposeUseCase.generateWireguardClientDockerCompose(
                 id, defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT)
@@ -417,7 +442,7 @@ public class VpnPeerRestController {
                 id, machineId == null ? null : machineId.value(), name, ipAddress, publicKey,
                 configFile, peerType.name(),
                 artefacts.stream().map(Enum::name).sorted().toList(),
-                qrCodePngBase64, dockerCompose, setupScript, setupToken);
+                dockerCompose, setupScript, setupToken);
     }
 
     @PatchMapping("/{peerId}")
@@ -499,7 +524,7 @@ public class VpnPeerRestController {
 
         // /config accepts a name OR an IP. The marker is keyed by peer id (= dir name), so
         // we resolve via getPeerConfigUseCase first to map IP→id, then atomically mark.
-        var config = getPeerConfigUseCase.getPeerConfig(peerIdentifier);
+        var config = getPeerConfigUseCase.retrievePeerConfig(peerIdentifier);
         if (config.isEmpty()) {
             log.warn("Peer config not found for identifier: {}", LogSafe.forLog(peerIdentifier));
             return ResponseEntity.notFound().build();
@@ -523,9 +548,11 @@ public class VpnPeerRestController {
     @GetMapping("/{peerId}/config-file")
     public ResponseEntity<?> downloadConfigFile(@PathVariable String peerId) {
         log.info("Downloading config file for peer: {}", LogSafe.forLog(peerId));
+        // Read first, so a refused personal device never spends the one-shot budget.
+        var config = getPeerConfigUseCase.retrievePeerConfig(peerId);
         ResponseEntity<?> gate = checkOneShotGate(peerId);
         if (gate != null) return gate;
-        return getPeerConfigUseCase.getPeerConfig(peerId)
+        return config
                 .map(result -> {
                     byte[] content = result.configContent().getBytes();
                     ByteArrayResource resource = new ByteArrayResource(content);
@@ -537,24 +564,6 @@ public class VpnPeerRestController {
                             .<Object>body(resource);
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
-    }
-
-    @GetMapping("/{peerId}/qr-code")
-    public ResponseEntity<?> getPeerQrCode(@PathVariable String peerId) {
-        log.info("Generating QR code for peer: {}", LogSafe.forLog(peerId));
-        ResponseEntity<?> gate = checkOneShotGate(peerId);
-        if (gate != null) return gate;
-        var config = getPeerConfigUseCase.getPeerConfig(peerId);
-        if (config.isEmpty()) return ResponseEntity.notFound().build();
-        try {
-            byte[] png = encodeQrCodePng(config.get().configContent());
-            return ResponseEntity.ok()
-                    .contentType(MediaType.IMAGE_PNG)
-                    .body(png);
-        } catch (Exception e) {
-            log.error("Failed to generate QR code for peer {}: {}", LogSafe.forLog(peerId), e.getMessage(), e);
-            return ResponseEntity.internalServerError().build();
-        }
     }
 
     @GetMapping("/{peerId}/docker-compose")
@@ -669,19 +678,6 @@ public class VpnPeerRestController {
     }
 
     /**
-     * Best-effort QR PNG → base64. Returns null and logs on failure so the create response is
-     * still usable (config text is still inline; the operator can copy/paste).
-     */
-    private String tryEncodeQrCodeBase64(String content, String peerId) {
-        try {
-            return java.util.Base64.getEncoder().encodeToString(encodeQrCodePng(content));
-        } catch (Exception e) {
-            log.error("Failed to generate QR code for peer {}: {}", LogSafe.forLog(peerId), e.getMessage(), e);
-            return null;
-        }
-    }
-
-    /**
      * Server URL used to seed the inline docker-compose / setup-script in the create response.
      * The GET endpoints accept this as a query param; the create flow has no such param, so we
      * fall back to {@code VAIER_DOMAIN}-derived {@code vaier.<domain>} (the canonical WireGuard
@@ -689,25 +685,6 @@ public class VpnPeerRestController {
      */
     private String defaultServerUrl() {
         return new net.vaier.domain.VaierHostnames(configResolver.getDomain()).vaierServerFqdn();
-    }
-
-    private static byte[] encodeQrCodePng(String content) throws Exception {
-        com.google.zxing.qrcode.QRCodeWriter writer = new com.google.zxing.qrcode.QRCodeWriter();
-        com.google.zxing.common.BitMatrix matrix = writer.encode(
-                content,
-                com.google.zxing.BarcodeFormat.QR_CODE,
-                256, 256,
-                java.util.Map.of(
-                        com.google.zxing.EncodeHintType.ERROR_CORRECTION,
-                        com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M,
-                        com.google.zxing.EncodeHintType.MARGIN, 2
-                )
-        );
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        javax.imageio.ImageIO.write(
-                com.google.zxing.client.j2se.MatrixToImageWriter.toBufferedImage(matrix),
-                "PNG", out);
-        return out.toByteArray();
     }
 
     /**
@@ -739,6 +716,8 @@ public class VpnPeerRestController {
             List<String> availableArtifacts,
             /** True when the peer minted its own keypair: nothing here can reissue or regenerate it. */
             boolean deviceHeldKey,
+            /** True for a personal device: it rejoins from its Vaier app, never by a Reissue or regeneration. */
+            boolean joinsThroughVaierApp,
             String lanCidr,
             String lanAddress,
             String description,
@@ -847,7 +826,6 @@ public class VpnPeerRestController {
             String configFile,
             String peerType,
             List<String> availableArtifacts,
-            String qrCodePngBase64,
             String dockerCompose,
             String setupScript,
             String setupToken

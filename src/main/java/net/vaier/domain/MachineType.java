@@ -4,11 +4,23 @@ public enum MachineType {
     MOBILE_CLIENT,
     WINDOWS_CLIENT,
     UBUNTU_SERVER,
-    WINDOWS_SERVER,
     LAN_SERVER;
 
     public boolean isServerType() {
-        return this == UBUNTU_SERVER || this == WINDOWS_SERVER || this == LAN_SERVER;
+        return this == UBUNTU_SERVER || this == LAN_SERVER;
+    }
+
+    /** A personal device: it joins with a key the Vaier app makes, never one Vaier mints. */
+    public boolean joinsThroughVaierApp() {
+        return this == MOBILE_CLIENT || this == WINDOWS_CLIENT;
+    }
+
+    /** Refuses to mint or re-render a config for a machine that joins through the Vaier app. */
+    public void requireVaierMintedConfig(String machineName) {
+        if (joinsThroughVaierApp()) {
+            throw new ConflictException(machineName + " joins through the Vaier app, so Vaier makes no config "
+                + "for it. Install the Vaier app from the launchpad on the device and approve its join code.");
+        }
     }
 
     public boolean isVpnPeer() {

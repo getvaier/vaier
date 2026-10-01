@@ -126,7 +126,6 @@
         MOBILE_CLIENT:  'Mobile client',
         WINDOWS_CLIENT: 'Windows client',
         UBUNTU_SERVER:  'Ubuntu server',
-        WINDOWS_SERVER: 'Windows server',
         LAN_SERVER:     'LAN server',
     };
 
@@ -289,8 +288,8 @@
 
     // Machines are ordered the way the Infrastructure page orders them, so the two never disagree: the Vaier
     // server first, then the servers, then the clients, each group alphabetical. Server-ness is the machine's
-    // type (the domain's isServerType — Ubuntu/Windows/LAN server), the same split the fleet grid draws.
-    const SERVER_TYPES = new Set(['UBUNTU_SERVER', 'WINDOWS_SERVER', 'LAN_SERVER']);
+    // type (the domain's isServerType — Ubuntu/LAN server), the same split the fleet grid draws.
+    const SERVER_TYPES = new Set(['UBUNTU_SERVER', 'LAN_SERVER']);
     const machineRank = (m) => (m.vaierServer ? 0 : (SERVER_TYPES.has(m.type) ? 1 : 2));
     const sortedMachines = () => S.machines.slice()
         .sort((a, b) => machineRank(a) - machineRank(b) || a.name.localeCompare(b.name));
@@ -2296,11 +2295,12 @@
         // Named by what it does rather than "Advanced", which said only that the operator was unlikely to
         // want it — never that opening it put a working machine at risk.
         if (!isVaierServer) {
-            // A device that enrolled from the app holds the only copy of its private key. Reissue would
-            // re-render a config nobody can hand to it, and Regenerate would mint a server-side keypair —
-            // turning it back into a QR-code peer. Neither is offered; the server refuses the first anyway.
-            const deviceHeld = !!(S.peers.get(m.id) || {}).deviceHeldKey;
-            const canReissue = S.peers.has(m.id) && !deviceHeld;
+            // A personal device joins through the Vaier app, so Vaier mints it no config: neither Reissue nor
+            // Regenerate is offered, and the server refuses both anyway.
+            const peerRec = S.peers.get(m.id) || {};
+            const deviceHeld = !!peerRec.deviceHeldKey;
+            const viaApp = !!peerRec.joinsThroughVaierApp;
+            const canReissue = S.peers.has(m.id) && !deviceHeld && !viaApp;
             const adv = dangerFold(canReissue ? 'Reissue, regenerate or remove this machine'
                                               : 'Remove this machine');
             if (canReissue) {
@@ -2315,6 +2315,9 @@
                     + 'here to reissue or regenerate — the private half only ever existed on the device. '
                     + 'To replace the key, leave Vaier in its Vaier app and join again (removing it here '
                     + 'from another device works too).'));
+            } else if (viaApp) {
+                adv.appendChild(hint('This machine joins through the Vaier app, so Vaier makes no config for it. '
+                    + 'To give it a new key, remove it here and join again from its Vaier app.'));
             }
             // Removing the device this browser comes through would cut the tunnel carrying the answer.
             if (S.tunnelMachineId === m.id && !S.tunnelMachineRemovable) {
@@ -2830,7 +2833,6 @@
         let cand = initialCandidate || null;        // the candidate being adopted
         let pickedLan = null;                       // the LAN chosen on pickLan: { anchor, name, cidr }
         let peerIntent = null;                      // the peer branch's intent: 'SERVER' | 'PERSONAL_DEVICE'
-        let peerWindows = false;                    // whether the peer runs Windows — the OS second step's answer
         let peerCreated = null;                     // the create response, held for the handoff screen
         let adopted = null;                         // the adopt result, held for the LAN handoff screen: { name, credNote }
         const enrolment = initialEnrolment || null; // the device's enrolment request: { code, name, publicKey, machineType }
@@ -2891,7 +2893,7 @@
             else if (id === 'lanHandoff') paintLanHandoff();
             else if (id === 'byaddress') paintByAddress();
             else if (id === 'peerWhat') paintPeerWhat();
-            else if (id === 'peerOs') paintPeerOs();
+            else if (id === 'peerApp') paintPeerApp();
             else if (id === 'peerName') paintPeerName();
             else if (id === 'peerHandoff') paintPeerHandoff();
             else if (id === 'enrol') paintEnrol();
@@ -2915,8 +2917,8 @@
                 + 'that connects through the VPN, or a server already on one of your networks?';
             const grid = el('div', 'ex-choice-grid');
             const peer = choiceCard('relay', 'A peer',
-                'A new box or device that connects through Vaier’s VPN. Gets a tunnel address, keys and a config '
-                + 'to install.');
+                'A new server or personal device that connects through Vaier’s VPN and gets its own tunnel '
+                + 'address.');
             peer.onclick = () => screen('peerWhat');
             const lan = choiceCard('server', 'A LAN server',
                 'A machine already running on one of your networks. Vaier scans, finds it, and adopts it.');
@@ -3423,12 +3425,10 @@
             name.focus();
         }
 
-        // ---- peer branch: intent first, an explicit OS second, then name, then handoff ------------------
-        // A brand-new peer is on no network yet, so Vaier can't probe it. It asks only intent — what the
-        // machine is for, and its OS — and generates everything else. The intent -> MachineType mapping is
-        // the domain's (MachineIntent, resolved server-side from intent + windows); the browser never
-        // decides the routing type. The LAN a server routes is set later from the machine, so the operator
-        // types only the name here.
+        // ---- peer branch: intent first, then a name and the handoff for a server ------------------------
+        // A server gets a Vaier-made config for the Docker client; a personal device joins through the Vaier
+        // app with its own key, so its branch only says how. The intent -> MachineType mapping is the
+        // domain's (MachineIntent); the browser never decides the routing type.
 
         // A lone Back control at the foot of a peer screen.
         function peerFoot(onBack) {
@@ -3454,47 +3454,38 @@
             const server = choiceCard('server', 'A server',
                 'Runs around the clock and can host services. Stays reachable from the fleet, and can open '
                 + 'up the network it sits on.');
-            server.onclick = () => { peerIntent = 'SERVER'; screen('peerOs'); };
+            server.onclick = () => { peerIntent = 'SERVER'; screen('peerName'); };
             const device = choiceCard('laptop', 'A personal device',
-                'A phone, laptop or desktop that just needs to reach the fleet. Its traffic goes through '
-                + 'Vaier while it’s connected.');
-            device.onclick = () => { peerIntent = 'PERSONAL_DEVICE'; screen('peerOs'); };
+                'An Android phone or a Windows PC that needs to reach the fleet. It joins with the Vaier app.');
+            device.onclick = () => { peerIntent = 'PERSONAL_DEVICE'; screen('peerApp'); };
             grid.append(server, device);
             content.append(sub, section('What is this?'), grid, peerFoot(() => screen('fork')));
         }
 
-        // ---- peer · OS second step — always shown, never inferred --------------------------------------
-        function paintPeerOs() {
-            if (!peerIntent) { screen('peerWhat'); return; }
-            const isServer = peerIntent === 'SERVER';
-            titleEl.textContent = 'Add a peer';
+        // ---- peer · a personal device joins through the Vaier app ------------------------------------
+        // Vaier makes no config for a phone or a PC: the app makes its own key and asks to join with a join
+        // code, which lands under Waiting to join. Said as the address to open on the device itself — a link
+        // would open here, on the wrong machine.
+        function paintPeerApp() {
+            titleEl.textContent = 'Add a personal device';
             content.innerHTML = '';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = isServer
-                ? 'The operating system sets how the peer comes up — a no-root container command on Ubuntu, '
-                  + 'or the WireGuard app on Windows.'
-                : 'The kind of device sets how Vaier hands off — a QR to scan, or a config for the '
-                  + 'WireGuard app.';
-            const grid = el('div', 'ex-choice-grid');
-            let a, b;
-            if (isServer) {
-                a = choiceCard('server', 'Ubuntu',
-                    'Comes up with a single no-root command — Vaier runs the tunnel in a container.');
-                a.onclick = () => { peerWindows = false; screen('peerName'); };
-                b = choiceCard('desktop', 'Windows',
-                    'Comes up with WireGuard for Windows and the config Vaier generates.');
-                b.onclick = () => { peerWindows = true; screen('peerName'); };
-            } else {
-                a = choiceCard('phone', 'Phone / Mac / Linux',
-                    'Scan a QR in the WireGuard app, or import the config.');
-                a.onclick = () => { peerWindows = false; screen('peerName'); };
-                b = choiceCard('desktop', 'Windows PC',
-                    'Import the config into the WireGuard app for Windows.');
-                b.onclick = () => { peerWindows = true; screen('peerName'); };
-            }
-            grid.append(a, b);
-            content.append(sub, section(isServer ? 'Which OS?' : 'Which device?'), grid,
-                peerFoot(() => screen('peerWhat')));
+            sub.textContent = 'A phone or Windows PC joins with the Vaier app. It makes its own key, so nothing '
+                + 'is copied by hand.';
+            const list = el('ol', 'ex-instr');
+            ['On the device, open ' + location.host + ' and tap Install on the card at the top — Download '
+                 + 'on Windows.',
+             'Open the Vaier app and join. It shows a four-digit join code.',
+             'Back here, the device appears under Waiting to join on the fleet. Add it when the codes match.']
+                .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
+            const actions = actionsRow();
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = () => screen('peerWhat');
+            const done = el('button', 'ex-btn is-accent'); done.textContent = 'Done';
+            done.onclick = () => { close(); go(['fleet']); };
+            actions.append(back, done);
+            content.append(sub, section('Join with the Vaier app'), list, actions);
+            done.focus();
         }
 
         // ---- peer · name — the one thing Vaier can't generate ------------------------------------------
@@ -3504,7 +3495,7 @@
             content.innerHTML = '';
 
             const name = el('input', 'ex-input'); name.type = 'text';
-            name.placeholder = peerIntent === 'SERVER' ? 'e.g. Roon server' : 'e.g. Geir’s phone';
+            name.placeholder = 'e.g. Roon server';
             name.autocomplete = 'off'; name.spellcheck = false;
             content.appendChild(field('Name', 'The only thing Vaier can’t generate — what to call it.', name));
 
@@ -3514,7 +3505,7 @@
 
             const actions = actionsRow();
             const back = el('button', 'ex-btn'); back.textContent = 'Back';
-            back.onclick = () => screen('peerOs');
+            back.onclick = () => screen('peerWhat');
             const add = el('button', 'ex-btn is-accent'); add.textContent = 'Generate config';
             add.onclick = () => submitPeer(name.value.trim(), add);
             const sync = () => { add.disabled = name.value.trim() === ''; };
@@ -3525,7 +3516,7 @@
             name.focus();
         }
 
-        // The create call, in-modal: POST with intent + windows so the intent -> MachineType decision stays
+        // The create call, in-modal: POST with the intent so the intent -> MachineType decision stays
         // the domain's (resolved server-side), then render the handoff into this same modal. lanCidr is left
         // empty — a server's routed LAN is set later from its machine page, so the operator types only a name.
         async function submitPeer(name, addBtn) {
@@ -3534,7 +3525,7 @@
             try {
                 const res = await fetch('/vpn/peers', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name, intent: peerIntent, windows: peerWindows,
+                    body: JSON.stringify({ name: name, intent: peerIntent,
                         lanCidr: '', lanAddress: '', description: '' }),
                 });
                 if (!res.ok) {
@@ -3656,25 +3647,18 @@
         }
 
         // ---- peer · handoff — the config, shown once, and the way to get it onto the box ----------------
-        // Four variants off the same one-shot create response (#202): the Ubuntu server gets the no-sudo
-        // recipe (its setup script is shown here to transfer, never fetched with a token); the others get
-        // the config, the QR (mobile), and short WireGuard-app instructions. No new endpoint is involved.
+        // Off the one-shot create response (#202): the Ubuntu server's no-sudo recipe. No new endpoint is involved.
         function paintPeerHandoff() {
             const p = peerCreated;
             if (!p) { screen('peerWhat'); return; }
             titleEl.textContent = p.name + ' — get it on the air';
             content.innerHTML = '';
 
-            const isServer = peerIntent === 'SERVER';
             const sub = el('div', 'ex-dialog-body');
             sub.textContent = 'Save this now: for security the config is shown once. Install it on ' + p.name
                 + ' to bring it onto the VPN.';
             content.appendChild(sub);
-
-            if (isServer && !peerWindows) content.appendChild(peerHandoffUbuntu(p));
-            else if (isServer) content.appendChild(peerHandoffWindows(p, 'server'));
-            else if (!peerWindows) content.appendChild(peerHandoffMobile(p));
-            else content.appendChild(peerHandoffWindows(p, 'client'));
+            content.appendChild(peerHandoffUbuntu(p));
 
             const wait = el('div', 'ex-waiting');
             wait.appendChild(el('span', 'ex-scanmeta-dot is-live'));
@@ -3718,12 +3702,6 @@
                 row.appendChild(sc);
             }
             wrap.appendChild(row);
-            if (opts.qr && p.qrCodePngBase64) {
-                const img = el('img', 'ex-qr');
-                img.src = 'data:image/png;base64,' + p.qrCodePngBase64;
-                img.alt = 'WireGuard config QR code';
-                wrap.appendChild(img);
-            }
             return wrap;
         }
 
@@ -3774,7 +3752,7 @@
                     const pre = el('pre', 'ex-config'); pre.textContent = p.setupScript;
                     fb.appendChild(pre);
                 }
-                fb.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true, qr: false }));
+                fb.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true }));
                 wrap.appendChild(fb);
                 return wrap;
             }
@@ -3793,7 +3771,7 @@
                 const pre = el('pre', 'ex-config'); pre.textContent = p.setupScript;
                 wrap.appendChild(pre);
             }
-            wrap.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true, qr: false }));
+            wrap.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true }));
             return wrap;
         }
 
@@ -3806,50 +3784,6 @@
             copy.onclick = () => navigator.clipboard.writeText(cmd)
                 .then(() => toast('Command copied.')).catch(() => toast('Could not copy the command.'));
             row.appendChild(copy); wrap.appendChild(row);
-            return wrap;
-        }
-
-        // Windows server or Windows PC: the config file plus short WireGuard-for-Windows steps. The server
-        // also gets its docker-compose.
-        function peerHandoffWindows(p, role) {
-            const wrap = el('div');
-            wrap.appendChild(section('Set up ' + p.name + ' on Windows'));
-            const list = el('ol', 'ex-instr');
-            ['Install WireGuard for Windows on the ' + (role === 'server' ? 'box' : 'PC') + '.',
-             'Download the config below, then in WireGuard choose Add Tunnel → Import from file.',
-             'Activate the tunnel. ' + p.name + ' turns green here on its first handshake.']
-                .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
-            wrap.appendChild(list);
-            wrap.appendChild(peerConfigBlock(p,
-                { showConfig: true, compose: role === 'server', setup: false, qr: false }));
-            return wrap;
-        }
-
-        // Phone / Mac / Linux: the QR to scan, the config to import.
-        function peerHandoffMobile(p) {
-            const wrap = el('div');
-            // #359: on Android there is a better route than a photographed QR — the Vaier app mints the
-            // key on the phone and enrols it over the operator's own session, so nothing is copied by
-            // hand. Said first; the QR below stays for the WireGuard app.
-            //
-            // No link: this pane is open on the operator's desktop and the app has to be installed on the
-            // phone, so what helps is the address to type there — which is the address this page is on.
-            const app = el('div', 'ex-hint');
-            app.textContent = 'On Android, open ' + location.host + ' on the phone itself and tap Install '
-                + 'on the card at the top, then enrol ' + p.name + ' from the app — the phone makes its own '
-                + 'key and nothing is copied by hand.';
-            wrap.appendChild(app);
-            wrap.appendChild(section('Scan it into WireGuard'));
-            const list = el('ol', 'ex-instr');
-            ['Open the WireGuard app on the device.',
-             'Tap Add → Scan from QR code and point it at the code below.',
-             'Toggle the tunnel on. It turns green here on its first handshake.']
-                .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
-            wrap.appendChild(list);
-            wrap.appendChild(peerConfigBlock(p, { showConfig: false, compose: false, setup: false, qr: true }));
-            const alt = el('div', 'ex-hint');
-            alt.textContent = 'On a Mac or Linux box, import the .conf into WireGuard instead of scanning.';
-            wrap.appendChild(alt);
             return wrap;
         }
 
@@ -4001,12 +3935,6 @@
                 row.appendChild(sc);
             }
             dialog.appendChild(row);
-        }
-        if (p.qrCodePngBase64) {
-            const img = el('img', 'ex-qr');
-            img.src = 'data:image/png;base64,' + p.qrCodePngBase64;
-            img.alt = 'WireGuard config QR code';
-            dialog.appendChild(img);
         }
 
         const actions = el('div', 'ex-dialog-actions');

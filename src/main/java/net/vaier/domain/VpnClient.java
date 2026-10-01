@@ -7,10 +7,23 @@ public record VpnClient(
     String endpointPort,
     String latestHandshake,
     String transferRx,
-    String transferTx
+    String transferTx,
+    long goodbyeEpoch
 ) {
 
     private static final long HANDSHAKE_STALE_AFTER_SECONDS = 180;
+
+    /** A peer as WireGuard reports it, before any goodbye is known. */
+    public VpnClient(String publicKey, String allowedIps, String endpointIp, String endpointPort,
+                     String latestHandshake, String transferRx, String transferTx) {
+        this(publicKey, allowedIps, endpointIp, endpointPort, latestHandshake, transferRx, transferTx, 0L);
+    }
+
+    /** This peer after its app said goodbye at {@code epochSecond}; {@code 0} means none. */
+    public VpnClient withGoodbyeAt(long epochSecond) {
+        return new VpnClient(publicKey, allowedIps, endpointIp, endpointPort, latestHandshake,
+            transferRx, transferTx, epochSecond);
+    }
 
     /** A configured peer the running interface does not know: no endpoint, no handshake, never connected. */
     public static VpnClient absent(String publicKey, String ipAddress) {
@@ -20,7 +33,8 @@ public record VpnClient(
     public boolean isConnected() {
         long handshake = latestHandshakeEpoch();
         long now = System.currentTimeMillis() / 1000;
-        return handshake > 0 && (now - handshake) < HANDSHAKE_STALE_AFTER_SECONDS;
+        // WireGuard never says goodbye; the app does, and only a later handshake undoes it.
+        return handshake > 0 && (now - handshake) < HANDSHAKE_STALE_AFTER_SECONDS && handshake > goodbyeEpoch;
     }
 
     /** The last-handshake instant as a Unix epoch second; {@code 0} when absent or unparseable. */

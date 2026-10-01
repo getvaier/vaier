@@ -15,7 +15,7 @@ public static class JoinProtocol
     public static string JoinRequest(string name, string publicKey) =>
         new JsonObject { ["name"] = name, ["publicKey"] = publicKey, ["platform"] = "windows" }.ToJsonString();
 
-    /// <summary>Leaving and asking about standing both prove who is asking with the two keys only this computer and Vaier hold.</summary>
+    /// <summary>Leaving, asking about standing and saying hello and goodbye all prove who is asking with the two keys only this computer and Vaier hold.</summary>
     public static string Proof(string publicKey, string presharedKey) =>
         new JsonObject { ["publicKey"] = publicKey, ["presharedKey"] = presharedKey }.ToJsonString();
 

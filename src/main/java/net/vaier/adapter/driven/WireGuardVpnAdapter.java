@@ -7,6 +7,7 @@ import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForRecordingPeerSignals;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -18,6 +19,8 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -29,7 +32,7 @@ import net.vaier.domain.port.ForGettingServerPublicKey;
 
 @Component
 @Slf4j
-public class WireGuardVpnAdapter implements ForGettingVpnClients, ForGettingServerPublicKey, ForDeletingVpnPeers,
+public class WireGuardVpnAdapter implements ForGettingVpnClients, ForRecordingPeerSignals, ForGettingServerPublicKey, ForDeletingVpnPeers,
         ForUpdatingServerAllowedIps {
 
     @Value("${wireguard.config.path:/wireguard/config}")
@@ -55,6 +58,9 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForGettingServ
 
     private final Clock clock;
     private volatile TunnelRead lastRead;
+
+    /** When each peer's app last said goodbye, in epoch seconds. In memory: a restart falls back to 180 s. */
+    private final Map<String, Long> goodbyes = new ConcurrentHashMap<>();
 
     /** One tick's view of the interface: its peers and its own public key, read together. */
     private record TunnelRead(Instant at, List<VpnClient> clients, String serverPublicKey) {}
@@ -321,7 +327,20 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForGettingServ
 
     @Override
     public List<VpnClient> getClients() {
-        return tunnel().clients();
+        return tunnel().clients().stream()
+            .map(client -> client.withGoodbyeAt(goodbyes.getOrDefault(client.publicKey(), 0L)))
+            .toList();
+    }
+
+    @Override
+    public void recordHello(String publicKey) {
+        goodbyes.remove(publicKey);
+        lastRead = null;
+    }
+
+    @Override
+    public void recordGoodbye(String publicKey) {
+        goodbyes.put(publicKey, clock.instant().getEpochSecond());
     }
 
     @Override

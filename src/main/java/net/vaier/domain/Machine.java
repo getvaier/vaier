@@ -29,8 +29,18 @@ public record Machine(
     boolean runsDocker,
     Integer dockerPort,
     DeviceCategory deviceCategory,
-    Boolean sshAccessOverride
+    Boolean sshAccessOverride,
+    long goodbyeEpoch
 ) {
+
+    /** A machine whose app has not said goodbye — every machine but a peer read from a live tunnel. */
+    public Machine(MachineId id, String name, MachineType type, String publicKey, String allowedIps,
+                   String endpointIp, String endpointPort, String latestHandshake, String transferRx,
+                   String transferTx, String lanCidr, String lanAddress, boolean runsDocker, Integer dockerPort,
+                   DeviceCategory deviceCategory, Boolean sshAccessOverride) {
+        this(id, name, type, publicKey, allowedIps, endpointIp, endpointPort, latestHandshake, transferRx,
+            transferTx, lanCidr, lanAddress, runsDocker, dockerPort, deviceCategory, sshAccessOverride, 0L);
+    }
 
     /**
      * Whether Vaier offers SSH (the credential control now, the web terminal later) for a machine by
@@ -112,7 +122,8 @@ public record Machine(
             peer.peerType().isServerType(),
             null,
             peer.effectiveDeviceCategory(),
-            peer.sshAccess()
+            peer.sshAccess(),
+            client == null ? 0L : client.goodbyeEpoch()
         );
     }
 
@@ -170,7 +181,7 @@ public record Machine(
             return lanReachability != null && lanReachability.get(lanAddress) == Reachability.OK;
         }
         return new VpnClient(publicKey, allowedIps, endpointIp, endpointPort, latestHandshake,
-            transferRx, transferTx).isConnected();
+            transferRx, transferTx, goodbyeEpoch).isConnected();
     }
 
 

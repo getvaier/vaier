@@ -387,7 +387,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                 // Check if any middleware indicates authentication (forwardAuth, basicAuth, digestAuth)
                 ReverseProxyRoute.AuthInfo authInfo = extractAuthInfoFromMiddlewareNames(routerMiddlewares);
 
-                if (serviceName != null) {
+                // Every route is addressed by a host; a path-only router (the tunnel door's) is not one.
+                if (serviceName != null && domainName != null) {
                     // Try to find service with exact name first
                     Map<String, Object> serviceConfig = castToMap(services.get(serviceName));
 

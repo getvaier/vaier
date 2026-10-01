@@ -31,7 +31,6 @@ class DeviceCategoryTest {
         assertThat(DeviceCategory.fromMachineType(MachineType.MOBILE_CLIENT)).isEqualTo(DeviceCategory.PHONE);
         assertThat(DeviceCategory.fromMachineType(MachineType.WINDOWS_CLIENT)).isEqualTo(DeviceCategory.LAPTOP);
         assertThat(DeviceCategory.fromMachineType(MachineType.UBUNTU_SERVER)).isEqualTo(DeviceCategory.SERVER);
-        assertThat(DeviceCategory.fromMachineType(MachineType.WINDOWS_SERVER)).isEqualTo(DeviceCategory.SERVER);
         assertThat(DeviceCategory.fromMachineType(MachineType.LAN_SERVER)).isEqualTo(DeviceCategory.GENERIC);
     }
 

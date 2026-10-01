@@ -1361,9 +1361,8 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
     padding: 10px 12px; margin: 0 0 12px; max-height: 260px; overflow: auto; white-space: pre;
     color: var(--text-muted);
 }
-.ex-qr { display: block; width: 196px; height: 196px; margin: 6px auto 14px; background: #fff; padding: 8px; border-radius: var(--radius-1); }
 
-/* Peer handoff: the no-sudo recipe for an Ubuntu server, and the plain per-platform steps for the rest.
+/* Peer handoff: the no-sudo recipe for an Ubuntu server.
    The recipe is the one bold moment of the peer flow — numbered, no-root, the setup script transferred by
    hand rather than pulled with a token. Everything around it stays in the shell's quiet register. */
 .ex-recipe { list-style: none; margin: 8px 0 12px; padding: 0; counter-reset: ex-step; display: grid; gap: 12px; }

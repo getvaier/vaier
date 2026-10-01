@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain HTTP only to Vaier's tunnel door, which is reached inside WireGuard and so is encrypted anyway. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">172.20.0.251</domain>
+    </domain-config>
+</network-security-config>

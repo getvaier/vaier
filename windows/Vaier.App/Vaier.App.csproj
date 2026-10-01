@@ -10,7 +10,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Vaier.App</RootNamespace>
     <AssemblyName>Vaier</AssemblyName>
-    <Version>0.5.1</Version>
+    <Version>0.6.2</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Assets\vaier.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>

@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -33,5 +34,16 @@ class MachineReachabilityTest {
         Machine stale = new Machine(MachineId.generate(), "bob", MachineType.UBUNTU_SERVER, "pk", "10.13.13.3/32",
             "1.2.3.4", "51820", "1000", "1", "1", null, null, true, null, DeviceCategory.SERVER, null);
         assertThat(stale.isReachable(Map.of())).isFalse();
+    }
+
+    @Test
+    void peerThatSaidGoodbyeIsNotReachable_thoughItsHandshakeIsFresh() {
+        long now = System.currentTimeMillis() / 1000;
+        PeerConfiguration peer = new PeerConfiguration("phone", "Phone", "10.13.13.9", "",
+            MachineType.MOBILE_CLIENT, null, null, null);
+        VpnClient client = new VpnClient("pk", "10.13.13.9/32", "1.2.3.4", "51820",
+            String.valueOf(now - 30), "1", "1").withGoodbyeAt(now - 5);
+
+        assertThat(Machine.fromPeer(peer, client).isReachable(Map.of())).isFalse();
     }
 }

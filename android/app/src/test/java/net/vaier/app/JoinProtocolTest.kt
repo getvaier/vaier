@@ -59,11 +59,11 @@ class JoinProtocolTest {
     }
 
     @Test
-    fun `asking about standing presents exactly the same proof as leaving`() {
-        assertEquals(
-            JoinProtocol.leaveRequest(publicKey, presharedKey),
-            JoinProtocol.standingRequest(publicKey, presharedKey),
-        )
+    fun `asking about standing, saying hello and saying goodbye present exactly the same proof as leaving`() {
+        val leaving = JoinProtocol.leaveRequest(publicKey, presharedKey)
+        assertEquals(leaving, JoinProtocol.standingRequest(publicKey, presharedKey))
+        assertEquals(leaving, JoinProtocol.helloRequest(publicKey, presharedKey))
+        assertEquals(leaving, JoinProtocol.goodbyeRequest(publicKey, presharedKey))
     }
 
     @Test

@@ -39,6 +39,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerPublicKey;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForRecordingPeerSignals;
 import net.vaier.domain.port.ForHoldingEnrolmentRequests;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerIds;
@@ -49,6 +50,7 @@ import net.vaier.domain.port.ForSyncingLanRoutes;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.junit.jupiter.api.BeforeEach;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -88,6 +90,7 @@ class VpnServiceTest {
 
     @Mock ConfigResolver configResolver;
     @Mock ForGettingVpnClients forGettingVpnClients;
+    @Mock ForRecordingPeerSignals forRecordingPeerSignals;
     @Mock ForGettingServerPublicKey forGettingServerPublicKey;
     @Mock ForResolvingPeerIds forResolvingPeerIds;
     @Mock ForGettingPeerConfigurations peerConfigProvider;
@@ -238,6 +241,24 @@ class VpnServiceTest {
         String result = service.generateWireguardClientDockerCompose("alice", "vpn.example.com", "51820");
 
         assertThat(result).isEqualTo("docker-compose-yaml-content");
+    }
+
+    @Test
+    void theDownloadablePaths_refuseAPersonalDevice_beforeRenderingAnything() {
+        // It joins through the Vaier app. One Vaier minted a key for long ago keeps working, but gets
+        // nothing new handed out.
+        when(peerConfigProvider.getPeerConfigByName("phone")).thenReturn(Optional.of(
+            new PeerConfiguration("phone", "Phone", "10.13.13.7", "[Interface]\nPrivateKey = k\n",
+                MachineType.MOBILE_CLIENT, null, null, null)));
+        record Row(String path, ThrowingCallable call) {}
+        for (Row row : List.of(
+                new Row("retrieve config", () -> service.retrievePeerConfig("phone")),
+                new Row("docker-compose", () -> service.generateWireguardClientDockerCompose("phone", "vpn", "51820")),
+                new Row("setup script", () -> service.generateSetupScript("phone", "vpn", "51820")))) {
+            assertThatThrownBy(row.call()).as(row.path())
+                .isInstanceOf(ConflictException.class).hasMessageContaining("Vaier app");
+        }
+        verifyNoInteractions(dockerComposeGenerator);
     }
 
     // --- generateSetupScript ---
@@ -856,6 +877,18 @@ class VpnServiceTest {
     }
 
     @Test
+    void createPeer_refusesAPersonalDevice_beforeMintingAKey() {
+        // A phone or Windows PC joins through the Vaier app with a key it makes itself.
+        for (MachineType type : new MachineType[] { MachineType.MOBILE_CLIENT, MachineType.WINDOWS_CLIENT }) {
+            assertThatThrownBy(() -> service.createPeer("Geir's phone", type, null, null, null))
+                .as(type.name())
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("Vaier app");
+        }
+        verifyNoInteractions(forExecutingInContainer, forUpdatingServerAllowedIps, forUpdatingPeerConfigurations);
+    }
+
+    @Test
     void createPeer_allowsALanServersName() {
         // The LAN-server list is not even read any more: there is no name to be free of. That the stub
         // would be unnecessary here is itself the point.
@@ -1074,7 +1107,7 @@ class VpnServiceTest {
     }
 
     @Test
-    void getVpnPeers_mobileClient_isClientNotServer_andOffersQrCode() {
+    void getVpnPeers_mobileClient_isClientNotServer_andOffersNothingToDownload() {
         VpnClient client = new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
@@ -1086,10 +1119,8 @@ class VpnServiceTest {
         assertThat(view.isServer()).isFalse();
         assertThat(view.isClient()).isTrue();
         assertThat(view.isRelay()).isFalse();
-        assertThat(view.availableArtifacts())
-            .containsExactlyInAnyOrder(
-                net.vaier.domain.PeerArtifact.WG_CONFIG,
-                net.vaier.domain.PeerArtifact.QR_CODE);
+        assertThat(view.availableArtifacts()).isEmpty();
+        assertThat(view.joinsThroughVaierApp()).isTrue();
     }
 
     @Test
@@ -1119,14 +1150,16 @@ class VpnServiceTest {
     }
 
     @Test
-    void getVpnPeers_anOrdinaryPeer_holdsNoDeviceHeldKey() {
+    void getVpnPeers_anOrdinaryPeer_holdsNoDeviceHeldKey_andDoesNotJoinThroughTheVaierApp() {
         VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", "[Interface]",
                 MachineType.UBUNTU_SERVER, null, null, null)));
 
-        assertThat(service.getVpnPeers().get(0).deviceHeldKey()).isFalse();
+        var view = service.getVpnPeers().get(0);
+        assertThat(view.deviceHeldKey()).isFalse();
+        assertThat(view.joinsThroughVaierApp()).isFalse();
     }
 
     @Test
@@ -2027,6 +2060,26 @@ class VpnServiceTest {
         verifyNoInteractions(forExecutingInContainer);
     }
 
+    @Test
+    void reissuePeerConfig_refusesAPersonalDeviceVaierOnceMintedAKeyFor() {
+        // A legacy phone keeps working as it is, but Vaier hands out no new config for it.
+        String existing = WireGuardPeerConfig.generate("PRIV", "10.13.13.7", "OLD_PUB", "PSK",
+            "old.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24", null, "Phone",
+            null, null, mid("phone"));
+        when(peerConfigProvider.getPeerConfigByName("phone")).thenReturn(Optional.of(
+            new PeerConfiguration("phone", "Phone", "10.13.13.7", existing, MachineType.MOBILE_CLIENT,
+                null, null, null, null, null, mid("phone"), null)));
+
+        assertThatThrownBy(() -> service.reissuePeerConfig("phone"))
+            .isInstanceOf(ConflictException.class)
+            .hasMessageContaining("Phone")
+            .hasMessageContaining("Vaier app");
+
+        verify(forUpdatingPeerConfigurations, never()).rewriteConfig(any(), any());
+        verify(forTrackingPeerConfigRetrieval, never()).resetViewed(any());
+        verifyNoInteractions(forExecutingInContainer);
+    }
+
     // --- enrolment requests: a phone waits, the operator approves from anywhere (#359 slice 1b) ---
 
     private static final String PSK = "cGKrDp0z0Fs0IiUrPzuTfnJ7CEZzSXpGX0ZlLBFgLGE=";
@@ -2184,6 +2237,21 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs())
             .thenReturn(List.of(enrolledPhone("ruten", DEVICE_KEY, PSK)));
         assertThat(service.isMember(DEVICE_KEY, "not-the-preshared-key")).isFalse();
+    }
+
+    @Test
+    void helloAndGoodbye_areRecordedOnlyForThePeerTheCallerProvesItHolds() {
+        when(peerConfigProvider.getAllPeerConfigs())
+            .thenReturn(List.of(enrolledPhone("ruten", DEVICE_KEY, PSK)));
+
+        assertThat(service.sayHello(DEVICE_KEY, "not-the-preshared-key")).isFalse();
+        assertThat(service.sayGoodbye(DEVICE_KEY, "not-the-preshared-key")).isFalse();
+        verifyNoInteractions(forRecordingPeerSignals);
+
+        assertThat(service.sayHello(DEVICE_KEY, PSK)).isTrue();
+        verify(forRecordingPeerSignals).recordHello(DEVICE_KEY);
+        assertThat(service.sayGoodbye(DEVICE_KEY, PSK)).isTrue();
+        verify(forRecordingPeerSignals).recordGoodbye(DEVICE_KEY);
     }
 
     @Test

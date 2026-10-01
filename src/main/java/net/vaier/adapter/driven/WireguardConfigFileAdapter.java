@@ -354,6 +354,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
     private MachineType parseMachineType(String value) {
         if (value == null) return MachineType.UBUNTU_SERVER;
+        // WINDOWS_SERVER was retired; such a peer is still a split-tunnel server, so it reads as one.
+        if (value.equals("WINDOWS_SERVER")) return MachineType.UBUNTU_SERVER;
         try {
             return MachineType.valueOf(value);
         } catch (IllegalArgumentException e) {

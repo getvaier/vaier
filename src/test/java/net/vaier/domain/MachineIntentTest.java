@@ -13,13 +13,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MachineIntentTest {
 
     @Test
-    void server_onWindows_isAWindowsServer() {
-        assertThat(MachineIntent.SERVER.toMachineType(true)).isEqualTo(MachineType.WINDOWS_SERVER);
-    }
-
-    @Test
-    void server_notWindows_isAnUbuntuServer() {
+    void server_isAnUbuntuServer_onWindowsToo() {
+        // A Windows server is not something Vaier adds: a server runs Vaier's own client in Docker.
         assertThat(MachineIntent.SERVER.toMachineType(false)).isEqualTo(MachineType.UBUNTU_SERVER);
+        assertThat(MachineIntent.SERVER.toMachineType(true)).isEqualTo(MachineType.UBUNTU_SERVER);
     }
 
     @Test
