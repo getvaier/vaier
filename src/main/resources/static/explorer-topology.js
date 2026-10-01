@@ -903,59 +903,14 @@
 
         // --- boats ------------------------------------------------------------------------------------------
         // A peer that is online sails the open sea, each in a cell of its own, the cell picked by the machine's
-        // identity so a boat keeps its water when another joins. One that is offline lies moored at a jetty off
-        // the coast where it was last seen (see mooringOf): sail furled, lantern out, no wake.
+        // identity so a boat keeps its water when another joins. One that is offline lies moored in the harbour of
+        // the coast where it was last seen (see mooringOf), outside the boom: sail furled, lantern out, no wake.
         const boats = fleet.boats.slice().sort(byName);
         const sailing = boats.filter((b) => !b.dark);
         const moored = boats.filter((b) => b.dark);
         const quays = [];   // each jetty with its boats, as a box
         const skerryBox = [skL - 10, 540, skR + 10, 704];
         const overlaps = (p, q) => p[0] < q[2] && p[2] > q[0] && p[1] < q[3] && p[3] > q[1];
-        if (moored.length) {
-            const groups = new Map();
-            moored.forEach((b) => {
-                const m = mooringOf(b, harbours, L.coasts.map((c) => c.band));
-                const key = m.harbour ? harbours.indexOf(m.harbour) : m.band;
-                if (!groups.has(key)) groups.set(key, { m, boats: [] });
-                groups.get(key).boats.push(b);
-            });
-            // The houses' reflections and window light, the busiest water under a village.
-            const busy = harbours.filter((h) => h.row === 0).map((h) => [h.left - 6, SHORE, h.right + 6, SHORE + 44]);
-            const quay = el('g', {});
-            groups.forEach(({ m, boats: group }) => {
-                const [from, to] = L.two ? (m.band === 'nordic' ? [20, 620] : [1040, W - 20]) : [20, W - 20];
-                const s = Math.max(0.7, Math.min(0.9, (to - from - 20) / (group.length * 100)));
-                const len = group.length * 100 * s + 20;
-                const want = m.harbour ? (m.harbour.left + m.harbour.right) / 2 : (from + to) / 2;
-                // The clearest stretch of water nearest the place, as close in to the shore as it can lie.
-                let best = null;
-                for (const dy of [40, 58, 76, 94, 112, 130]) {
-                    for (let x = from; x + len <= to; x += 8) {
-                        const deck = SHORE + dy;
-                        const box = [x - 4, deck - 50 * s, x + len + 4, deck + 26 * s];
-                        // The pier out from the shore leaves from the jetty's end nearest the village.
-                        const gx = x + len / 2 < want ? x + len - 10 : x + 10;
-                        const clash = [skerryBox].concat(busy, quays).filter((q) => overlaps(box, q)).length
-                            + (crosses(wakeTrack, box) ? 1 : 0) + (crosses(wakeTrack, [gx - 4, SHORE, gx + 4, deck]) ? 1 : 0);
-                        const score = clash * 10000 + Math.abs(x + len / 2 - want) + dy * 3;
-                        if (!best || score < best.score) best = { score, x, deck, box, gx };
-                    }
-                }
-                const { x: a, deck, gx } = best;
-                el('path', { d: `M ${gx - 2.5} ${SHORE + 1} L ${gx + 2.5} ${SHORE + 1} L ${gx + 6} ${deck + 2} L ${gx - 6} ${deck + 2} Z`, fill: '#5a4a3e' }, quay);
-                for (let y = SHORE + 14; y < deck - 4; y += 14) {
-                    const w = 2.5 + 3.5 * (y - SHORE) / (deck - SHORE);
-                    el('rect', { x: (gx - w).toFixed(1), y: y.toFixed(1), width: 1.4, height: 5, fill: '#2a2320' }, quay);
-                    el('rect', { x: (gx + w - 1.4).toFixed(1), y: y.toFixed(1), width: 1.4, height: 5, fill: '#2a2320' }, quay);
-                }
-                group.forEach((b, i) => { b.at = { x: a + 10 + (50 + i * 100) * s, y: deck + 13 * s, s, deck }; });
-                for (let x = a + 6; x < a + len; x += 22) el('rect', { x: x.toFixed(1), y: deck + 3, width: 3, height: (18 * s).toFixed(1), fill: '#2a2320' }, quay);
-                el('rect', { x: a.toFixed(1), y: deck, width: len.toFixed(1), height: 4, fill: '#4a3c33' }, quay);
-                el('rect', { x: a.toFixed(1), y: (deck + 22 * s).toFixed(1), width: len.toFixed(1), height: 3, fill: '#4a3c33', opacity: 0.15, filter: 'url(#tp-tiny)' }, quay);
-                quays.push(best.box);
-            });
-            town.appendChild(quay);
-        }
 
         const keepOut = [skerryBox].concat(quays);
         // An online boat's wake: a curve from its stern in to the lighthouse.
@@ -994,22 +949,152 @@
             b.at = Object.assign({ s: bs }, slots[i]);
         });
 
+        // --- the boom: the VPN, the fleet's own water ----------------------------------------------------------
+        // One sweep of floating boom round everything the fleet uses: every tunnel's wake, every online boat and
+        // the water before the lighthouse. It is the rounded ring of all of that with room to spare, so it never
+        // crosses a wake or a boat. Where it meets the shore it is anchored there, and it leaves the water
+        // behind the lighthouse open: the fleet's one way out to sea is past the light.
+        const skC = (skL + skR) / 2, skRx = (skR - skL) / 2;
+        const onRock = (x, y, k) => ((x - skC) / (skRx * k)) ** 2 + ((y - 616) / (36 * k)) ** 2 < 1;
+        const reach = [];
+        const around = (px, py, r) => { for (let a = 0; a < 12; a++) reach.push([px + r * Math.cos(a * Math.PI / 6), Math.max(SHORE + 6, py + r * Math.sin(a * Math.PI / 6))]); };
+        wakeTrack.concat(...sailing.map((b) => track(sailWake(b.at)))).forEach(([px, py], n) => { if (n % 3 === 0) around(px, py, 30); });
+        sailing.forEach(({ at }) => [[-44, 0], [44, 0], [0, -64], [0, 12]].forEach(([dx, dy]) => around(at.x + dx * at.s, at.y + dy * at.s, 26)));
+        for (let x = skL; x <= skR; x += 20) around(x, 662, 30);
+        // Monotone-chain hull, its corners rounded off.
+        const turn = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        const half = (pts) => pts.reduce((h, p) => { while (h.length > 1 && turn(h[h.length - 2], h[h.length - 1], p) <= 0) h.pop(); h.push(p); return h; }, []);
+        function sweep() {
+            reach.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+            let r = half(reach).slice(0, -1).concat(half(reach.slice().reverse()).slice(0, -1));
+            for (let n = 0; n < 3; n++) {
+                r = [].concat(...r.map((p, k) => {
+                    const q = r[(k + 1) % r.length];
+                    return [[p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25], [p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75]];
+                }));
+            }
+            return r;
+        }
+        const ring = sweep();
+        const inHull = (x, y) => ring.reduce((inn, p, k) => {
+            const q = ring[(k + 1) % ring.length];
+            return ((p[1] > y) !== (q[1] > y)) && x < p[0] + (y - p[1]) * (q[0] - p[0]) / (q[1] - p[1]) ? !inn : inn;
+        }, false);
+        // Floats ride the sweep about 85 px apart up close, nearer together toward the horizon; none on land, on
+        // the rock, behind the lighthouse or off the picture.
+        const depth = (y) => 0.42 + 0.58 * Math.min(1, Math.max(0, (y - SHORE) / (H - SHORE)));
+        const afloat = (x, y) => y > SHORE + 14 && y < H - 6 && x > 6 && x < W - 6 && !onRock(x, y, 1.15)
+            && !(y < 600 && Math.abs(x - X) < skRx * 0.75);
+        const runs = [];
+        let run = [], carry = 0;
+        const start = ring.reduce((b, p, k) => (afloat(p[0], p[1]) ? b : k), 0);   // begin at a gap, so runs never wrap
+        for (let n = 1; n <= ring.length; n++) {
+            const [ax, ay] = ring[(start + n - 1) % ring.length], [bx, by] = ring[(start + n) % ring.length];
+            const len = Math.hypot(bx - ax, by - ay);
+            let d = carry;
+            while (d < len) {
+                const x = ax + (bx - ax) * d / len, y = ay + (by - ay) * d / len;
+                if (afloat(x, y)) run.push([x, y]); else if (run.length) { runs.push(run); run = []; }
+                d += 85 * depth(y);
+            }
+            carry = d - len;
+        }
+        if (run.length) runs.push(run);
+        const boom = el('g', {});
+        const ropeD = runs.filter((r) => r.length > 1).map((r) => 'M ' + r.map(([x, y], n) => {
+            if (!n) return x.toFixed(1) + ' ' + y.toFixed(1);
+            const [px, py] = r[n - 1], sag = 2 + Math.hypot(x - px, y - py) * 0.09;
+            return `Q ${((px + x) / 2).toFixed(1)} ${((py + y) / 2 + sag * 2).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`;
+        }).join(' ')).join(' ');
+        if (ropeD) {
+            el('path', { d: ropeD, fill: 'none', stroke: lightLook === 'day' ? '#3c3a3a' : '#1a1c24', 'stroke-width': 1.1, 'stroke-linecap': 'round', opacity: 0.45 }, boom);
+            let nth = 0;
+            runs.forEach((r) => r.forEach(([x, y]) => {
+                const k = depth(y), look = lookOf(bandAt(x));
+                const [body, top] = look === 'day' ? ['#e9dcc6', '#f7f0e4'] : look === 'twilight' ? ['#a39a8d', '#c0b7a9'] : ['#3c3e48', '#54565f'];
+                const f = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(k * 0.82).toFixed(3)})` }, boom);
+                // A small drum float, its shadow on the water and a lit top.
+                el('ellipse', { cx: 0, cy: 3.5, rx: 7.5, ry: 2, fill: '#06101c', opacity: 0.25 }, f);
+                el('path', { d: 'M -6 -4 Q -6 -8 0 -8 Q 6 -8 6 -4 L 6 2 Q 6 4.5 0 4.5 Q -6 4.5 -6 2 Z', fill: body }, f);
+                el('ellipse', { cx: -1.5, cy: -6.4, rx: 3.6, ry: 1.3, fill: top, opacity: 0.85 }, f);
+                // After dark every fourth float carries a small light, far dimmer than a lantern.
+                if (look !== 'day' && nth++ % 4 === 0) el('circle', { cx: 0, cy: -9.5, r: 1.5, fill: '#ffdca0', opacity: look === 'night' ? 0.75 : 0.55 }, f);
+            }));
+            const hit = el('path', { d: ropeD, fill: 'none', stroke: 'transparent', 'stroke-width': 16 }, boom);
+            hoverable(hit, { name: 'The VPN', role: 'the fleet’s own water',
+                state: 'a device inside it reaches the internet only through Vaier’s edge, encrypted, where the pirate ships are turned away' }, null);
+        }
+        // Pirates keep clear of the boom as well as out of the water inside it.
+        const nearBoom = (x, y) => runs.some((r) => r.some(([bx, by]) => Math.hypot(bx - x, by - y) < 16));
+
+        // --- harbours: where the boats that are offline lie, outside the boom ----------------------------------
+        // Each coast keeps one short jetty near its outer edge, away from the lighthouse (with one coast, away from
+        // the fjord mouth), as close in to the shore as the boom allows. Its boats raft up side by side, two deep
+        // when crowded, so the boom's end at the shore lies between harbour and villages.
+        const nearRing = (x, y, d) => ring.some(([rx, ry]) => Math.hypot(rx - x, ry - y) < d);
+        if (moored.length) {
+            const groups = new Map();
+            moored.forEach((b) => {
+                const band = mooringOf(b, harbours, L.coasts.map((c) => c.band)).band;
+                if (!groups.has(band)) groups.set(band, []);
+                groups.get(band).push(b);
+            });
+            const quay = el('g', {});
+            groups.forEach((group, band) => {
+                const left = !L.two || band === 'nordic';
+                const deep = group.length > 3 ? 2 : 1, across = Math.ceil(group.length / deep);
+                const s = Math.max(0.6, Math.min(0.9, 230 / (across * 70 + 40)));
+                const len = across * 70 * s + 30, a = left ? 10 : W - 10 - len;
+                const boxOf = (deck) => [a - 4, deck - 50 * s, a + len + 4, deck + (39 + 16 * (deep - 1)) * s];
+                const clear = (q) => [[q[0], q[1]], [q[2], q[1]], [q[0], q[3]], [q[2], q[3]], [(q[0] + q[2]) / 2, q[1]], [(q[0] + q[2]) / 2, q[3]]]
+                    .every(([x, y]) => !inHull(x, y) && !nearRing(x, y, 12)) && !overlaps(q, skerryBox);
+                let deck = null;
+                for (let y = SHORE + 40; y < H - 40 && deck == null; y += 6) if (clear(boxOf(y))) deck = y;
+                if (deck == null) deck = H - 60;
+                // A short pier to the shore when the jetty lies close in; further out it is a pontoon.
+                if (deck - SHORE < 90) {
+                    const gx = left ? a + 10 : a + len - 10;
+                    el('path', { d: `M ${gx - 2} ${SHORE + 1} L ${gx + 2} ${SHORE + 1} L ${gx + 4} ${deck + 2} L ${gx - 4} ${deck + 2} Z`, fill: '#5a4a3e' }, quay);
+                }
+                for (let x = a + 6; x < a + len; x += 22) el('rect', { x: x.toFixed(1), y: deck + 3, width: 3, height: (18 * s).toFixed(1), fill: '#2a2320' }, quay);
+                el('rect', { x: a.toFixed(1), y: deck, width: len.toFixed(1), height: 4, fill: '#4a3c33' }, quay);
+                group.forEach((b, i) => {
+                    const row = i < across ? 0 : 1, col = row ? i - across : i;
+                    // A boat rafted outboard ties to its neighbour's gunwale, not to the jetty.
+                    b.at = { x: a + 15 + (40 + col * 70 + row * 30) * s, y: deck + (13 + row * 16) * s, s, deck: deck + row * 8 * s };
+                });
+                quays.push(boxOf(deck));
+            });
+            town.appendChild(quay);
+        }
+
         // --- pirate ships: addresses the edge is keeping out ------------------------------------------------
         // A fresh ban sits close in, just turned away; as it runs down its ship drifts out toward the horizon.
-        // Spread over the whole water, clear of the lighthouse, its quay and each other.
+        // Always outside the boom, clear of the lighthouse, the jetties and each other; one that finds no water
+        // of its own lies at the boom, stopped.
         const pirates = el('g', {});
         const placed = sailing.map((b) => ({ x: b.at.x, y: b.at.y }));
+        const outside = (x, y, k) => [[-46, 0], [44, 0], [0, -64], [0, 12], [-6, -80], [6, -80]].every(([dx, dy]) => !inHull(x + dx * k, y + dy * k) && !nearBoom(x + dx * k, y + dy * k));
         fleet.bans.slice().sort((a, b) => a.drift - b.drift || a.ip.localeCompare(b.ip)).forEach((ban) => {
             const t = Math.min(1, ban.drift / 240);
             const hr = rng(hash(ban.ip));
-            const y = SHORE + 60 + t * 250 + (hr() - 0.5) * 40;
+            let y = SHORE + 60 + t * 250 + (hr() - 0.5) * 40;
             const k = 0.3 + t * 0.4;
             let x = 70 + hr() * (W - 140);
-            for (let tries = 0; tries < 60; tries++) {
-                const nearLight = Math.abs(x - X) < 260 && y < 760;
-                const nearQuay = quays.some(([a, b, c, d]) => x > a - 40 && x < c + 40 && y > b - 30 && y < d + 30);
-                if (!nearLight && !nearQuay && placed.every((p) => Math.hypot(p.x - x, (p.y - y) * 2) > 150)) break;
-                x = 70 + hr() * (W - 140);
+            const clear = (x, y, gap) => !(Math.abs(x - X) < 260 && y < 760)
+                && !quays.some(([a, b, c, d]) => x > a - 40 && x < c + 40 && y > b - 30 && y < d + 30)
+                && placed.every((p) => Math.hypot(p.x - x, (p.y - y) * 2) > gap) && outside(x, y, k);
+            let found = false;
+            for (let tries = 0; tries < 60 && !(found = clear(x, y, 150)); tries++) x = 70 + hr() * (W - 140);
+            if (!found) {
+                let best = null;
+                for (let cy = SHORE + 40; cy < H - 20; cy += 12) {
+                    for (let cx = 60; cx < W - 60; cx += 12) {
+                        const d = Math.hypot(cx - x, cy - y);
+                        if ((!best || d < best.d) && clear(cx, cy, 100)) best = { d, cx, cy };
+                    }
+                }
+                if (best) { x = best.cx; y = best.cy; }
             }
             placed.push({ x, y });
             const away = x < X ? -1 : 1;   // the bow points away from the lighthouse
@@ -1151,11 +1236,12 @@
         svg.appendChild(wakes);
         sailing.forEach((b, i) => wake(sailWake(b.at), false, 12 + (i % 4) * 3, hash(b.id), b.at.x));
         svg.appendChild(seaHit);
+        svg.appendChild(boom);
         svg.appendChild(town);
         svg.appendChild(pirates);
         svg.appendChild(ship);
         svg.appendChild(beamHit);
-        boats.forEach(boat);
+        boats.slice().sort((p, q) => p.at.y - q.at.y).forEach(boat);
         svg.appendChild(lh);
         svg.appendChild(lanterns);
         const vg = el('radialGradient', { id: 'tp-vig', cx: 0.5, cy: 0.45, r: 0.75 }, defs);
