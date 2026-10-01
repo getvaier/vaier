@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="styles.css">
     <style>
         /* Launchpad-local accents. The palette + display/mono fonts live in styles.css;
-           these three are specific to the launchpad's status dots and hero glow. */
+           these three are specific to the launchpad's status dots and tile accents. */
         .content {
             --live: #5fe3a1;
             --off: #f2765f;
@@ -23,80 +23,6 @@
             max-width: 1180px;
             margin: 0 auto;
         }
-
-        /* Hero — a framed "mesh" header that gives the launchpad its own front door:
-           brand glyph tile, a one-line live summary, and Machines/Services/Online stat chips. */
-        .hero {
-            position: relative;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            gap: 1.4rem;
-            padding: 1.5rem 1.6rem;
-            margin-bottom: 2rem;
-            border: 1px solid var(--border);
-            border-radius: var(--radius-2);
-            background:
-                radial-gradient(120% 160% at 88% -20%, rgba(76, 201, 230, 0.10), transparent 55%),
-                linear-gradient(180deg, #151c26, #121821);
-        }
-
-        .hero-mesh {
-            flex-shrink: 0;
-            width: 60px;
-            height: 60px;
-            border-radius: var(--radius-2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--accent);
-            background: var(--accent-dim);
-            border: 1px solid rgba(76, 201, 230, 0.35);
-            box-shadow: 0 0 32px rgba(76, 201, 230, 0.18);
-        }
-
-        .hero-txt { flex: 1; min-width: 0; }
-
-        .hero h1 {
-            font-family: var(--display);
-            font-weight: 600;
-            font-size: 1.7rem;
-            letter-spacing: -0.01em;
-            line-height: 1.1;
-        }
-
-        .hero p {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            margin-top: 0.3rem;
-        }
-
-        .hero p b { color: var(--text); font-weight: 500; }
-
-        .stats { display: flex; gap: 0.6rem; flex-shrink: 0; }
-
-        .stat {
-            min-width: 78px;
-            padding: 0.6rem 0.8rem;
-            border: 1px solid var(--border);
-            border-radius: var(--radius-1);
-            background: rgba(255, 255, 255, 0.015);
-        }
-
-        .stat .n {
-            font-family: var(--display);
-            font-weight: 600;
-            font-size: 1.4rem;
-            line-height: 1;
-        }
-
-        .stat .l {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin-top: 0.35rem;
-        }
-
-        .stat.ok .n { color: var(--live); }
 
         /* Install card — the Vaier app, offered on the device that can actually take it (#359, #370).
            Sits at the foot of the page, below the fleet. Same object family as a service tile: card ground, --radius-2, one shadow, no frame. The only
@@ -306,10 +232,6 @@
 
         @media (max-width: 600px) {
             .content { padding: 1.25rem 1rem 3rem; }
-            .hero { flex-wrap: wrap; gap: 1rem; padding: 1.2rem; }
-            .hero h1 { font-size: 1.4rem; }
-            .stats { width: 100%; }
-            .stat { flex: 1; min-width: 0; }
             .grid { grid-template-columns: 1fr 1fr; gap: 0.75rem; }
             .tile-sub { display: none; }
         }
@@ -334,28 +256,6 @@
     </div>
 
     <div class="content">
-        <div class="hero">
-            <div class="hero-mesh">
-                <svg width="30" height="30" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                    <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
-                    <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
-                    <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
-                    <circle cx="2.5" cy="3.5" r="1.4" fill="currentColor" stroke="none"/>
-                    <circle cx="13.5" cy="3.5" r="1.4" fill="currentColor" stroke="none"/>
-                    <circle cx="2.5" cy="12.5" r="1.4" fill="currentColor" stroke="none"/>
-                    <circle cx="13.5" cy="12.5" r="1.4" fill="currentColor" stroke="none"/>
-                </svg>
-            </div>
-            <div class="hero-txt">
-                <h1>Launchpad</h1>
-                <p id="heroSummary">&nbsp;</p>
-            </div>
-            <div class="stats">
-                <div class="stat"><div class="n" id="statMachines">–</div><div class="l">Machines</div></div>
-                <div class="stat"><div class="n" id="statServices">–</div><div class="l">Services</div></div>
-                <div class="stat ok"><div class="n" id="statOnline">–</div><div class="l">Online</div></div>
-            </div>
-        </div>
         <div id="grid">
         </div>
         <div id="installCard"></div>
@@ -627,36 +527,12 @@
 
         const isServiceOnline = (s) => s.liveness === 'LIVE';
 
-        // The hero's live summary + stat chips are derived entirely from the fetched
-        // services list — machines = distinct peers, online = tiles the domain marked reachable.
-        function updateHero(services) {
-            const machines = new Set(services.map(s => s.peerName)).size;
-            const total = services.length;
-            const online = services.filter(isServiceOnline).length;
-
-            document.getElementById('statMachines').textContent = machines;
-            document.getElementById('statServices').textContent = total;
-            document.getElementById('statOnline').textContent = online;
-
-            const summary = document.getElementById('heroSummary');
-            if (total === 0) {
-                summary.textContent = 'No services published yet';
-                return;
-            }
-            const svcWord = total === 1 ? 'service' : 'services';
-            const machineWord = machines === 1 ? 'machine' : 'machines';
-            summary.innerHTML =
-                `<b>${total} ${svcWord}</b> across <b>${machines} ${machineWord}</b> · ` +
-                `<b>${online} reachable</b> right now`;
-        }
-
         async function load() {
             const container = document.getElementById('grid');
             try {
                 const services = await fetchServices();
                 container.innerHTML = '';
                 _hasRendered = true;
-                updateHero(services);
                 if (services.length === 0) {
                     container.innerHTML = '<div class="empty">No services published yet.<br>Use <a href="/explorer.html">Explorer</a> to add services.</div>';
                     return;
