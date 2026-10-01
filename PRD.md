@@ -4428,3 +4428,9 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 **Publishing.** `VaierServerCatalogue` offers Pi-hole's admin UI (container port 80, root redirect `/admin`) exactly as it offers Traefik's dashboard; port 53 is never offered. Pi-hole's own password is off (`FTLCONF_webserver_api_password: ""`), because the published route is meant to sit behind social login, which is the gate.
 
 **Updates.** Pi-hole is now part of Vaier's own stack, so `VaierServerCatalogue.sweepable` drops it from the update sweep and it moves with a Vaier release (§6.61).
+
+### 6.64 Quick Settings tile on Android ✅ (implemented 2026-10-01)
+
+**Why.** Disconnecting meant opening the app, or digging through Android's VPN settings; the key icon in the status bar does nothing on tap.
+
+**What.** `VaierTileService` puts a **Vaier** toggle in the pull-down shade, lit while the tunnel is up. `QuickTile.onTap` decides a tap: connected → disconnect; a member with VPN consent → connect; otherwise open the app, since joining and Android's VPN consent need an activity. The tile and the app share one `Connection` (tunnel + standing watchdog), so a tap does exactly what the app's switch does, and either one asks the tile to look again. The tile reads the tunnel when the shade opens; it never polls. App version 0.5.

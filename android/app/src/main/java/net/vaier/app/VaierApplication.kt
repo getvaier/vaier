@@ -15,4 +15,5 @@ class VaierApplication : Application() {
     val watchdog: StandingWatchdog by lazy {
         StandingWatchdog(store, tunnels, vaier, RemovalNotification(this))
     }
+    val connection: Connection by lazy { Connection(this, store, tunnels, watchdog) }
 }

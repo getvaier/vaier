@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var tunnels: TunnelController
     private lateinit var vaier: VaierClient
     private lateinit var watchdog: StandingWatchdog
+    private lateinit var connection: Connection
 
     private val membership = mutableStateOf<Membership?>(null)
     private val pending = mutableStateOf<PendingJoin?>(null)
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
         tunnels = app.tunnels
         vaier = app.vaier
         watchdog = app.watchdog
+        connection = app.connection
         readStore()
 
         setContent {
@@ -85,6 +87,8 @@ class MainActivity : ComponentActivity() {
         watchdog.onRemoved = { runOnUiThread(::speakOfRemoval) }
         readStore()
         speakOfRemoval()
+        // The tile may have connected or disconnected while the app was away.
+        refreshStatus()
         askAboutThisPhone()
     }
 
@@ -251,16 +255,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bringUp() = onTunnel("Vaier could not connect this phone.") {
-        tunnels.setUp(tunnels.configOf(it.configText))
+        connection.connect()
         // Only now is there anything worth a notification later, and only now has the person shown
         // they want this connection. A refusal changes nothing about being connected.
         runOnUiThread(::askToNotify)
-        watchdog.watch()
     }
 
     private fun takeDown() = onTunnel("Vaier could not disconnect this phone.") {
-        watchdog.rest()
-        tunnels.setDown(tunnels.configOf(it.configText))
+        connection.disconnect()
     }
 
     private fun askToNotify() {
