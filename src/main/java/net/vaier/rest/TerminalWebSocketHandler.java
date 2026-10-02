@@ -18,6 +18,7 @@ import net.vaier.domain.MachineId;
 import net.vaier.domain.PersistentShell;
 import net.vaier.domain.SshAuthException;
 import net.vaier.domain.SshConnectException;
+import net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener;
 import net.vaier.domain.port.ForOpeningSshSessions.SshSession;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -25,10 +26,14 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
+import jakarta.annotation.PreDestroy;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * WebSocket bridge for the web terminal (#308): on connect it resolves the machine from the path,
@@ -67,6 +72,10 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
     private final EndTerminalSessionUseCase endTerminalSessionUseCase;
     private final SendHostPasswordUseCase sendHostPasswordUseCase;
 
+    /** Every terminal with a shell open, so a restart can tell each one it is coming back. */
+    private final Set<WebSocketSession> open = ConcurrentHashMap.newKeySet();
+    private volatile boolean restarting;
+
     @Override
     public void afterConnectionEstablished(WebSocketSession wsSession) {
         String machineSegment = machineFromPath(wsSession.getUri());
@@ -95,6 +104,7 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
             // Tell the browser truthfully how this open resolved, so its reconnect banner can say
             // "reattached" only when the session was genuinely resumed.
             sendShellMode(wsSession, opened.continuity());
+            open.add(wsSession);
         } catch (NotFoundException e) {
             closeWith(wsSession, CLOSE_NOT_FOUND, "No machine with id \"" + machineSegment + "\"");
         } catch (NoHostCredentialException e) {
@@ -189,10 +199,22 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
      */
     @Override
     public void afterConnectionClosed(WebSocketSession wsSession, CloseStatus status) {
+        open.remove(wsSession);
         SshSession ssh = ssh(wsSession);
         if (ssh != null) {
             ssh.close();
         }
+    }
+
+    /**
+     * Vaier is shutting down, as on every deploy. Its own shutdown also ends each SSH channel, which would
+     * otherwise reach the browser as "the shell ended" (1000) and close the window — while the tmux session
+     * lives on. 1012 tells the window to reconnect and reattach once Vaier is back.
+     */
+    @PreDestroy
+    public void restarting() {
+        restarting = true;
+        open.forEach(session -> closeWith(session, CloseStatus.SERVICE_RESTARTED.getCode(), "Vaier is restarting"));
     }
 
     private static SshSession ssh(WebSocketSession wsSession) {
@@ -294,7 +316,7 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
      * <em>change</em> only, never per chunk, and the tail is what makes a prompt split across two reads
      * still register.
      */
-    private static final class WsOutputListener implements net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener {
+    private final class WsOutputListener implements SshOutputListener {
         private final WebSocketSession wsSession;
         private final OutputTail tail;
         private final Object sendLock = new Object();
@@ -328,7 +350,9 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
         public void onClosed() {
             try {
                 if (wsSession.isOpen()) {
-                    wsSession.close(CloseStatus.NORMAL.withReason("Shell closed"));
+                    wsSession.close(restarting
+                        ? CloseStatus.SERVICE_RESTARTED.withReason("Vaier is restarting")
+                        : CloseStatus.NORMAL.withReason("Shell closed"));
                 }
             } catch (IOException e) {
                 log.debug("Failed to close terminal socket on shell end: {}", e.getMessage());

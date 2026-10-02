@@ -30,9 +30,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -153,6 +155,27 @@ class TerminalWebSocketHandlerTest {
         handler().handleMessage(wsSession, new TextMessage("{\"type\":\"resize\",\"cols\":120,\"rows\":40}"));
 
         verify(sshSession).resize(120, 40);
+    }
+
+    @Test
+    void aShellThatExits_closesAsAnExit_butAVaierRestartClosesAsARestart() throws Exception {
+        // The window closes itself on 1000. A redeploy used to send exactly that, so the operator's terminal
+        // vanished while its tmux session lived on; 1012 makes the window reconnect and reattach instead.
+        attrs();
+        when(wsSession.getUri()).thenReturn(URI.create("wss://host/machines/" + mid("nas") + "/terminal"));
+        when(wsSession.isOpen()).thenReturn(true);
+        ArgumentCaptor<SshOutputListener> listener = ArgumentCaptor.forClass(SshOutputListener.class);
+        when(openTerminalSessionUseCase.openTerminal(eq(mid("nas")), any(), listener.capture()))
+            .thenReturn(opened(sshSession));
+        TerminalWebSocketHandler handler = handler();
+        handler.afterConnectionEstablished(wsSession);
+
+        listener.getValue().onClosed();
+        verify(wsSession).close(CloseStatus.NORMAL.withReason("Shell closed"));
+
+        handler.restarting();
+        listener.getValue().onClosed();
+        verify(wsSession, times(2)).close(argThat(status -> status.getCode() == CloseStatus.SERVICE_RESTARTED.getCode()));
     }
 
     @Test
