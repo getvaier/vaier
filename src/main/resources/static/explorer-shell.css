@@ -751,14 +751,43 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 /* A tickbox and the verbs it gates are two thoughts, not one row that happened to wrap. */
 .ex-check-row + .ex-lactions.is-static { margin-top: 10px; }
 
+/* Needs you: one panel, one row per thing. Built only when something needs the operator, so a healthy page
+   has no panel, no heading and no gap. A row's colour is its weight — red a verdict, amber worth an eye, the
+   accent an invitation — carried by a short bar at the row's edge and its glyph, nothing else. */
+.ex-needs { margin-bottom: 30px; max-width: 760px; }
+.ex-needs-list {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-2);
+    background: var(--bg-card);
+    overflow: hidden;
+}
+.ex-need {
+    --tone: var(--accent);
+    position: relative;
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 14px;
+    padding: 14px 16px 14px 20px;
+}
+.ex-need + .ex-need { border-top: 1px solid var(--border); }
+.ex-need::before {
+    content: ''; position: absolute; left: 0; top: 12px; bottom: 12px;
+    width: 3px; border-radius: 9999px; background: var(--tone);
+}
+.ex-need.is-down { --tone: var(--red); }
+.ex-need.is-degraded { --tone: var(--yellow); }
+.ex-need-ico { width: 18px; height: 18px; color: var(--tone); align-self: start; margin-top: 2px; }
+.ex-need-title { color: var(--text); font-weight: 600; font-size: 15px; line-height: 1.4; }
+.ex-need-why { color: var(--text-muted); font-size: 13.5px; margin-top: 3px; line-height: 1.5; overflow-wrap: anywhere; }
+.ex-need .ex-btn { white-space: nowrap; }
+/* A phone keeps the glyph beside the sentence and puts the button under it, never under the glyph. */
+@media (max-width: 560px) {
+    .ex-need { grid-template-columns: 18px minmax(0, 1fr); row-gap: 10px; padding: 13px 14px 13px 18px; }
+    .ex-need .ex-btn { grid-column: 2; justify-self: start; }
+}
+
 /* Progressive-adoption nudges — quiet, evidence-backed invitations on a machine (the domain decides which
    apply; the shell only renders them). A thin accent left-edge and accent glyph mark an opportunity — never
    the warn colour, since a nudge is an offer, not a problem. The action stays a quiet outline button that
    warms to the accent on hover, so three stacked nudges invite rather than shout. */
-/* The fleet's own ladder (#336) sits above the machines; empty it takes no room at all, because a fleet with
-   nothing left to say must not leave a gap where advice used to be. */
-.ex-fleet-next:not(:empty) { margin-bottom: 14px; }
-
 .ex-nudge {
     display: flex; align-items: flex-start; gap: 14px;
     padding: 15px 17px;

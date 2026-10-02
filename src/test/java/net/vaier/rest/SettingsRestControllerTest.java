@@ -1,7 +1,6 @@
 package net.vaier.rest;
 
 import net.vaier.application.GetAppSettingsUseCase;
-import net.vaier.application.GetReverseProxyAuditUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.GetSelfUpdateStatusUseCase;
@@ -11,31 +10,14 @@ import net.vaier.application.UpdateAnthropicApiKeyUseCase;
 import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
-import net.vaier.domain.ReverseProxyAudit;
-import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.SelfUpdateStatus;
 import org.junit.jupiter.api.Test;
-import java.util.Optional;
-import java.time.Instant;
-import java.time.Duration;
-import net.vaier.domain.PreFlightFinding;
-import net.vaier.domain.MachineType;
-import net.vaier.domain.MachineId;
-import net.vaier.domain.MachineDiskStanding;
-import net.vaier.domain.Machine;
-import net.vaier.domain.DeviceCategory;
-import net.vaier.domain.ConsoleCertificate;
-import net.vaier.application.GetVaierServerUseCase;
-import net.vaier.application.GetMachineDiskStandingsUseCase;
-import net.vaier.application.GetVpnClientsUseCase;
-import net.vaier.application.InspectConsoleCertificateUseCase;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
@@ -54,11 +36,6 @@ class SettingsRestControllerTest {
     @Mock SetSurvivalKitPassphraseUseCase setSurvivalKitPassphraseUseCase;
     @Mock UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase;
     @Mock GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase;
-    @Mock GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
-    @Mock InspectConsoleCertificateUseCase inspectConsoleCertificateUseCase;
-    @Mock GetVpnClientsUseCase getVpnClientsUseCase;
-    @Mock GetMachineDiskStandingsUseCase getMachineDiskStandingsUseCase;
-    @Mock GetVaierServerUseCase getVaierServerUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -71,31 +48,6 @@ class SettingsRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().version()).isEqualTo("1.0.0");
-    }
-
-    /**
-     * "Is it working?" (#265): composed at the driving edge from what the use cases already hold, judged by the
-     * domain, and carrying only what is wrong — a healthy server answers with an empty list and no summary.
-     */
-    @Test
-    void getPreFlight_composesTheFacts_andReturnsOnlyWhatIsWrong() {
-        when(getAppSettingsUseCase.getSettings()).thenReturn(new AppSettingsResult("example.com", null, null, null,
-            null, null, "NOT_RESOLVING", "Not resolving", "ERROR", "Wildcard DNS is not set up. Create one record.",
-            85, false, 2, "Europe/Oslo", false, false, false, false));
-        when(inspectConsoleCertificateUseCase.inspectConsoleCertificate("vaier.example.com")).thenReturn(
-            Optional.of(new ConsoleCertificate("R11", Instant.now().plus(Duration.ofDays(60)), false)));
-        when(getVpnClientsUseCase.getClients()).thenThrow(new RuntimeException("wg command failed"));
-        Machine server = new Machine(MachineId.generate(), "Vaier server", MachineType.UBUNTU_SERVER, "pk",
-            "10.13.13.1/32", null, null, null, null, null, null, null, true, null, DeviceCategory.SERVER, null);
-        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(server);
-        when(getMachineDiskStandingsUseCase.getMachineDiskStandings()).thenReturn(List.of(
-            new MachineDiskStanding(server.id(), "/", 40, 85, 0, 2)));
-
-        SettingsRestController.PreFlightResponse body = controller.getPreFlight().getBody();
-
-        assertThat(body.findings()).extracting(SettingsRestController.PreFlightFindingResponse::check)
-            .containsExactly(PreFlightFinding.Check.WILDCARD_DNS.name(), PreFlightFinding.Check.WIREGUARD.name());
-        assertThat(body.summary()).isEqualTo("2 things need attention before Vaier works as expected.");
     }
 
     @Test
@@ -285,38 +237,4 @@ class SettingsRestControllerTest {
         verify(updateAnthropicApiKeyUseCase).updateAnthropicApiKey("  ");
     }
 
-    // --- the reverse proxy audit (#354): read-only, and silent when there is nothing wrong ---
-
-    @Test
-    void getReverseProxyAudit_saysNothingIsWrongWithACleanConfig() {
-        when(getReverseProxyAuditUseCase.getReverseProxyAudit())
-                .thenReturn(ReverseProxyAudit.of(ReverseProxyConfig.empty()));
-
-        ResponseEntity<SettingsRestController.ReverseProxyAuditResponse> response =
-                controller.getReverseProxyAudit();
-
-        assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(response.getBody().findings()).isEmpty();
-        assertThat(response.getBody().summary()).isEmpty();
-    }
-
-    @Test
-    void getReverseProxyAudit_namesEachBrokenEntry() {
-        when(getReverseProxyAuditUseCase.getReverseProxyAudit())
-                .thenReturn(ReverseProxyAudit.of(ReverseProxyConfig.builder()
-                        .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
-                                .protocol(ReverseProxyConfig.Protocol.HTTP)
-                                .name("orphaned-redirect").build()))
-                        .build()));
-
-        ResponseEntity<SettingsRestController.ReverseProxyAuditResponse> response =
-                controller.getReverseProxyAudit();
-
-        assertThat(response.getBody().findings()).hasSize(1);
-        assertThat(response.getBody().findings().get(0).entry()).isEqualTo("orphaned-redirect");
-        assertThat(response.getBody().findings().get(0).kind()).isEqualTo("UNREFERENCED_MIDDLEWARE");
-        assertThat(response.getBody().findings().get(0).message()).contains("no router");
-        // The lead sentence is the domain's, carried through rather than re-phrased at the edge.
-        assertThat(response.getBody().summary()).contains("Vaier changed nothing");
-    }
 }

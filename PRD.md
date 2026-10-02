@@ -4492,3 +4492,16 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Bugs:** a dialog now closes when the Explorer moves to another view instead of surviving and stacking; on a phone the Security view no longer prints each blocked address's origin, scenario and expiry twice.
 - A peer's **Transfer** reads in human units ("148 GB up / 15 GB down").
 - **Monospace** is kept for identifiers; machine and service titles, the backup server's list of machines, form values and launchpad subtitles use the body face.
+
+### 6.69 One place for trouble: Needs you ✅ (part 2a of [#376](https://github.com/getvaier/vaier/issues/376), slice 2 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** "Is anything wrong?" had no single answer: a red card led to a machine page that never said why, the pre-flight and the reverse proxy audit lived in Settings, a phone waiting to join had its own section, and the fleet nudge ladder only ever said what to do next.
+
+**What.**
+- **Needs you** at the top of the Fleet root (`GET /fleet/needs`, composed at the driving edge in `FleetRestController` from existing use cases and judged by the pure-domain `FleetNudges` assembler). It widens the fleet nudge ladder: devices waiting to join, pre-flight findings, servers that should be answering and are not, backups that failed or came back incomplete (with the fix Vaier has — get the machine ready, back up as root), disks past or closing on their threshold, reverse proxy audit findings, then up to three ladder rungs, then newer images. One sentence, its evidence and one button each; nothing at all when all is well. The domain owns the order, the wording and each row's weight.
+- **The same verdict on the machine's own page**, above its doors; the backup door wears the failed-run mark.
+- **Fleet sorted trouble-first** by the same list.
+- **Pre-flight and the reverse proxy audit left Settings** (`/settings/pre-flight` and `/settings/reverse-proxy-audit` are gone); the audit row's **See which** opens its findings. The "Waiting to join" section is now Needs you rows. **Back up as root** moved from a machine's What to do next into Needs you, so an incomplete backup is said once.
+- Re-read on pushes that can change it (a tunnel or LAN server flipping, a backup settling, a disk standing moving, a publish, a join request); the browser never polls.
+
+**Still to come in #376.** 2b: *switched off on purpose* — a machine that is off by intent goes grey and quiet, its backup pauses instead of failing. 2c: pending OS updates counted on the five-minute sweep, replacing the always-present fold. Backlog: a container in trouble and a missing default route still live only in a machine's What to do next — they belong in Needs you too; two machines sharing a name ("Printer") read the same in a row — the row could say where it is.

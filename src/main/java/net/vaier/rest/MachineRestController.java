@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
-import net.vaier.application.GetBackupRunsUseCase;
 import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetClaudeSignInStandingsUseCase;
 import net.vaier.application.GetContainerStandingsUseCase;
@@ -22,7 +21,6 @@ import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.BackupFleet;
 import net.vaier.domain.BackupJob;
-import net.vaier.domain.BackupRun;
 import net.vaier.domain.EffectiveUser;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
@@ -68,7 +66,6 @@ public class MachineRestController {
     private final SetDiskWatchUseCase setDiskWatchUseCase;
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final GetBackupJobsUseCase getBackupJobsUseCase;
-    private final GetBackupRunsUseCase getBackupRunsUseCase;
     private final GetBackupServersUseCase getBackupServersUseCase;
     private final GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     private final GetSshServerPresenceUseCase getSshServerPresenceUseCase;
@@ -168,12 +165,11 @@ public class MachineRestController {
     /**
      * The progressive-adoption nudges Vaier suggests for one machine: evidence-backed, single yes/no
      * prompts to adopt one more capability — publish its exposed services, back it up, make it the
-     * fleet's backup server, or (#334) back it up as root once a run has visibly lost files to permissions.
-     * Each carries its own "why" from already-cached state.
+     * fleet's backup server, route the network it sits on. Each carries its own "why" from already-cached state.
      *
      * <p><b>Composed at the driving edge.</b> The controller gathers each signal from an existing
      * {@code *UseCase} — the machine, its publishable services, whether a credential is stored, its backup
-     * job and latest run, the backup fleet, reachability — and hands them to the pure-domain
+     * job, the backup fleet, reachability — and hands them to the pure-domain
      * {@link MachineNudges} assembler, which owns the decisions. No application service reaches across
      * domains to collect nudges, and none implements a driven port to expose them. 404 when no machine
      * has that id. A non-whitelisted path under {@code /machines}, so it is admin-gated automatically.
@@ -200,14 +196,10 @@ public class MachineRestController {
             .filter(s -> s.awaitsPublishingOn(target.id()))
             .count();
         boolean hasCredential = hasStoredCredential(target.id());
-        // The machine's job, not a boolean derived from it: "already protected" is one reading of a job, and
-        // "should it back up as root" is another, so the edge fetches the job once and judges neither.
+        // The machine's job, not a boolean derived from it: "already protected" is the domain's reading of it.
         Optional<BackupJob> job = getBackupJobsUseCase.getBackupJobs().stream()
             .filter(j -> target.id().equals(j.machineId()))
             .findFirst();
-        // The last run is the evidence behind the back-up-as-root nudge — an archive with holes in it names
-        // the files it lost. Read straight from the runs use case, exactly as every other signal here.
-        Optional<BackupRun> latestRun = getBackupRunsUseCase.latestForMachine(target.id());
         BackupFleet fleet = new BackupFleet(getBackupServersUseCase.getBackupServers());
         Map<String, Reachability> lanReachability = target.lanAddress() == null ? Map.of()
             : Map.of(target.lanAddress(), getLanServerReachabilityUseCase.getReachability(target.lanAddress()));
@@ -232,7 +224,6 @@ public class MachineRestController {
             .reachable(reachable)
             .hasCredential(hasCredential)
             .job(job)
-            .latestRun(latestRun)
             .fleet(fleet)
             .networks(networks)
             .routingHostNetworks(routingHostNetworks)

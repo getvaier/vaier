@@ -7,7 +7,6 @@ import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.MachineId;
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
-import net.vaier.application.GetBackupRunsUseCase;
 import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetClaudeSignInStandingsUseCase;
 import net.vaier.application.GetContainerStandingsUseCase;
@@ -26,7 +25,6 @@ import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.BackupJob;
-import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.HostCredentialView;
@@ -87,7 +85,6 @@ class MachineRestControllerTest {
     @Mock SetDiskWatchUseCase setDiskWatchUseCase;
     @Mock GetPublishableServicesUseCase getPublishableServicesUseCase;
     @Mock GetBackupJobsUseCase getBackupJobsUseCase;
-    @Mock GetBackupRunsUseCase getBackupRunsUseCase;
     @Mock GetBackupServersUseCase getBackupServersUseCase;
     @Mock GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     @Mock GetSshServerPresenceUseCase getSshServerPresenceUseCase;
@@ -469,31 +466,6 @@ class MachineRestControllerTest {
 
         assertThat(response).extracting(MachineRestController.NudgeResponse::kind)
             .doesNotContain(MachineNudge.Kind.PUBLISH.name());
-    }
-
-    @Test
-    void nudges_backUpAsRoot_isRaisedFromTheMachinesLastRun() {
-        // #334: the signal the nudge rests on is a run, so the controller has to gather runs too. It still
-        // decides nothing — it hands the job and the run to MachineNudges and renders what comes back.
-        Machine colina = new Machine(mid("colina"), "colina", MachineType.UBUNTU_SERVER, "pk",
-            "10.13.13.3/32", "1.2.3.4", "51820", "1", "1", "1", null, null, true, null,
-            DeviceCategory.SERVER, null);
-        BackupJob job = new BackupJob("colina", mid("colina"), "colina-repo", List.of("/home"), List.of(),
-            7, 4, 6, "zstd,6", true, false);
-        BackupRun incomplete = BackupRun.fromExitCode(job, "run-1", Instant.EPOCH, Instant.EPOCH, 1,
-            "/home/mqtt/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'\n");
-        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(colina));
-        when(getPublishableServicesUseCase.getPublishableServices()).thenReturn(List.of());
-        when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of(job));
-        when(getBackupServersUseCase.getBackupServers()).thenReturn(List.of(
-            new BackupServer("nas-borg", mid("nas"), "192.168.3.50", 8022, "borg", null, "/vol", true)));
-        when(getBackupRunsUseCase.latestForMachine(mid("colina"))).thenReturn(Optional.of(incomplete));
-
-        var response = controller.nudges(mid("colina").value());
-
-        assertThat(response).extracting(MachineRestController.NudgeResponse::kind)
-            .containsExactly(MachineNudge.Kind.BACK_UP_AS_ROOT.name());
-        assertThat(response.get(0).evidence()).contains("/home/mqtt/mosquitto.db");
     }
 
     @Test

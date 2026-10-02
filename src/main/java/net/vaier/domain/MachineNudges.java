@@ -21,13 +21,12 @@ public final class MachineNudges {
 
     /**
      * The nudges that apply to {@code machine}, trouble first (no-default-route, containers in trouble) and then
-     * the invitations in a stable order (publish, back-up, designate-backup-server, back-up-as-root,
-     * route-LAN). Each is included only when its factory says so.
+     * the invitations in a stable order (publish, back-up, designate-backup-server, route-LAN). Back-up-as-root
+     * is trouble about a run, so Needs you says it ({@link FleetNudge#backups}), not this list as well. Each is included only when its factory says so.
      *
      * <p>The machine's backup job arrives as the job itself rather than as a pre-computed
      * "already protected" flag: whether a machine is protected <em>is</em> whether it has a job, and that is
-     * a domain reading, not arithmetic for a controller to do on the way in. The same job then answers the
-     * back-up-as-root question, so the driving edge fetches it once and decides nothing.
+     * a domain reading, not arithmetic for a controller to do on the way in.
      *
      * <p>The signals arrive as a {@link MachineSignals} rather than as a parameter list — see that record
      * for why. What they are and where they come from has not changed.
@@ -45,7 +44,6 @@ public final class MachineNudges {
         MachineNudge.backUp(machine.name(), signals.reachable(), signals.hasCredential(),
             signals.job().isPresent()).ifPresent(nudges::add);
         MachineNudge.designateBackupServer(machine, signals.fleet()).ifPresent(nudges::add);
-        MachineNudge.backUpAsRoot(machine.name(), signals.latestRun(), signals.job()).ifPresent(nudges::add);
         MachineNudge.routeLan(machine, signals.networks(), signals.routingHostNetworks())
             .ifPresent(nudges::add);
         return List.copyOf(nudges);

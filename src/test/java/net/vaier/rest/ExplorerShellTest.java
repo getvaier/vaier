@@ -179,7 +179,7 @@ class ExplorerShellTest {
         // here. It briefly had a /claude-sign-ins fleet read; that was removed because painting one pane
         // must not SSH to the whole fleet, and an endpoint with no caller is exactly the machinery
         // CLAUDE.md says not to carry.
-        // /fleet (#336) is the fleet root's own read — the nudge ladder at fleet altitude, GET /fleet/nudges —
+        // /fleet (#336) is the fleet root's own read — Needs you, GET /fleet/needs —
         // and has the /fleet-credentials kind of justification: a genuinely new capability whose REST surface
         // and view shipped together, composed at the driving edge from use cases that already existed.
         // /access widens /access/services: a service credential's person picker reads the access entries the
@@ -188,7 +188,7 @@ class ExplorerShellTest {
                                        "/docker-services", "/published-services", "/access",
                                        "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
                                        "/settings", "/lan-scan", "/survival-kit", "/security",
-                                       "/fleet-credentials", "/vpn/enrolments", "/chat", "/fleet/nudges");
+                                       "/fleet-credentials", "/vpn/enrolments", "/chat", "/fleet/needs");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
@@ -2509,45 +2509,47 @@ class ExplorerShellTest {
         assertThat(body).doesNotContain("viewable");
     }
 
-    // --- the reverse proxy audit in Settings (#354) ----------------------------------------------------------
+    // --- Needs you, and the audit and pre-flight that moved into it (#376) ---------------------------------
 
     @Test
-    void theReverseProxyAudit_paintsNothingAtAllWhenTheConfigIsClean() throws IOException {
-        // A healthy state paints nothing AND reserves no space. A section that said "no problems found"
-        // every time would be a heartbeat, and would teach the operator to skim past the day it says
-        // otherwise — so the whole block sits behind the findings being non-empty.
+    void needsYou_paintsNothingAtAll_whenNothingNeedsAnyone() throws IOException {
+        // A healthy state paints nothing AND reserves no space: the block is built only behind a non-empty
+        // list, on the fleet and on a machine alike, and Settings no longer carries the pre-flight or audit.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("if (findings.length) {");
-        assertThat(js).contains("section('Reverse proxy')");
+        int fleet = js.indexOf("function renderFleet(");
+        String fleetBody = js.substring(fleet, js.indexOf("\n    }\n", fleet));
+        assertThat(fleetBody).contains("if (S.needs.length) body.appendChild(needsBlock(S.needs, null));");
+        assertThat(fleetBody.indexOf("needsBlock")).as("above the machine grid").isLessThan(fleetBody.indexOf("ex-grid"));
+        int machine = js.indexOf("function renderMachine(");
+        assertThat(js.substring(machine, js.indexOf("\n    }\n", machine)))
+            .contains("if (mine.length) body.appendChild(needsBlock(mine, m));");
+        assertThat(js).doesNotContain("/settings/reverse-proxy-audit").doesNotContain("/settings/pre-flight");
     }
 
     @Test
-    void theReverseProxyAudit_readsWithTheRestOfSettingsAndNeverPolls() throws IOException {
-        // The backend polls (the five-minute sweep) and this reads once with the pane. No timer here.
+    void needsYou_isReadOnPushes_neverPolled() throws IOException {
+        // The backend sweeps and pushes; the browser re-reads on the push and never on a clock.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("'/settings/reverse-proxy-audit'");
-        int from = js.indexOf("async function loadSettings(");
+        int from = js.indexOf("function loadNeeds(");
         assertThat(from).isPositive();
-        String body = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(body).contains("/settings/reverse-proxy-audit");
-        assertThat(body).doesNotContain("setInterval");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(body).contains("'/fleet/needs'").doesNotContain("setInterval").doesNotContain("setTimeout");
+        int fleet = js.indexOf("function renderFleet(");
+        assertThat(js.substring(fleet, js.indexOf("\n    }\n", fleet))).as("render never fetches")
+            .doesNotContain("fetch(");
     }
 
     @Test
-    void theReverseProxyAudit_offersNoButton_becauseVaierNeverTouchesTheFile() throws IOException {
-        // #354's decision: say so, do not touch. Deleting an entry Vaier may not have written is the
-        // operator's act, and there is deliberately nothing here that would do it for them.
+    void theRouteAuditRow_onlyOpensWhatItFound_becauseVaierNeverTouchesTheFile() throws IOException {
+        // #354's decision: say so, do not touch. The row's one button opens the domain's own sentences.
         String js = read("explorer-shell.js");
-        int from = js.indexOf("const audit = S.settings.audit || {};");
-        assertThat(from).isPositive();
-        String block = js.substring(from, from + 1200);
-        assertThat(block).doesNotContain("ex-btn");
-        // Every sentence in the block is the domain's — the lead and each row alike. The shell counts
-        // nothing and phrases nothing, so Settings and the alert email cannot drift apart.
-        assertThat(block).contains("audit.summary");
-        assertThat(block).doesNotContain("findings.length === 1");
+        int from = js.indexOf("const NUDGE_ACTION = {");
+        String table = js.substring(from, js.indexOf("};", from));
+        assertThat(table).contains("ROUTE_AUDIT:").contains("detailModal(n.title, n.evidence, n.detail)");
+        int modal = js.indexOf("function detailModal(");
+        assertThat(modal).isPositive();
+        assertThat(js.substring(modal, js.indexOf("\n    }\n", modal))).doesNotContain("fetch(");
         // And its rows wear the shell's own radius token rather than a hard-coded corner.
-        assertThat(read("explorer-shell.css")).contains(".ex-audit-row");
         int css = read("explorer-shell.css").indexOf(".ex-audit-row {");
         assertThat(read("explorer-shell.css").substring(css, css + 320)).contains("var(--radius-1)");
     }
@@ -4132,15 +4134,10 @@ class ExplorerShellTest {
         // A join asked while the stream was down (a redeploy) is re-read when it comes back, not on a refresh.
         int ask = js.indexOf("liveStream('/vpn/enrolments/events'");
         assertThat(js.substring(ask, js.indexOf(";", ask))).contains("onReopen").contains("loadEnrolmentRequests()");
-        int from = js.indexOf("function renderFleet(");
-        String fleet = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(fleet).contains("section('Waiting to join')");
-        assertThat(fleet.indexOf("Waiting to join")).as("above the machine grid").isLessThan(fleet.indexOf("ex-grid"));
-        // The code is the chip: it is what the operator reads off the phone and matches here.
-        int row = js.indexOf("function enrolmentRequestRow(");
+        // It is a row of Needs you, whose one button is the Add the flow already has.
+        int row = js.indexOf("function waitingAction(");
         assertThat(row).isPositive();
         String rowBody = js.substring(row, js.indexOf("\n    }", row));
-        assertThat(rowBody).contains("chip.textContent = r.code");
         assertThat(rowBody).contains("addMachineFork('enrol', null, r)");
     }
 
@@ -4213,7 +4210,7 @@ class ExplorerShellTest {
         String body = js.substring(from, js.indexOf("\n        }", from));
         assertThat(body).as("the address to open, on the device itself").contains("location.host");
         assertThat(body).as("and the button to tap there").contains("tap Install");
-        assertThat(body).as("where its join code turns up").contains("Waiting to join");
+        assertThat(body).as("where its join code turns up").contains("Needs you");
         assertThat(body).doesNotContain("fetch(");
 
         assertThat(js).doesNotContain("qrCodePngBase64").doesNotContain("WINDOWS_SERVER")

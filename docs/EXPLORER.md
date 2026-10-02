@@ -6,15 +6,28 @@ One address space spanning the whole fleet, at `/explorer.html` — the shape Va
 
 ---
 
-## Suggested next steps
+## Needs you
 
-Once a machine is on the mesh, its pane in the Explorer surfaces evidence-backed suggestions for the next thing worth doing with it — publish the services it exposes, back it up, (before any exists) make it the fleet's backup server, read every file when a backup came back with holes, or let the fleet reach the network it sits on. Each is a single action with its reason shown ("reachable, Vaier holds a credential, nothing backed up yet"), and appears only when it actually applies — Vaier works out which, so you decide the intent, not the mechanism. A nudge that grants Vaier more reach on a machine links to what that means.
+The top of the **Fleet** root answers "is anything wrong?". **Needs you** is one list, one row per thing that wants the operator, each a plain sentence, its evidence, and at most one button that takes them to the fix. Most urgent first:
+
+- **someone waiting to join** — a phone or a computer showing its join code (**Add**);
+- **Vaier's own basics** — what the [pre-flight](MONITORING.md#pre-flight) found wrong, with what to do as the evidence (no button: the fix is outside Vaier);
+- **a server not answering** — a LAN server or server peer that should be up, with when it last answered (**Open**). A phone or laptop that is simply away is never on this list. A failed backup on a machine that is down rides on this row ("its last backup failed too") rather than getting a second one;
+- **a backup that went wrong** — a failed run (**Open its backup**), one that failed only because the machine has no borg client (**Get this machine ready**), one missing files that reading as root would get (**Back up everything**, with a link to what that means), or missing files for another reason (**Open its backup**);
+- **a disk** past or closing on its threshold (**Open its disk**);
+- **the reverse proxy config** — entries no route can reach, from the [reverse proxy audit](MONITORING.md#reverse-proxy-audit) (**See which** opens the findings; Vaier never edits the file);
+- **what to do next** — up to three rungs of the fleet nudge ladder: let people in, add the machine your services run on, publish, designate a backup server (naming a NAS if the fleet has one), write the survival kit, set up mail. Capped so it reads as guidance, not a to-do list;
+- **newer images** — containers on a machine whose image has a newer version (**See them**). Worth knowing, never urgent, so last.
+
+Every "does this need the operator?", every sentence, its weight (red a verdict, amber worth an eye, the accent an invitation) and the order are decided by the domain; the page only draws them. A row disappears the moment its condition clears. **When nothing needs anyone, Needs you paints nothing and reserves no room** — a finished, healthy fleet opens straight on its machines. The list is re-read when a push says something changed (a tunnel or a LAN server coming or going, a backup settling, a disk standing moving, a publish, a join request) — the browser never polls.
+
+The machine grid is **sorted trouble-first**: a machine with a verdict in Needs you stands where its worst row stands, and the rest keep their usual order (the Vaier server, then servers, then personal devices, each alphabetical). A card wears a short **machine mark** for the same trouble ("Backup failed"); Needs you carries the sentence and the fix. The card is the glance, the row is the action.
+
+**The same verdict on the machine's own page.** A machine with trouble opens on its own Needs you rows, above its doors — "Roon server is not answering · its last backup failed too", with what to check — so a red card never leads to a page that does not say why. Its **backup** door wears the same mark as its fleet card when the last run failed or came back incomplete.
+
+**What to do next** on a machine's pane keeps the invitations for that machine — publish the services it exposes, back it up, (before any exists) make it the fleet's backup server, let the fleet reach the network it sits on — plus the two kinds of trouble that live there today, a container in trouble and no default route. Each is a single action with its reason shown ("reachable, Vaier holds a credential, nothing backed up yet"), and appears only when it actually applies. A pane's standing verbs, the ones offered whatever its state — **Add machine** on the fleet, **Check the registries now** on a container list, **Publish a service by hand** on a services list, **Back up now** and **Back up more** on a machine's backup, **Add a credential** — sit in the pane's head beside its title.
 
 ---
-
-The same ladder exists at fleet altitude, on the page everyone lands on. The **Fleet** root shows up to three **fleet nudges** — someone waiting to be let in, add the machine your services run on, publish the services a machine exposes, designate a backup server (naming a NAS if the fleet has one), write the survival kit once repositories exist, set up mail so alerts are not silent — each with the evidence Vaier used, ordered by the domain and capped so it reads as guidance rather than a to-do list. A rung disappears the moment its condition clears; a fully configured fleet shows none, which means "you're done", not "nothing here". A fresh install therefore no longer opens on an empty note: it opens on the one thing to do first.
-
-**What to do next** is kept for these — real suggestions and fixes, shown only when one applies. A pane's standing verbs, the ones offered whatever its state — **Add machine** on the fleet, **Check the registries now** on a container list, **Publish a service by hand** on a services list, **Back up now** and **Back up more** on a machine's backup, **Add a credential** — sit in the pane's head beside its title, where every pane keeps the verbs that are always there.
 
 ## The address space
 

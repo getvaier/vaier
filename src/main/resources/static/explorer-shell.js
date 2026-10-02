@@ -154,6 +154,7 @@
         askAvailable: false,     // whether an Anthropic API key is stored — Chat exists only then
         chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], errands: [], spend: null },   // the kept conversation: { role, text }, the question being typed, and what Vaier remembers
         enrolmentRequests: [],   // phones waiting on a join code: { code, name, publicKey, expiresAt }
+        needs: [],               // GET /fleet/needs — Needs you, in the domain's order; empty when nothing needs anyone
         path: ['fleet'],                 // the selected entry, as its path
         machines: [],                    // GET /machines
         peers: new Map(),                // machine id -> its live WireGuard peer (tunnel address, liveness)
@@ -293,6 +294,16 @@
     const machineRank = (m) => (m.vaierServer ? 0 : (SERVER_TYPES.has(m.type) ? 1 : 2));
     const sortedMachines = () => S.machines.slice()
         .sort((a, b) => machineRank(a) - machineRank(b) || a.name.localeCompare(b.name));
+
+    // The fleet grid, trouble first: a machine with a verdict in Needs you stands where its worst row stands
+    // (the domain orders them, most severe first), and the rest keep the order above. Moves only when a
+    // verdict comes or goes.
+    function fleetOrder() {
+        const rank = new Map();
+        S.needs.forEach((n, i) => { if (n.trouble && n.value && !rank.has(n.value)) rank.set(n.value, i); });
+        const at = (m) => (rank.has(m.id) ? rank.get(m.id) : Number.MAX_SAFE_INTEGER);
+        return sortedMachines().sort((a, b) => at(a) - at(b));
+    }
 
     // A tree path under `files` and a path on the machine are the same path, written twice — but a machine's
     // tree does not begin at "/". It begins at its SFTP root (#326): the NAS jails its SFTP subsystem into
@@ -965,13 +976,8 @@
     function machineMarks(machineId) {
         const marks = el('span', 'ex-card-marks');
 
-        // A run that kept everything, one still running and one that never ran say nothing here. The tint
-        // comes from the RUN_MARK the job pane uses, so the two never disagree about a run.
-        const job = jobsOn(machineId)[0];
-        const runTone = job && RUN_CHIP[job.lastRunStatus] && RUN_MARK[job.lastRunStatus];
-        if (runTone) {
-            marks.appendChild(mark(runTone, 'archive', RUN_CHIP[job.lastRunStatus], RUN_WORD[job.lastRunStatus]));
-        }
+        const run = runMark(machineId);
+        if (run) marks.appendChild(run);
 
         // Disk pressure, from the sweep the backend already runs. Absence is not health: a machine the sweep
         // has not reached has no standing and draws nothing, exactly as a clear one does. A fact about now,
@@ -1004,6 +1010,15 @@
         const u = updateCountMark(machineId);
         if (u) marks.appendChild(u);
         return marks;
+    }
+
+    // A run that kept everything, one still running and one that never ran say nothing. The tint comes from the
+    // RUN_MARK the job pane uses, so the two never disagree about a run. Worn by the fleet card and again by the
+    // machine's own backup door, so a red card never leads to a door that looks fine.
+    function runMark(machineId) {
+        const job = jobsOn(machineId)[0];
+        const runTone = job && RUN_CHIP[job.lastRunStatus] && RUN_MARK[job.lastRunStatus];
+        return runTone ? mark(runTone, 'archive', RUN_CHIP[job.lastRunStatus], RUN_WORD[job.lastRunStatus]) : null;
     }
 
     // How many of a machine's containers want a newer image, as one pill — on the fleet card and again on the
@@ -1301,29 +1316,10 @@
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
 
-        // A phone that asked to join is waiting on someone right now, so it comes before the machines that
-        // are already in. Gone the moment it is answered or gives up; the section paints nothing otherwise.
-        const waiting = liveEnrolmentRequests();
-        if (waiting.length) {
-            body.appendChild(section('Waiting to join'));
-            const list = el('div', 'ex-disc');
-            waiting.forEach((r) => list.appendChild(enrolmentRequestRow(r)));
-            body.appendChild(list);
-        }
-
-        // What to do next, at fleet altitude (#336): the domain's ladder, three rungs at most, each with the
-        // evidence it used. Filled when the read lands, into a holder that is already in place, so the pane
-        // never repaints under the operator; a fleet with nothing left to say paints nothing here at all.
-        const next = el('div', 'ex-fleet-next');
-        body.appendChild(next);
-        fetch('/fleet/nudges', { cache: 'no-store' })
-            .then((res) => (res.ok ? res.json() : []))
-            .then((rungs) => {
-                if (!Array.isArray(rungs) || !rungs.length) return;
-                next.appendChild(section('What to do next'));
-                rungs.forEach((n) => next.appendChild(nudgeCard(null, n)));
-            })
-            .catch(() => { /* the ladder is guidance; a failed read is silence, not an error card */ });
+        // Needs you: everything that wants the operator, trouble first, in the domain's order. Held in S and
+        // re-read on the pushes that can change it, so the pane paints it in the same frame as the machines and
+        // a fleet with nothing wrong paints nothing here at all.
+        if (S.needs.length) body.appendChild(needsBlock(S.needs, null));
 
         // No "Machines" heading: the pane is already titled Fleet and its subtitle has just counted them, so
         // a label over the grid says a third time what two lines above it already said. An empty fleet says
@@ -1331,7 +1327,7 @@
         if (S.machines.length) {
             const grid = document.createElement('div');
             grid.className = 'ex-grid';
-            sortedMachines().forEach((m) => {
+            fleetOrder().forEach((m) => {
                 // The card says what the machine is FOR, not where it answers. A tunnel address is Vaier's own
                 // plumbing: standing on the fleet an operator can do nothing with 10.13.13.6, while the
                 // description is the one line that tells them which machine this is. The address has not been
@@ -1373,29 +1369,6 @@
         // *not* in the fleet would be a second road in, competing with the head's Add machine.
 
         pane.appendChild(body);
-    }
-
-    // One waiting phone: what it calls itself, the code it is showing, and the two answers. The code is the
-    // chip because it is the thing the operator reads off the phone and matches here.
-    function enrolmentRequestRow(r) {
-        const row = el('div', 'ex-disc-row');
-        const ic = el('span', 'ex-disc-icon');
-        ic.innerHTML = svg(joinerWord(r) === 'computer' ? 'laptop' : 'phone', 'ex-disc-svg');
-        const info = el('div', 'ex-disc-info');
-        const line = el('div', 'ex-disc-line');
-        const nm = el('span', 'ex-disc-name'); nm.textContent = r.name;
-        const chip = el('span', 'ex-disc-kind'); chip.textContent = r.code;
-        line.append(nm, chip);
-        const meta = el('span', 'ex-disc-meta');
-        const mins = Math.max(1, Math.round((r.expiresAt - Date.now()) / 60000));
-        meta.textContent = 'wants to join from the Vaier app · waits ' + mins + (mins === 1 ? ' more minute' : ' more minutes');
-        info.append(line, meta);
-        const acts = el('div', 'ex-lactions is-static');
-        const add = el('button', 'ex-btn is-accent'); add.textContent = 'Add';
-        add.onclick = () => addMachineFork('enrol', null, r);
-        acts.appendChild(add);
-        row.append(ic, info, acts);
-        return row;
     }
 
     // The fleet on a map — where the machines physically are. Leaflet, loaded from explorer.html; if it did not
@@ -2084,6 +2057,11 @@
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
 
+        // The same verdict the fleet gave this machine, at the top of its own page — a red card must not lead
+        // to a page that never mentions why. A fact about now, so it stands down in the past.
+        const mine = S.at ? [] : S.needs.filter((n) => n.trouble && n.value === m.id);
+        if (mine.length) body.appendChild(needsBlock(mine, m));
+
         // Whether Vaier may open a session at all. It appears in one of two places depending on the answer:
         // while it is off it is the next step and stands in the open, because granting it is what gives this
         // page anything to show; once on it is a fact about the machine and sits quietly among the others.
@@ -2134,9 +2112,10 @@
                 ? 'No SSH server detected on last check' : null;
             const door = card(entryIco(kid.kind, kid.name), kid.name,
                 NOTE[kid.name], () => go(['fleet', m.id, kid.name]), null, disabledTitle);
-            // The containers door wears the fleet card's own "One update" pill: the operator who came here
-            // for that mark should not have to open the door to find it again.
-            const stale = kid.kind === 'containers' ? updateCountMark(m.id) : null;
+            // The containers and backup doors wear the fleet card's own marks: the operator who came here for
+            // that mark should not have to open the door to find it again.
+            const stale = kid.kind === 'containers' ? updateCountMark(m.id)
+                : kid.kind === 'backup' && !S.at ? runMark(m.id) : null;
             if (stale) {
                 const marks = el('span', 'ex-card-marks');
                 marks.appendChild(stale);
@@ -2493,7 +2472,7 @@
         // The only nudge whose answer changes what Vaier's login on that machine is allowed to do, so it is
         // the only one that carries a `learn` slug: the operator can read what saying yes grants, on the
         // Concepts page, before answering. `run` is the single grant-and-flag action, never a wizard step.
-        BACK_UP_AS_ROOT:         (m) => ({ icon: 'shield',  label: 'Back up everything', run: () => backUpAsRootNow(m.id), learn: 'back-up-as-root' }),
+        BACK_UP_AS_ROOT:         (m, n) => ({ icon: 'shield',  label: 'Back up everything', run: () => backUpAsRootNow(m ? m.id : n.value), learn: 'back-up-as-root' }),
         // The only nudge carrying a value: Vaier read the network off the machine, and the operator is
         // answering whether the fleet should reach it. The CIDR travels on the nudge, so the shell never
         // has to recover it from the sentence it was rendered into.
@@ -2506,7 +2485,40 @@
         // endpoint that starts, stops or restarts one. No label, no button, and the domain's sentence in
         // its place. The card's title says which trouble it is; this table only picks the glyph.
         CONTAINER_TROUBLE:       () => ({ icon: 'warn' }),
+        // Needs you's trouble rows. On a machine's own page (m set) a row that would only open that same page
+        // says its action sentence instead; on the fleet it opens the machine, or runs the fix the UI already
+        // offers. `quiet` rows carry their fix in the evidence and say nothing more.
+        DEVICE_WAITING:          (m, n) => waitingAction(n),
+        VAIER_BASICS:            () => ({ icon: 'warn', quiet: true }),
+        MACHINE_DOWN:            (m, n) => (m ? { icon: 'warn' }
+            : { icon: 'warn', label: 'Open', run: () => go(['fleet', n.value]) }),
+        BACKUP_FAILED:           (m, n) => ({ icon: 'archive', label: 'Open its backup', run: () => go(['fleet', n.value, 'backup']) }),
+        BACKUP_INCOMPLETE:       (m, n) => ({ icon: 'archive', label: 'Open its backup', run: () => go(['fleet', n.value, 'backup']) }),
+        BACKUP_NEEDS_READYING:   (m, n) => readyingAction(n),
+        DISK_FULL:               (m, n) => ({ icon: 'disk', label: 'Open its disk', run: () => go(['fleet', n.value, 'disk']) }),
+        DISK_FILLING:            (m, n) => ({ icon: 'disk', label: 'Open its disk', run: () => go(['fleet', n.value, 'disk']) }),
+        // Vaier never touches the file (#354), so the button only opens what the audit found.
+        ROUTE_AUDIT:             (m, n) => ({ icon: 'route', label: 'See which', run: () => detailModal(n.title, n.evidence, n.detail) }),
+        IMAGE_UPDATES:           (m, n) => ({ icon: 'arrowup', label: 'See them', run: () => go(['fleet', n.value, 'containers']) }),
     };
+
+    // A device that gave up has nothing left to add, so its row keeps its sentence and loses the button.
+    function waitingAction(n) {
+        const r = liveEnrolmentRequests().find((x) => x.code === n.value);
+        return r ? { icon: joinerWord(r) === 'computer' ? 'laptop' : 'phone', label: 'Add',
+            run: () => addMachineFork('enrol', null, r) } : { icon: 'phone', quiet: true };
+    }
+
+    function readyingAction(n) {
+        const job = S.backupJobs.find((j) => j.machineId === n.value);
+        if (!job) return { icon: 'archive', quiet: true };
+        return S.preparing.has(n.value) ? { icon: 'archive', label: 'Getting ready…', disabled: true }
+            : { icon: 'archive', label: 'Get this machine ready', run: () => readyClient(job) };
+    }
+
+    // How loud a row is, as the domain said it: red a verdict, amber worth an eye, the accent an invitation —
+    // the same three the machine marks speak.
+    const NEED_TONE = { VERDICT: 'is-down', WATCH: 'is-degraded', INVITE: 'is-invite' };
 
     // The machine a nudge is about: the pane's own, or — on the fleet — the one the nudge's value names.
     function nudgeTarget(m, n) {
@@ -2546,6 +2558,68 @@
             row.appendChild(btn);
         }
         return row;
+    }
+
+    // Needs you: one list, one row per thing, each a sentence, its evidence and at most one button. Nothing is
+    // passed in when nothing is wrong, so a healthy page never builds it and reserves no room for it.
+    function needsBlock(list, m) {
+        const wrap = el('div', 'ex-needs');
+        wrap.appendChild(section('Needs you'));
+        const rows = el('div', 'ex-needs-list');
+        list.forEach((n) => rows.appendChild(needRow(m, n)));
+        wrap.appendChild(rows);
+        return wrap;
+    }
+
+    function needRow(m, n) {
+        const a = (NUDGE_ACTION[n.kind] || (() => ({ icon: 'warn', quiet: true })))(m, n);
+        const row = el('div', 'ex-need ' + (NEED_TONE[n.tone] || 'is-invite'));
+        row.innerHTML = svg(a.icon || 'warn', 'ex-need-ico');
+        const text = el('div', 'ex-need-text');
+        const title = el('div', 'ex-need-title'); title.textContent = n.title;
+        const why = el('div', 'ex-need-why'); why.textContent = n.evidence;
+        text.append(title, why);
+        if (a.learn) {
+            const more = el('a', 'ex-nudge-more');
+            more.href = 'concepts.html#' + a.learn;
+            more.target = '_blank';
+            more.rel = 'noopener';
+            more.textContent = 'What that means \u203a';
+            text.appendChild(more);
+        }
+        if (!a.label && !a.quiet) {
+            const what = el('div', 'ex-need-why'); what.textContent = n.action;
+            text.appendChild(what);
+        }
+        row.appendChild(text);
+        if (a.label) {
+            const btn = el('button', 'ex-btn'); btn.textContent = a.label;
+            if (a.disabled) btn.disabled = true; else btn.onclick = a.run;
+            row.appendChild(btn);
+        }
+        return row;
+    }
+
+    // The detail behind a row, read-only: the domain's own sentences, one per line, and a way out.
+    function detailModal(title, lead, lines) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog');
+        const h = el('div', 'ex-dialog-title'); h.textContent = title;
+        const b = el('div', 'ex-dialog-body'); b.textContent = lead;
+        const list = el('div', 'ex-audit-list');
+        (lines || []).forEach((line) => { const r = el('div', 'ex-audit-row'); r.textContent = line; list.appendChild(r); });
+        const actions = el('div', 'ex-dialog-actions');
+        const ok = el('button', 'ex-btn'); ok.textContent = 'Close';
+        actions.appendChild(ok);
+        dialog.append(h, b, list, actions);
+        scrim.appendChild(dialog);
+        document.body.appendChild(scrim);
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        ok.onclick = close;
+        document.addEventListener('keydown', onKey);
+        ok.focus();
     }
 
     // Says yes to a detected network. It goes through the one endpoint that has always routed a LAN — the
@@ -3475,7 +3549,7 @@
 
         // ---- peer · a personal device joins through the Vaier app ------------------------------------
         // Vaier makes no config for a phone or a PC: the app makes its own key and asks to join with a join
-        // code, which lands under Waiting to join. Said as the address to open on the device itself — a link
+        // code, which lands under Needs you. Said as the address to open on the device itself — a link
         // would open here, on the wrong machine.
         function paintPeerApp() {
             titleEl.textContent = 'Add a personal device';
@@ -3487,7 +3561,7 @@
             ['On the device, open ' + location.host + ' and tap Install on the card at the top — Download '
                  + 'on Windows.',
              'Open the Vaier app and join. It shows a four-digit join code.',
-             'Back here, the device appears under Waiting to join on the fleet. Add it when the codes match.']
+             'Back here, the device appears under Needs you on the fleet. Add it when the codes match.']
                 .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
             const actions = actionsRow();
             const back = el('button', 'ex-btn'); back.textContent = 'Back';
@@ -6709,6 +6783,7 @@
             // cached answer here the card would not appear until the operator left the pane and came back:
             // the moment the evidence arrives would be the moment it is invisible. Not a poll — we were told.
             S.nudges.delete(d.machineId);
+            loadNeeds();
             render();
         });
         // The other half of the readying we started under a first back-up: the detached borg install has
@@ -6731,6 +6806,7 @@
                 ? d.machineName + ' is ready — its backup will run tonight, or now if you like.'
                 : 'Vaier could not finish getting ' + d.machineName + ' ready — try backing it up again.');
             loadBackup();
+            loadNeeds();
             render();
         });
         // A detached server provisioning has settled on the host. If a provision dialog is still open on that
@@ -8104,32 +8180,21 @@
         if (S.settings.state === 'loading') return;
         S.settings = { ...S.settings, state: 'loading' };
         try {
-            const [cfg, ver, upd, audit, preflight, signIn] = await Promise.all([
+            const [cfg, ver, upd, signIn] = await Promise.all([
                 fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
                 fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 // Whether a newer Vaier is being served, and how the last update went. Read with the rest of
                 // the page rather than polled: an image going stale is not news that decays in seconds.
                 fetch('/settings/update', { cache: 'no-store' })
                     .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-                // What Vaier's reverse proxy audit finds in the Traefik config it writes itself. Read here with
-                // everything else — a config defect does not decay in seconds either, and the answer is
-                // almost always an empty list.
-                fetch('/settings/reverse-proxy-audit', { cache: 'no-store' })
-                    .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-                // "Is it working?" (#265) — Vaier's judgement of its own basics: the wildcard record, the
-                // certificate on its front door, the tunnel, the disk under it. Read with the page, never
-                // polled, and almost always an empty list.
-                fetch('/settings/pre-flight', { cache: 'no-store' })
-                    .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 // Which identity providers exist and where each comes from (#264). Never a secret.
                 fetch('/settings/sign-in', { cache: 'no-store' })
                     .then((r) => (r.ok ? r.json() : null)).catch(() => null),
             ]);
             S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
-                version: (ver || {}).version || '', update: upd || {}, audit: audit || {}, preflight: preflight || {},
-                signIn: signIn };
+                version: (ver || {}).version || '', update: upd || {}, signIn: signIn };
         } catch (e) {
-            S.settings = { state: 'error', config: null, version: '', update: {}, audit: {}, preflight: {}, signIn: null };
+            S.settings = { state: 'error', config: null, version: '', update: {}, signIn: null };
         }
         render();
     }
@@ -8581,53 +8646,8 @@
             body.appendChild(upActs);
         }
 
-        // --- the pre-flight: is it working? Nothing at all unless something is wrong (#265) ---
-        //
-        // The same rule as the audit below it: a healthy server paints nothing and reserves no space. Each row
-        // is two of the domain's sentences — what is wrong, and what to do — and nothing here re-judges a fact.
-        const pre = S.settings.preflight || {};
-        const preFindings = pre.findings || [];
-        if (preFindings.length) {
-            body.appendChild(section('Is it working?'));
-            const preLead = el('div', 'ex-runline');
-            preLead.textContent = pre.summary || '';
-            body.appendChild(preLead);
-            const preList = el('div', 'ex-audit-list');
-            preFindings.forEach((f) => {
-                const row = el('div', 'ex-audit-row');
-                const what = el('div'); what.textContent = f.message;
-                const fix = el('div', 'ex-audit-remedy'); fix.textContent = f.remedy;
-                row.append(what, fix);
-                preList.appendChild(row);
-            });
-            body.appendChild(preList);
-        }
-
-        // --- the reverse proxy audit: nothing at all unless something is wrong ---
-        //
-        // Vaier reads back the Traefik config it writes itself and names what no route can reach (#354).
-        // A clean config paints nothing and reserves no space — a section that said "all good" every time
-        // would be the heartbeat this project refuses to make, and would teach the operator to skim past
-        // the one day it says otherwise. It reports only: nothing here deletes or rewrites anything, which
-        // is why there is no button.
-        const audit = S.settings.audit || {};
-        const findings = audit.findings || [];
-        if (findings.length) {
-            body.appendChild(section('Reverse proxy'));
-            // Both sentences are the domain's: the lead it wrote, and each row's own finding. Nothing here
-            // counts entries or decides how to phrase "Vaier changed nothing" — the email says it once and
-            // this says the same words, so the two can never drift.
-            const lead = el('div', 'ex-runline');
-            lead.textContent = audit.summary || '';
-            body.appendChild(lead);
-            const list = el('div', 'ex-audit-list');
-            findings.forEach((f) => {
-                const row = el('div', 'ex-audit-row');
-                row.textContent = f.message;
-                list.appendChild(row);
-            });
-            body.appendChild(list);
-        }
+        // The pre-flight and the reverse proxy audit are not here: what they find is trouble, and trouble is
+        // said once, in Needs you on the fleet.
 
         // --- know: read-only facts, last, because nothing here is a decision ---
         //
@@ -10237,6 +10257,29 @@
 
     // The phones waiting to be let in. Each carries the instant it stops waiting, so a paint can drop one
     // that timed out without asking the server again.
+    // Needs you, re-read on the pushes that can change it — never on a timer. Reads that arrive while one is in
+    // flight fold into one more, and only an answer that differs repaints, so a burst of pushes is one paint.
+    // A failed read keeps the last answer: silence is not "all well", but neither is a flicker.
+    let _needsReading = null;
+    let _needsAgain = false;
+    function loadNeeds() {
+        if (_needsReading) { _needsAgain = true; return _needsReading; }
+        _needsReading = fetch('/fleet/needs', { cache: 'no-store' })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((list) => {
+                if (!Array.isArray(list)) return;
+                const changed = JSON.stringify(list) !== JSON.stringify(S.needs);
+                S.needs = list;
+                if (changed) render();
+            })
+            .catch(() => { /* keep what we had */ })
+            .finally(() => {
+                _needsReading = null;
+                if (_needsAgain) { _needsAgain = false; loadNeeds(); }
+            });
+        return _needsReading;
+    }
+
     async function loadEnrolmentRequests() {
         try {
             const res = await fetch('/vpn/enrolments');
@@ -10493,9 +10536,9 @@
     function watchFleet() {
         // A phone asking to join is pushed here the moment it asks; so is its answer, from whichever
         // signed-in browser gave it. The list is re-read on each edge, never on a timer.
-        const asks = liveStream('/vpn/enrolments/events', { onReopen: () => loadEnrolmentRequests().then(render) });
+        const asks = liveStream('/vpn/enrolments/events', { onReopen: () => { loadEnrolmentRequests().then(render); loadNeeds(); } });
         ['requested', 'approved', 'refused'].forEach((name) => {
-            asks.addEventListener(name, () => loadEnrolmentRequests().then(render));
+            asks.addEventListener(name, () => { loadEnrolmentRequests().then(render); loadNeeds(); });
         });
 
         // SSE does not replay events missed while the stream was down (an idle tab, a network blip, a Vaier
@@ -10506,24 +10549,28 @@
             _updating.clear();
             _upgradingOs.clear();
             Promise.all([loadFleet(), loadLanServers(), loadDiskStandings(),
-                loadClaudeStandings(), loadContainers(), loadContainerStandings()])
+                loadClaudeStandings(), loadContainers(), loadContainerStandings(), loadNeeds()])
                 .then(render);
         } });
         // A peer was added, renamed or removed — the fleet's own shape changed.
-        events.addEventListener('peers-updated', () => loadFleet().then(render));
+        events.addEventListener('peers-updated', () => { loadNeeds(); loadFleet().then(render); });
         // Liveness. The backend polls WireGuard and pushes what it sees; the browser only ever listens, and
         // repaints the dots where they stand rather than re-rendering the pane under the operator.
         events.addEventListener('peers-stats', (e) => {
             try {
+                let flipped = false;
                 JSON.parse(e.data).forEach((stat) => {
                     const peer = S.peersById.get(stat.name);
                     if (peer) {
+                        if (peer.connected !== stat.connected) flipped = true;
                         peer.connected = stat.connected;
                         peer.latestHandshake = stat.latestHandshake;
                     }
                 });
                 paintDots();
                 paintTopology();
+                // A tunnel that came up or went down may be a server's verdict; the counters alone are not.
+                if (flipped) loadNeeds();
             } catch (err) {
                 console.error('Failed to apply peers-stats update:', err);
             }
@@ -10532,7 +10579,10 @@
         // LanServerScrapeService publish this on the `vpn-peers` topic — the stream we are already holding
         // open — so LAN liveness costs no second connection, no new endpoint and no timer. Re-read the
         // statuses and repaint the dots where they stand, without re-rendering the pane under the operator.
-        events.addEventListener('lan-servers-updated', () => loadLanServers().then(() => { paintDots(); paintTopology(); }));
+        events.addEventListener('lan-servers-updated', () => {
+            loadNeeds();
+            loadLanServers().then(() => { paintDots(); paintTopology(); });
+        });
         // A LAN scan finished on the backend — re-read the discovered snapshot (it renders when it lands).
         events.addEventListener('lan-scan-updated', () => loadLanScan());
         // RemoteDiskWatcher's existing 5-minute sweep found (or stopped finding) an SSH server on a machine —
@@ -10543,7 +10593,7 @@
         // A machine's disk standing moved on that same 5-minute sweep — published only on the change, with an
         // empty body, so this re-reads the one memory-backed endpoint and repaints the marks. A machine that
         // stopped being readable is not corrected here by guesswork: the sweep says so, or it says nothing.
-        events.addEventListener('disk-standing-changed', () => loadDiskStandings().then(render));
+        events.addEventListener('disk-standing-changed', () => { loadNeeds(); loadDiskStandings().then(render); });
         // And where a machine stands on Claude, learned on that same trip and published the same way: only on
         // a change, empty body, one re-read of the one memory-backed endpoint.
         events.addEventListener('claude-standing-changed', () => loadClaudeStandings().then(render));
@@ -10566,6 +10616,7 @@
         events.addEventListener('container-update-settled', (e) => {
             try {
                 onUpdateSettled(JSON.parse(e.data)).then(render);
+                loadNeeds();
             } catch (err) {
                 console.error('Failed to apply container-update-settled:', err);
             }
@@ -10581,6 +10632,7 @@
         const refresh = () => {
             loadContainers();                       // re-renders when it lands
             loadServices().then(render);
+            loadNeeds();                            // a publish or unpublish is what the route audit judges
         };
         // Same reconnect re-sync as the fleet stream: a missed service/container change would otherwise
         // wait for a manual refresh.
@@ -10744,7 +10796,7 @@
         // only on a machine that actually publishes something, and an entry that grew a moment later would
         // have been lying for that moment.
         await Promise.all([loadFleet(), loadServices(), loadBackup(), loadMyDevice(), loadEnrolmentRequests(),
-            loadChatAvailability()]);
+            loadNeeds(), loadChatAvailability()]);
         // The menu was drawn before Vaier had said whether Chat may be offered; now it has, draw it again.
         renderVMenu();
         loadSpend();

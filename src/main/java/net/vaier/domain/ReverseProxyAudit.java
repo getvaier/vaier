@@ -118,7 +118,8 @@ public record ReverseProxyAudit(List<ReverseProxyFinding> findings) {
         body.append("\nVaier changed nothing. Removing an entry it may not have written is the operator's "
             + "call, not Vaier's — a middleware added by hand could be referenced from somewhere Vaier "
             + "cannot see.\n\n");
-        body.append("Settings, at ").append(consoleUrl(domain)).append(", lists the same findings.\n");
+        body.append("Needs you, at the top of the fleet at ").append(consoleUrl(domain))
+            .append(", lists the same findings.\n");
         return body.toString();
     }
 
@@ -129,7 +130,7 @@ public record ReverseProxyAudit(List<ReverseProxyFinding> findings) {
     public String recoveryBody(String domain) {
         return "Vaier read back the reverse proxy config it writes itself (remote-apps.yml) and everything it "
             + "declares is reachable again. Nothing more to do.\n\n"
-            + "Settings, at " + consoleUrl(domain) + ", says the same.\n";
+            + "Needs you, at the top of the fleet at " + consoleUrl(domain) + ", no longer lists them.\n";
     }
 
     private String countPhrase() {

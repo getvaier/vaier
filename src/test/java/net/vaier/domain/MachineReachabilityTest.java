@@ -46,4 +46,23 @@ class MachineReachabilityTest {
 
         assertThat(Machine.fromPeer(peer, client).isReachable(Map.of())).isFalse();
     }
+
+    @Test
+    void isDown_onlyForAServerThatShouldAnswer_andDoesNot() {
+        // A phone that is simply not connected is away, not down; a LAN server nobody has probed yet is
+        // unknown, and unknown is not a verdict.
+        Machine nas = new Machine(MachineId.generate(), "nas", MachineType.LAN_SERVER, null, null, null, null, null, null,
+            null, null, "192.168.3.50", true, 2375, DeviceCategory.NAS, null);
+        Machine serverPeer = new Machine(MachineId.generate(), "bob", MachineType.UBUNTU_SERVER, "pk", "10.13.13.3/32",
+            "1.2.3.4", "51820", "1000", "1", "1", null, null, true, null, DeviceCategory.SERVER, null);
+        Machine phone = new Machine(MachineId.generate(), "phone", MachineType.MOBILE_CLIENT, "pk", "10.13.13.4/32",
+            "1.2.3.4", "51820", "1000", "1", "1", null, null, false, null, DeviceCategory.PHONE, null);
+
+        assertThat(nas.isDown(Map.of("192.168.3.50", Reachability.DOWN))).isTrue();
+        assertThat(nas.isDown(Map.of("192.168.3.50", Reachability.UNKNOWN))).isFalse();
+        assertThat(nas.isDown(Map.of())).isFalse();
+        assertThat(serverPeer.isDown(Map.of())).isTrue();
+        assertThat(phone.isDown(Map.of())).isFalse();
+        assertThat(Machine.vaierServer(MachineId.generate(), null).isDown(Map.of())).isFalse();
+    }
 }

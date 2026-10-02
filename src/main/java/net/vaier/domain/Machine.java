@@ -184,6 +184,17 @@ public record Machine(
             transferRx, transferTx, goodbyeEpoch).isConnected();
     }
 
+    /**
+     * Whether this machine should be answering and is not — a server, never a personal device that is
+     * simply away. A LAN server nobody has probed yet is {@link Reachability#UNKNOWN}, which is not a verdict.
+     */
+    public boolean isDown(Map<String, Reachability> lanReachability) {
+        if (type == MachineType.LAN_SERVER) {
+            return lanReachability != null && lanReachability.get(lanAddress) == Reachability.DOWN;
+        }
+        return type != null && type.isServerType() && !isReachable(lanReachability);
+    }
+
 
     /**
      * Whether Vaier can open a shell on this machine — and therefore whether anything that needs one can

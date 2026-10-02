@@ -261,7 +261,9 @@ class ReverseProxyAuditTest {
         assertThat(audit.findingsBody("example.com"))
             .contains("orphaned-redirect")
             .contains("changed nothing")
-            .contains("example.com");
+            .contains("example.com")
+            // Where the console shows it now — Settings no longer does.
+            .contains("Needs you");
         assertThat(ReverseProxyAudit.of(ReverseProxyConfig.empty()).recoverySubject())
             .containsIgnoringCase("clear");
     }

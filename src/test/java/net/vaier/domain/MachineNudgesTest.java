@@ -27,11 +27,6 @@ class MachineNudgesTest {
             7, 4, 6, "zstd,6", true, backupAsRoot);
     }
 
-    private static BackupRun incompleteRun(BackupJob theJob) {
-        return BackupRun.fromExitCode(theJob, "run-1", Instant.EPOCH, Instant.EPOCH, 1,
-            "/home/mqtt/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'\n");
-    }
-
     /**
      * The signals every test here starts from, named rather than positional. The assembler used to take
      * eight of these in a row — several adjacent {@code Optional}s and booleans — which is a swap-two-
@@ -43,7 +38,6 @@ class MachineNudgesTest {
             .reachable(false)
             .hasCredential(false)
             .job(Optional.empty())
-            .latestRun(Optional.empty())
             .fleet(new BackupFleet(List.of()))
             .networks(MachineNetworks.unknown())
             .routingHostNetworks(MachineNetworks.unknown())
@@ -82,16 +76,14 @@ class MachineNudgesTest {
     }
 
     @Test
-    void aMachineWithAJobIsAlreadyProtected_andAnIncompleteRunAddsTheRootNudge() {
+    void aMachineWithAJobIsAlreadyProtected() {
         // "Already protected" is not a boolean the caller works out and passes in — it is "this machine has
-        // a job", which the assembler reads off the job it needs anyway for the back-up-as-root decision.
+        // a job". What its runs went on to do is trouble, and Needs you says it.
         BackupJob theJob = job(false);
         List<MachineNudge> nudges = MachineNudges.forMachine(machine(DeviceCategory.SERVER),
-            signals().reachable(true).hasCredential(true).job(Optional.of(theJob))
-                .latestRun(Optional.of(incompleteRun(theJob))).build());
+            signals().reachable(true).hasCredential(true).job(Optional.of(theJob)).build());
 
-        assertThat(nudges).extracting(MachineNudge::kind).containsExactly(
-            MachineNudge.Kind.DESIGNATE_BACKUP_SERVER, MachineNudge.Kind.BACK_UP_AS_ROOT);
+        assertThat(nudges).extracting(MachineNudge::kind).containsExactly(MachineNudge.Kind.DESIGNATE_BACKUP_SERVER);
     }
 
     @Test

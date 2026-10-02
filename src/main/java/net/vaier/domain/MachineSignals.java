@@ -25,7 +25,6 @@ import java.util.Optional;
  * @param reachable           whether the machine is reachable right now (from cached signals)
  * @param hasCredential       whether Vaier already holds an SSH credential for the machine
  * @param job                 the machine's backup job, or empty when nothing on it is backed up
- * @param latestRun           the machine's most recent backup run, or empty when it has never run
  * @param fleet               the fleet's backup-server posture (drives the designate nudge)
  * @param networks            what Vaier last read off this machine's own interfaces (#333)
  * @param routingHostNetworks what Vaier last read off the host that would install a LAN route — the
@@ -35,13 +34,12 @@ import java.util.Optional;
  */
 @Builder
 public record MachineSignals(int publishableCount, boolean reachable, boolean hasCredential,
-                             Optional<BackupJob> job, Optional<BackupRun> latestRun, BackupFleet fleet,
+                             Optional<BackupJob> job, BackupFleet fleet,
                              MachineNetworks networks, MachineNetworks routingHostNetworks,
                              List<MachineContainerStanding> containerStandings, ZoneId zone) {
 
     public MachineSignals {
         job = job == null ? Optional.empty() : job;
-        latestRun = latestRun == null ? Optional.empty() : latestRun;
         networks = networks == null ? MachineNetworks.unknown() : networks;
         routingHostNetworks = routingHostNetworks == null ? MachineNetworks.unknown() : routingHostNetworks;
         containerStandings = containerStandings == null ? List.of() : List.copyOf(containerStandings);

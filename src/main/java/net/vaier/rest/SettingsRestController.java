@@ -4,20 +4,6 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetSelfUpdateStatusUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
-import net.vaier.application.GetReverseProxyAuditUseCase;
-import java.util.Optional;
-import java.time.Instant;
-import net.vaier.domain.VaierHostnames;
-import net.vaier.domain.PreFlightFinding;
-import net.vaier.domain.PreFlightFacts;
-import net.vaier.domain.PreFlight;
-import net.vaier.domain.MachineId;
-import net.vaier.domain.MachineDiskStanding;
-import net.vaier.domain.ConsoleCertificate;
-import net.vaier.application.GetVaierServerUseCase;
-import net.vaier.application.GetMachineDiskStandingsUseCase;
-import net.vaier.application.GetVpnClientsUseCase;
-import net.vaier.application.InspectConsoleCertificateUseCase;
 import net.vaier.application.SetSurvivalKitPassphraseUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAnthropicApiKeyUseCase;
@@ -25,8 +11,6 @@ import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.application.UpdateVaierUseCase;
-import net.vaier.domain.ReverseProxyAudit;
-import net.vaier.domain.ReverseProxyFinding;
 import net.vaier.domain.SelfUpdateStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 
 @RestController
 @RequestMapping("/settings")
@@ -52,11 +35,6 @@ public class SettingsRestController {
     private final GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase;
     private final UpdateVaierUseCase updateVaierUseCase;
     private final UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase;
-    private final GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
-    private final InspectConsoleCertificateUseCase inspectConsoleCertificateUseCase;
-    private final GetVpnClientsUseCase getVpnClientsUseCase;
-    private final GetMachineDiskStandingsUseCase getMachineDiskStandingsUseCase;
-    private final GetVaierServerUseCase getVaierServerUseCase;
 
     public SettingsRestController(GetAppSettingsUseCase getAppSettingsUseCase,
                                   GetAppVersionUseCase getAppVersionUseCase,
@@ -67,12 +45,7 @@ public class SettingsRestController {
                                   SetSurvivalKitPassphraseUseCase setSurvivalKitPassphraseUseCase,
                                   GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase,
                                   UpdateVaierUseCase updateVaierUseCase,
-                                  UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase,
-                                  GetReverseProxyAuditUseCase getReverseProxyAuditUseCase,
-                                  InspectConsoleCertificateUseCase inspectConsoleCertificateUseCase,
-                                  GetVpnClientsUseCase getVpnClientsUseCase,
-                                  GetMachineDiskStandingsUseCase getMachineDiskStandingsUseCase,
-                                  GetVaierServerUseCase getVaierServerUseCase) {
+                                  UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase) {
         this.getAppSettingsUseCase = getAppSettingsUseCase;
         this.getAppVersionUseCase = getAppVersionUseCase;
         this.updateSmtpSettingsUseCase = updateSmtpSettingsUseCase;
@@ -83,81 +56,11 @@ public class SettingsRestController {
         this.getSelfUpdateStatusUseCase = getSelfUpdateStatusUseCase;
         this.updateVaierUseCase = updateVaierUseCase;
         this.updateAnthropicApiKeyUseCase = updateAnthropicApiKeyUseCase;
-        this.getReverseProxyAuditUseCase = getReverseProxyAuditUseCase;
-        this.inspectConsoleCertificateUseCase = inspectConsoleCertificateUseCase;
-        this.getVpnClientsUseCase = getVpnClientsUseCase;
-        this.getMachineDiskStandingsUseCase = getMachineDiskStandingsUseCase;
-        this.getVaierServerUseCase = getVaierServerUseCase;
     }
 
     @GetMapping("/config")
     public ResponseEntity<AppSettingsResult> getConfig() {
         return ResponseEntity.ok(getAppSettingsUseCase.getSettings());
-    }
-
-    /**
-     * What Vaier's reverse proxy audit (#354) finds in the Traefik config Vaier writes itself. A read, and only a
-     * read: it never moves the notification latch, so opening Settings cannot cost an operator an email.
-     *
-     * <p>An empty list is the healthy answer and the common one — the surface that draws this paints
-     * nothing at all for it.
-     */
-    @GetMapping("/reverse-proxy-audit")
-    public ResponseEntity<ReverseProxyAuditResponse> getReverseProxyAudit() {
-        ReverseProxyAudit audit = getReverseProxyAuditUseCase.getReverseProxyAudit();
-        return ResponseEntity.ok(new ReverseProxyAuditResponse(audit.summary(),
-            audit.findings().stream().map(FindingResponse::of).toList()));
-    }
-
-    /**
-     * "Is it working?" (#265): the pre-flight, composed here at the driving edge from what the use cases already
-     * hold and judged by the pure-domain {@link PreFlight}. Only what is wrong comes back; a healthy server
-     * answers with an empty list and no summary, so the Settings page has nothing to paint.
-     */
-    @GetMapping("/pre-flight")
-    public ResponseEntity<PreFlightResponse> getPreFlight() {
-        AppSettingsResult settings = getAppSettingsUseCase.getSettings();
-        String consoleHost = new VaierHostnames(settings.domain()).configuredVaierServerFqdn().orElse(null);
-        Optional<ConsoleCertificate> certificate = consoleHost == null ? Optional.empty()
-            : inspectConsoleCertificateUseCase.inspectConsoleCertificate(consoleHost);
-        boolean wireguardAnswering;
-        try {
-            getVpnClientsUseCase.getClients();
-            wireguardAnswering = true;
-        } catch (RuntimeException e) {
-            wireguardAnswering = false;
-        }
-        Optional<MachineDiskStanding> serverDisk;
-        try {
-            MachineId server = getVaierServerUseCase.getVaierServerMachine().id();
-            serverDisk = getMachineDiskStandingsUseCase.getMachineDiskStandings().stream()
-                .filter(d -> server.isSameAs(d.machineId()))
-                .findFirst();
-        } catch (RuntimeException e) {
-            serverDisk = Optional.empty();
-        }
-        PreFlight preFlight = PreFlight.of(new PreFlightFacts(consoleHost, settings.wildcardDnsSeverity(),
-            settings.wildcardDnsMessage(), certificate, wireguardAnswering, serverDisk, Instant.now()));
-        return ResponseEntity.ok(new PreFlightResponse(preFlight.summary(),
-            preFlight.findings().stream().map(PreFlightFindingResponse::of).toList()));
-    }
-
-    /** {@code summary} is the domain's own lead sentence, empty when there is nothing wrong. */
-    public record PreFlightResponse(String summary, List<PreFlightFindingResponse> findings) {}
-
-    public record PreFlightFindingResponse(String check, String message, String remedy) {
-        static PreFlightFindingResponse of(PreFlightFinding f) {
-            return new PreFlightFindingResponse(f.check().name(), f.message(), f.remedy());
-        }
-    }
-
-    /** {@code summary} is the domain's own lead sentence, empty when there is nothing wrong. */
-    public record ReverseProxyAuditResponse(String summary, List<FindingResponse> findings) {}
-
-    public record FindingResponse(String kind, String entry, String message) {
-        static FindingResponse of(ReverseProxyFinding finding) {
-            return new FindingResponse(finding.kind().name(), finding.entryName(), finding.message());
-        }
     }
 
     /**
