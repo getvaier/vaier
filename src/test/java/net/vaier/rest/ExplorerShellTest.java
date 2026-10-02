@@ -946,7 +946,7 @@ class ExplorerShellTest {
         assertThat(body).doesNotContain("thresholdPercent >").doesNotContain("usedPercent >");
 
         String css = read("explorer-shell.css");
-        assertThat(css).contains(".ex-mark.is-disk").contains(".ex-mark.is-degraded").contains(".ex-mark.is-down");
+        assertThat(css).contains(".ex-mark.is-degraded").contains(".ex-mark.is-down");
     }
 
     @Test
@@ -958,7 +958,7 @@ class ExplorerShellTest {
         int from = js.indexOf("function machineMarks(");
         String body = js.substring(from, js.indexOf("\n    // --- the address bar", from));
 
-        assertThat(body).contains("if (!S.at && standing)");
+        assertThat(body).contains("if (!S.at && standing && DISK_MARK[standing.level])");
         // No default, no fallback level, nothing that could turn "not read" into "clear".
         assertThat(body).doesNotContain("|| 'CLEAR'").doesNotContain("'is-up'");
 
@@ -1094,7 +1094,8 @@ class ExplorerShellTest {
         String js = read("claude-sign-in.js");
         int map = js.indexOf("const CLAUDE_STATE = {");
         String mapBody = js.substring(map, js.indexOf("\n    };", map));
-        assertThat(mapBody).contains("card: 'is-claude'").contains("card: 'is-claude-out'");
+        // Only signed out wears a card tint: a card speaks only of what wants acting on.
+        assertThat(mapBody).contains("card: 'is-claude-out'").doesNotContain("card: 'is-claude'");
         assertThat(mapBody).as("no trouble tint on a sign-in")
             .doesNotContain("'is-up'").doesNotContain("'is-degraded'").doesNotContain("'is-down'");
 
@@ -1103,8 +1104,7 @@ class ExplorerShellTest {
         assertThat(read("styles.css")).contains("--claude:").contains("#d97757");
 
         String css = read("explorer-shell.css");
-        assertThat(css).contains(".ex-mark.is-claude { color: var(--claude); }");
-        assertThat(css).contains(".ex-mark.is-claude-out { color: var(--claude); }");
+        assertThat(css).contains(".ex-mark.is-claude-out { color: var(--claude);");
         // The hollow: same hue at a lighter stroke and a lighter glyph, so it reads as dormant rather than as
         // a second colour saying something else. The fade is on the GLYPH alone — the mark carries a word now,
         // and fading the whole thing put that word at 2.8:1, on the one state an operator is meant to act on.
@@ -1371,7 +1371,7 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theSingleContainer_saysWhichOfTheThreeVerdictsItIs_includingCannotTell() throws IOException {
+    void theSingleContainer_namesAnUpdateOrCannotTell_andSaysNothingWhenUpToDate() throws IOException {
         // Absence of a mark on the list must never be read as a promise that the image is current. A list row
         // has no room to say so; the Inspector does, so this is where UNKNOWN is spoken aloud rather than
         // silently collapsed into "up to date" — which is precisely the lie #57 was filed about.
@@ -1387,10 +1387,10 @@ class ExplorerShellTest {
         int says = js.indexOf("function updateSays(");
         assertThat(says).isPositive();
         assertThat(js.substring(says, js.indexOf("\n    }", says))).contains("updateAvailable");
-        // all three verdicts are nameable here, and the third one is honest about not knowing
+        // An update and "cannot tell" are said here; up to date is a healthy state and says nothing (#375).
         assertThat(js).contains("Update available");
-        assertThat(js).contains("Up to date");
         assertThat(js).containsIgnoringCase("cannot tell");
+        assertThat(js.substring(says, js.indexOf("\n    }", says))).contains("'UP_TO_DATE') return null");
     }
 
     @Test
@@ -2235,14 +2235,14 @@ class ExplorerShellTest {
     }
 
     @Test
-    void aJobThatHasNeverRun_getsTheIdleMark_notTheGreenOne() throws IOException {
-        // "Not yet" is not success. Colouring an unrun job green would promise data is safe before a single
-        // archive exists.
+    void onlyATroubledRun_drawsABackupMark() throws IOException {
+        // A card says nothing about a run that kept everything, one still running, or one that never ran —
+        // and "not yet" is never coloured as success either. Only an outcome with a chip draws.
         String js = read("explorer-shell.js");
         int from = js.indexOf("function machineMarks(");
         String body = js.substring(from, js.indexOf("\n    // --- the address bar", from));
-        assertThat(body).contains("|| 'is-idle'");
-        assertThat(body).doesNotContain("'is-up'");
+        assertThat(body).contains("RUN_CHIP[job.lastRunStatus] && RUN_MARK[job.lastRunStatus]");
+        assertThat(body).doesNotContain("'is-up'").doesNotContain("|| 'is-idle'");
     }
 
     @Test
@@ -3611,16 +3611,18 @@ class ExplorerShellTest {
     }
 
     /**
-     * The point of the change: a healthy disk and a good backup stop wearing the shared green and wear their
-     * own hue. Asserted on the maps rather than the CSS, because the map is where a state is turned into a
-     * colour and where a regression would actually land.
+     * A healthy machine's card paints nothing (#375): a clear disk and a run that kept everything have no
+     * chip at all. Asserted on the maps, because the map is where a state is turned into a mark.
      */
     @Test
-    void aHealthyMark_wearsItsConceptsColour_notTheSharedGreen() throws IOException {
+    void aHealthyDiskAndAGoodBackup_drawNoMarkOnTheCard() throws IOException {
         String js = read("explorer-shell.js");
 
-        assertThat(js).as("a clear disk is disk-coloured").contains("CLEAR: 'is-disk'");
-        assertThat(js).as("a good backup is backup-coloured").contains("SUCCESS: 'is-backup'");
+        String disk = js.substring(js.indexOf("const DISK_MARK = {"), js.indexOf("};", js.indexOf("const DISK_MARK = {")));
+        assertThat(disk).as("a clear disk draws nothing").doesNotContain("CLEAR");
+        String chip = js.substring(js.indexOf("const RUN_CHIP = {"), js.indexOf("};", js.indexOf("const RUN_CHIP = {")));
+        assertThat(chip).as("only troubled outcomes have a chip")
+            .doesNotContain("SUCCESS").doesNotContain("RUNNING").doesNotContain("UNKNOWN");
 
         // And the shared green is gone from the marks entirely rather than left behind as a rule nothing
         // reaches — dead tints are how a retired vocabulary quietly comes back.
@@ -3657,23 +3659,19 @@ class ExplorerShellTest {
     }
 
     /**
-     * Docker is a borrowed identity exactly as Claude is, so its mark wears its own blue on the fleet card —
-     * the one surface a machine's capabilities are drawn on now.
+     * The capability strip stays deliberately quiet (#375): wordless glyphs, their words on the title and
+     * the aria-label, and no colour — not even Docker's blue — because colour on a card belongs to trouble.
      */
     @Test
-    void theDockerMark_wearsItsOwnBlue() throws IOException {
-        String css = read("explorer-shell.css");
+    void theCapabilityStrip_isWordlessAndQuiet() throws IOException {
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function capabilityStrip(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("g.title = c.word").contains("setAttribute('aria-label', c.word)");
 
-        assertThat(css).contains(".ex-mark.is-docker { color: var(--docker); }");
-    }
-
-    /**
-     * The rest of the capability strip stays deliberately quiet. It says what a machine IS, not how it is
-     * doing, and colouring it would put it in competition with the marks that do carry a verdict.
-     */
-    @Test
-    void theRestOfTheCapabilityStrip_staysQuiet() throws IOException {
         String css = read("explorer-shell.css");
+        assertThat(css).doesNotContain(".ex-cap.is-docker {").doesNotContain(".ex-mark.is-docker {");
 
         assertThat(css).doesNotContain(".ex-cap.is-relay {");
         assertThat(css).doesNotContain(".ex-cap.is-backupserver {");

@@ -248,6 +248,8 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     font-weight: 600;
     letter-spacing: -.015em;
 }
+/* A name gives way rather than shoving the head's verbs off the right edge. */
+.ex-pane-title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A path IS the content here, so it keeps its mono home — at a size that no longer asks to be
    squinted at, and only a shade down from the words beside it rather than a size down. */
 .ex-pane-title .is-id {
@@ -668,57 +670,26 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 }
 .ex-card-note:empty { display: none; }
 
-/* What a machine says without being opened: its capabilities, how its last backup went, and whether anything
-   on it wants a newer image. This is the ambience the tree used to carry on rows for machines you were not
-   looking at — rehomed here, which is what let the tree become optional.
+/* The capability strip: what a machine IS, as small dim glyphs after its name. No words and no colour —
+   the words are on the title, and colour on a card belongs to trouble. */
+.ex-card-caps { flex: none; display: inline-flex; align-items: center; gap: 9px; color: var(--text-dim); }
+.ex-cap { display: inline-flex; }
 
-   The backup outcome is a tinted archive glyph and NOT a second dot: beside the liveness dot, one bare
-   coloured dot that might mean either is worse than none. The glyph says which fact it is; the colour says
-   how that fact is going; the title says it in words. */
-/* Everything a machine says without being opened, on one strip: what it IS (Docker, Backup server) and how
-   it is DOING (its last backup, its disks, Claude, waiting updates), each a glyph and the word for it. The
-   word used to live only in a `title` — which is to say, only for someone holding a pointer who already
-   suspected there was something to hover.
-
-   A quiet mark has no ground at all. Giving every one a pill turned a healthy fleet into a wall of grey
-   lozenges, and spent on the ordinary case the one device that should have been reserved for the urgent
-   one. So the marks read as a line of small facts, and trouble is the only thing on the card wearing a
-   shape — which is what makes it impossible to miss. */
-.ex-card-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 15px; }
+/* Trouble marks, and only those: a healthy card has none and reserves no room for them. Each is the whole
+   mark recoloured on a tinted ground, so the one thing on a card wearing a shape is the thing to act on. */
+.ex-card-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .ex-mark {
     display: inline-flex; align-items: center; gap: 6px;
-    color: var(--text-dim);
-    font-size: 13px; line-height: 1.4;
-}
-/* Colour says what a thing is: the glyph wears the identity, the word stays legible beside it. */
-.ex-mark-lbl { color: var(--text-muted); white-space: nowrap; }
-/* Trouble, and only trouble, is given a shape — the whole mark recoloured on a tinted ground. */
-.ex-mark.is-degraded, .ex-mark.is-update,
-.ex-mark.is-down {
-    margin: -3px 0;
     padding: 3px 11px 3px 9px;
     border-radius: 9999px;
+    font-size: 13px; line-height: 1.4;
 }
+.ex-mark-lbl { color: inherit; white-space: nowrap; }
 .ex-mark.is-degraded, .ex-mark.is-update { color: var(--yellow); background: rgba(220, 220, 170, .14); }
 .ex-mark.is-down { color: var(--red); background: rgba(244, 135, 113, .14); }
-.ex-mark.is-degraded .ex-mark-lbl,
-.ex-mark.is-update .ex-mark-lbl,
-.ex-mark.is-down .ex-mark-lbl { color: inherit; }
-/* Docker is a borrowed identity, so its glyph wears its own blue here exactly as it does in the rail. The
-   other two capabilities stay dim on purpose: they say what a machine is, not how it is doing. */
-.ex-mark.is-docker { color: var(--docker); }
-/* Identity, not status: a mark wears the colour of the thing it is about, and only trouble recolours it.
-   The green these two used to share was VS Code Dark+'s, left behind by the palette rewrite that replaced
-   everything around it. */
-.ex-mark.is-backup { color: var(--backup); }
-.ex-mark.is-disk { color: var(--disk); }
-/* Colour says "Claude", weight says whether anyone is signed in — so the signed-out mark is the same hue
-   worn hollow, never a second colour competing with the disk and backup marks' trouble lights. */
-.ex-mark.is-claude { color: var(--claude); }
-/* Hollow, not faded. Fading the whole chip was fine while it was a lone glyph; now that it carries a word,
-   45% opacity drops that word to about 2.8:1 — unreadable, and on the one state an operator is meant to act
-   on. So the glyph alone goes hollow and the word keeps its strength. */
-.ex-mark.is-claude-out { color: var(--claude); }
+/* A signed-out Claude is something to act on but not an outage: Claude's own clay, the glyph worn hollow,
+   never the trouble lights. */
+.ex-mark.is-claude-out { color: var(--claude); background: color-mix(in srgb, var(--claude) 12%, transparent); }
 .ex-mark.is-claude-out svg { stroke-width: 1.1; opacity: .5; }
 .ex-mark .ex-cap-ico { flex: none; width: 14px; height: 14px; }
 /* An archive is how things stood then; a registry verdict and a tunnel are about now. Both stand down in the
@@ -829,6 +800,9 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 .ex-listing.is-wide .ex-lhead,
 .ex-listing.is-wide .ex-lrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 108px; }
 .ex-listing.is-wide .ex-lmeta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* No State column while every row is fine — the two remaining columns take its room. */
+.ex-listing.is-wide.is-stateless .ex-lhead,
+.ex-listing.is-wide.is-stateless .ex-lrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
 .ex-listing.is-wide .ex-lmeta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The blocked list (#329). Its verbs get a column of their own instead of riding over the last one the way
@@ -1217,7 +1191,7 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
     border: 1px solid var(--border-hi);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-family: var(--mono); font-size: 14px;
+    font-family: inherit; font-size: 14.5px;
 }
 .ex-dialog-input:focus { outline: none; border-color: var(--red); }
 .ex-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
@@ -1238,11 +1212,11 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 .ex-brepo {
     display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
     padding: 7px 0; border-bottom: 1px solid var(--border);
-    font-family: var(--mono); font-size: 14px;
+    font-size: 14.5px;
 }
 .ex-brepo:last-child { border-bottom: none; }
 .ex-brepo-name { color: var(--text); white-space: nowrap; }
-.ex-brepo-path { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-brepo-path { font-family: var(--mono); font-size: 13.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* --- discovered on the LAN: an icon and what Vaier thinks each thing is, not its reverse-DNS name ---- */
 .ex-disc { display: flex; flex-direction: column; }
@@ -1264,7 +1238,7 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
     padding: 1px 6px; border: 1px solid var(--border-hi); border-radius: var(--radius-1);
 }
 .ex-disc-meta {
-    color: var(--text-muted); font-family: var(--mono); font-size: 13px;
+    color: var(--text-muted); font-size: 13.5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ex-disc-row .ex-lactions { flex: none; }
@@ -1534,8 +1508,10 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
     border: 1px solid var(--border-hi);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-family: var(--mono); font-size: 14px;
+    font-family: inherit; font-size: 14.5px;
 }
+/* What is typed is a name or a sentence; only an address keeps the mono face. */
+.ex-input.is-coord, .ex-cred-key, .ex-cred-secret { font-family: var(--mono); }
 .ex-input:focus { outline: none; border-color: var(--accent); }
 .ex-check-row {
     display: flex; align-items: flex-start; gap: 9px;
@@ -1874,7 +1850,8 @@ select.ex-input { cursor: pointer; }
        query does not raise, so they have to be told again by name — otherwise they would keep three columns
        on a phone while the areas above describe two, and the row would come apart. */
     .ex-listing.is-wide .ex-lhead { display: none; }
-    .ex-listing.is-wide .ex-lrow { grid-template-columns: auto minmax(0, 1fr); }
+    .ex-listing.is-wide .ex-lrow,
+    .ex-listing.is-wide.is-stateless .ex-lrow { grid-template-columns: auto minmax(0, 1fr); }
     .ex-listing.is-wide .ex-lmeta { display: none; }
     /* The verbs are not lost, they have moved: Copy, Download and Delete are all on the selection bar, which
        rises the moment anything is ticked. So on a phone the row is a thing and the bar is the verbs — the
@@ -1892,6 +1869,9 @@ select.ex-input { cursor: pointer; }
     }
     .ex-listing.is-threats .ex-tsource { grid-area: src; }
     .ex-listing.is-threats .ex-lsub { grid-area: sub; display: flex; }
+    .ex-listing.is-threats .ex-lsub span { white-space: normal; overflow-wrap: anywhere; }
+    /* The columns' cells say what the line above already said, so on a phone they go. */
+    .ex-listing.is-threats .ex-lmeta { display: none; }
     .ex-listing.is-threats .ex-lactions {
         grid-area: acts; display: flex; justify-content: flex-start; gap: 6px; margin-top: 6px;
     }

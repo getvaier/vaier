@@ -4477,3 +4477,18 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 **Deliberately not asked: OAuth and SMTP.** Sign-in providers and mail stay in the console (**Settings → Sign-in**, **Settings** mail); the first-run door (§6.17 / [#264](https://github.com/getvaier/vaier/issues/264)) means no provider is needed to reach it.
 
 **Non-interactive is unchanged.** With no terminal (piped to a log, CI) or `VAIER_NONINTERACTIVE=1`, it fetches and scaffolds and prints the next steps, now filled with the real domain once `.env` has one. `SelfUpdateScript` runs the target release's installer with `VAIER_NONINTERACTIVE=1` (§6.61), so a self-update can never stop at a prompt even if it ever ran with a terminal.
+
+### 6.68 Quiet by default: a healthy fleet paints nothing ✅ (implemented 2026-10-02, closes [#375](https://github.com/getvaier/vaier/issues/375), slice 1 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** A read-only audit of the live UI found a healthy fleet page carrying about thirty worded chips ("Docker · Backed up · Disk has room · Claude signed in · Reaches its LAN"), every list saying OK on every row, and a green dot on every launchpad tile — against the rule that a healthy state paints nothing, reserves no space, and never says one verdict twice.
+
+**What.**
+- **Fleet cards** carry **machine marks** for trouble only (a failed, incomplete or complaining backup; a disk closing on or over its threshold; Claude signed out; waiting updates). Capabilities became the dim, wordless **capability strip** beside the name, named on the title and aria-label.
+- **Containers and services lists** show their State column only while some row is not OK.
+- **Launchpad** tiles wear a dot only when their host is offline; no green, no grey pending dot.
+- **Settings** no longer says "Vaier is running the newest image it can see"; a container's Inspector no longer says "Up to date" (an update, or "Vaier cannot tell", still is).
+- **What to do next** is kept for real nudges and fixes; the standing verbs (Add machine, Check the registries now, Publish a service by hand, Back up now / Back up more, Add a credential) moved to the pane head's action group.
+- The orphaned `settings.html` is deleted; the Explorer's native Settings uses the same endpoints.
+- **Bugs:** a dialog now closes when the Explorer moves to another view instead of surviving and stacking; on a phone the Security view no longer prints each blocked address's origin, scenario and expiry twice.
+- A peer's **Transfer** reads in human units ("148 GB up / 15 GB down").
+- **Monospace** is kept for identifiers; machine and service titles, the backup server's list of machines, form values and launchpad subtitles use the body face.

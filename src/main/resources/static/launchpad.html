@@ -8,10 +8,9 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234cc9e6%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234cc9e6%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/></svg>">
     <link rel="stylesheet" href="styles.css">
     <style>
-        /* Launchpad-local accents. The palette + display/mono fonts live in styles.css;
-           these three are specific to the launchpad's status dots and tile accents. */
+        /* Launchpad-local accents. The palette + display fonts live in styles.css;
+           these two are specific to the launchpad's offline dot and tile accents. */
         .content {
-            --live: #5fe3a1;
             --off: #f2765f;
             --accent-dim: rgba(76, 201, 230, 0.14);
         }
@@ -71,7 +70,7 @@
         .install .btn { flex-shrink: 0; }
 
 
-        /* Peer section — an accent rail + machine name + mono online count */
+        /* Peer section — an accent rail + machine name + online count */
         .peer-section { margin-bottom: 1.9rem; }
         .peer-section:last-child { margin-bottom: 0; }
 
@@ -177,7 +176,6 @@
         }
 
         .tile-sub {
-            font-family: var(--mono);
             font-size: 0.8rem;
             color: var(--text-muted);
             line-height: 1.3;
@@ -186,19 +184,8 @@
             text-overflow: ellipsis;
         }
 
-        /* Live dot on a reachable tile; the heavier off-dot flags an unreachable host
-           (issue #208) — opacity alone reads as "muted" and the operator can miss it. */
-        .tile-live {
-            position: absolute;
-            top: 0.65rem;
-            right: 0.7rem;
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--live);
-            box-shadow: 0 0 0 3px rgba(95, 227, 161, 0.14);
-        }
-
+        /* The one dot a tile can wear: its host is unreachable (issue #208) — opacity alone reads as
+           "muted" and the operator can miss it. Healthy and unprobed tiles wear none. */
         .tile-off {
             position: absolute;
             top: 0.6rem;
@@ -208,19 +195,6 @@
             border-radius: 50%;
             background: var(--off);
             box-shadow: 0 0 0 2px var(--bg-card);
-        }
-
-        /* Pending dot — host reachability not yet confirmed (no probe has landed, e.g. at
-           startup). Grey, not green: we don't claim "live" until we actually know (issue #208). */
-        .tile-pending {
-            position: absolute;
-            top: 0.65rem;
-            right: 0.7rem;
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--text-dim);
-            box-shadow: 0 0 0 3px rgba(88, 101, 118, 0.12);
         }
 
         .loading, .empty {
@@ -478,16 +452,14 @@
 
             // Inactive tile → render an offline indicator (issue #208). Visibility is set by
             // the domain (ReverseProxyRoute.launchpadVisibility): VISIBLE_INACTIVE is reached
-            // The dot reports host reachability alone (issue #208), independent of the tile's
-            // link/dim state: LIVE (green, confirmed reachable), OFFLINE (red, confirmed
-            // unreachable), or — before the first probe lands, e.g. at startup — PENDING (grey).
-            const dot = document.createElement('span');
-            switch (service.liveness) {
-                case 'LIVE':    dot.className = 'tile-live';    dot.title = 'Reachable'; break;
-                case 'OFFLINE': dot.className = 'tile-off';     dot.title = 'Host offline — the machine hosting this service is unreachable'; break;
-                default:        dot.className = 'tile-pending'; dot.title = 'Checking reachability…'; break;
+            // Only an unreachable host earns a dot (issue #208): a reachable or not-yet-probed tile
+            // paints nothing, so the one red dot on the page is the one worth seeing.
+            if (service.liveness === 'OFFLINE') {
+                const dot = document.createElement('span');
+                dot.className = 'tile-off';
+                dot.title = 'Host offline — the machine hosting this service is unreachable';
+                tile.appendChild(dot);
             }
-            tile.appendChild(dot);
 
             return tile;
         }

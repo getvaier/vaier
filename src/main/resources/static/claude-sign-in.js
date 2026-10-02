@@ -22,12 +22,11 @@
     // and "Claude · Claude isn’t installed here" says it twice. One map, so the two surfaces can never drift
     // into two vocabularies.
     // `card` is the tint a machine card's mark wears and `tone` the tint of the same standing said in the shell
-    // window, on this same map for the same reason. Only the two states the server marks at all need one — it
-    // decides which those are, this only says what they look like. Both surfaces wear Claude's own clay rather
-    // than a traffic light: green/amber/red are the disk and backup marks' words for trouble, and a sign-in is
-    // presence. Signed out is the same clay, hollow.
+    // window, on this same map for the same reason. Only signed out has a card tint: a card speaks only of what
+    // wants acting on, so a signed-in machine draws nothing. Both surfaces wear Claude's own clay rather than a
+    // traffic light — a sign-in is presence, not an outage. Signed out is the same clay, hollow.
     const CLAUDE_STATE = {
-        SIGNED_IN:     { label: 'Signed in',                   short: 'Signed in',     chip: 'Claude signed in',  tone: 'is-claude-in',  card: 'is-claude' },
+        SIGNED_IN:     { label: 'Signed in',                   short: 'Signed in',     chip: 'Claude signed in',  tone: 'is-claude-in' },
         SIGNED_OUT:    { label: 'Signed out',                  short: 'Signed out',    chip: 'Claude signed out', tone: 'is-claude-out', card: 'is-claude-out' },
         NOT_INSTALLED: { label: 'Claude isn’t installed here', short: 'Not installed', chip: 'No Claude here',    tone: 'is-muted' },
         UNREACHABLE:   { label: 'Unreachable',                 short: 'Unreachable',   chip: 'Claude unreachable', tone: 'is-muted' },

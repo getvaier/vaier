@@ -891,67 +891,56 @@
     }
 
     // What a machine IS, in the order an operator scans for it: reached → runs → keeps. Relay (it routes a
-    // LAN behind it, so other machines are reachable only through it) reads off its peer; Docker (it hosts
-    // containers) reads off the machine; backup server (it holds the fleet's archives) reads off the one
-    // designated server. The fleet card draws them as marks — a glyph and its word.
+    // LAN behind it), Docker (it hosts containers), backup server (it holds the fleet's archives). The fleet
+    // card draws them as wordless glyphs beside the name; the words are on the title and the aria-label.
     function capabilitiesOf(machineId) {
         const m = machineById(machineId);
         const peer = S.peers.get(machineId);
         const caps = [];
         if (peer && peer.isRelay) {
-            caps.push({ kind: 'relay', word: 'Reaches its LAN',
-                        title: 'Machines on its network are reached through it' });
+            caps.push({ kind: 'relay', word: 'Reaches its LAN — machines on its network are reached through it' });
         }
-        if (m && m.runsDocker) caps.push({ kind: 'docker', word: 'Docker', title: 'Runs Docker' });
+        if (m && m.runsDocker) caps.push({ kind: 'docker', word: 'Runs Docker' });
         if (S.backupServer && S.backupServer.machineId === machineId) {
-            caps.push({ kind: 'backupserver', word: 'Backup server',
-                        title: 'The fleet’s archives are kept here' });
+            caps.push({ kind: 'backupserver', word: 'Backup server — the fleet’s archives are kept here' });
         }
         return caps;
     }
 
-    // How a run's outcome is said to a person, on the fleet card's hover. The pane spells the same fact out
-    // at length; here it has one line, so each word has to carry the consequence rather than the status name.
-    const RUN_WORD = {
-        SUCCESS:    'Backed up',
-        WARNING:    'Backed up, with a complaint',
-        INCOMPLETE: 'Files are missing from the last backup',
-        FAILED:     'The last backup failed',
-        RUNNING:    'Backing up now',
-        UNKNOWN:    'The last backup’s outcome is unknown',
-    };
+    // The capability strip: small, dim, and silent until hovered. It says what a machine is, never how it
+    // is doing, so it takes no colour and no words from the trouble marks below.
+    function capabilityStrip(machineId) {
+        const caps = capabilitiesOf(machineId);
+        if (!caps.length) return null;
+        const strip = el('span', 'ex-card-caps');
+        caps.forEach((c) => {
+            const g = el('span', 'ex-cap is-' + c.kind);
+            g.innerHTML = svg(c.kind, 'ex-cap-ico');
+            g.title = c.word;
+            g.setAttribute('role', 'img');
+            g.setAttribute('aria-label', c.word);
+            strip.appendChild(g);
+        });
+        return strip;
+    }
 
-    // The same outcomes at chip length — what fits beside a glyph on a card, where RUN_WORD's sentence
-    // would wrap the card open. The sentence is still there, on the chip's title.
+    // A troubled run's chip and the sentence on its title. Only the outcomes RUN_MARK tints as trouble are
+    // here, because only those draw: a card says nothing about a run that kept everything.
     const RUN_CHIP = {
-        SUCCESS:    'Backed up',
         WARNING:    'Backup complained',
         INCOMPLETE: 'Files missing',
         FAILED:     'Backup failed',
-        RUNNING:    'Backing up',
-        UNKNOWN:    'Backup unknown',
+    };
+    const RUN_WORD = {
+        WARNING:    'Backed up, with a complaint',
+        INCOMPLETE: 'Files are missing from the last backup',
+        FAILED:     'The last backup failed',
     };
 
-    /**
-     * What a machine is telling you without being opened — its capabilities, how its last backup went, and
-     * whether anything on it wants a newer image. This is the fleet pane's whole job: the machine in trouble
-     * is visible from the one place that lists every machine, without opening any of them.
-     *
-     * Deliberately not a second liveness dot. On a card a bare coloured dot would sit next to the liveness
-     * dot with nothing to tell them apart, and a green dot that might mean either is worse than no dot at
-     * all. So the backup outcome is the archive glyph, tinted, and the words are on its title. Its colours
-     * come from the same RUN_MARK map the job pane uses, so the two can never disagree about a run — and a
-     * job that has never run gets the idle one: "not yet" is neither trouble nor success.
-     */
-    // How a machine's disks stand, tinted. The level is the server's own DiskStandingLevel — the browser is
-    // never a second place deciding when a disk is in trouble, exactly as it never recomputes a filesystem's
-    // aboveThreshold in the disk pane. There is deliberately no entry for "not read": a machine the sweep has
-    // not reached has no standing at all, and a standing that does not exist draws nothing.
-    // A clear disk wears the disk's own colour rather than the shared green; closing and breaching still
-    // take the trouble colours outright, because a filling disk is the thing on this card worth interrupting
-    // someone for. Named MARK, not DOT: nothing draws a disk dot, and the old name said otherwise.
-    const DISK_MARK = { CLEAR: 'is-disk', CLOSING: 'is-degraded', BREACHING: 'is-down' };
-    const DISK_WORD = { CLEAR: 'well under', CLOSING: 'closing on', BREACHING: 'over' };
+    // How a machine's disks stand, from the server's own DiskStandingLevel — never re-decided here. A clear
+    // disk has no entry, and a machine the sweep has not reached has no standing: both draw nothing.
+    const DISK_MARK = { CLOSING: 'is-degraded', BREACHING: 'is-down' };
+    const DISK_WORD = { CLOSING: 'closing on', BREACHING: 'over' };
 
     // A mark is a glyph and the word for what it means. The word used to live only in the `title`, which is
     // to say: only for someone with a pointer, who already suspected there was something to hover. The long
@@ -971,32 +960,25 @@
     // what a machine is doing — which is why the words live with the UI that acts on them, not here.
     const claudeWords = (state) => window.VaierClaude.words(state);
 
+    // Trouble only. A healthy machine's card carries no marks and reserves no room for them; what it IS rides
+    // beside its name as the capability strip.
     function machineMarks(machineId) {
         const marks = el('span', 'ex-card-marks');
 
-        // Capabilities lead: what a machine is comes before how it is doing. They stay quiet — the strip says
-        // what a machine IS, and colouring it would put it in competition with the marks carrying a verdict.
-        capabilitiesOf(machineId).forEach((c) => marks.appendChild(mark('is-' + c.kind, c.kind, c.word, c.title)));
-
+        // A run that kept everything, one still running and one that never ran say nothing here. The tint
+        // comes from the RUN_MARK the job pane uses, so the two never disagree about a run.
         const job = jobsOn(machineId)[0];
-        if (job) {
-            marks.appendChild(mark(RUN_MARK[job.lastRunStatus] || 'is-idle', 'archive',
-                RUN_CHIP[job.lastRunStatus] || 'No backup yet',
-                RUN_WORD[job.lastRunStatus] || 'No backup has run yet'));
+        const runTone = job && RUN_CHIP[job.lastRunStatus] && RUN_MARK[job.lastRunStatus];
+        if (runTone) {
+            marks.appendChild(mark(runTone, 'archive', RUN_CHIP[job.lastRunStatus], RUN_WORD[job.lastRunStatus]));
         }
 
-        // Disk pressure, from the sweep the backend already runs — no machine is asked anything to draw this.
-        //
-        // Absence is not health. A machine the sweep has not reached (a cold start, up to five minutes; no
-        // SSH access; no stored credential) has no standing, and gets NO mark rather than a green one — a
-        // disk at 89% once sat silent for weeks here precisely because missing state read as fine. And like
-        // the update mark, how full a disk is is a fact about now, so it stands down in the past.
+        // Disk pressure, from the sweep the backend already runs. Absence is not health: a machine the sweep
+        // has not reached has no standing and draws nothing, exactly as a clear one does. A fact about now,
+        // so it stands down in the past.
         const standing = S.diskStandings.get(machineId);
-        if (!S.at && standing) {
-            // The number is shown only where it is worth an eye. A percentage on every card would be a row
-            // of digits nobody reads; on the two that are filling it is the thing you were looking for.
-            const d = mark(DISK_MARK[standing.level], 'disk',
-                standing.level === 'CLEAR' ? 'Disk has room' : 'Disk ' + standing.usedPercent + '% full');
+        if (!S.at && standing && DISK_MARK[standing.level]) {
+            const d = mark(DISK_MARK[standing.level], 'disk', 'Disk ' + standing.usedPercent + '% full');
             d.title = standing.mountPoint + ' is ' + standing.usedPercent + '% full — '
                 + DISK_WORD[standing.level] + ' its ' + standing.thresholdPercent + '% threshold'
                 + (standing.breachingFilesystems > 1
@@ -1006,22 +988,13 @@
             marks.appendChild(d);
         }
 
-        // Where this machine stands on Claude, from that same sweep — again, nothing is asked to draw it.
-        //
-        // Whether a reading is a verdict about a sign-in at all is the server's answer, not a state list
-        // kept here — the same reason the disk mark takes DiskStandingLevel rather than recomputing it. So
-        // a machine the sweep has not reached, one with no Claude on it, and one that did not answer all
-        // draw nothing. Absence matters more here than it does for disks: the backend goes to real trouble
-        // never to report a sign-in the CLI did not say, and a mark invented from silence would undo it.
-        // The tone comes from claudeWords, the one map the shell window's sign-in reads too. And like the
-        // disk mark, this is a fact about now, so it stands down in the past.
+        // Where this machine stands on Claude, from that same sweep. Whether a reading is a verdict at all is
+        // the server's answer; which verdict earns a chip is the shared map's — only a state with a card tone
+        // (signed out) draws. A sign-in names one user's home, so the title names that user.
         const claude = S.claudeStandings.get(machineId);
-        if (!S.at && claude && claude.saysWhereTheSignInStands) {
-            const c = mark(claudeWords(claude.state).card || 'is-claude-out', 'claude',
-                claudeWords(claude.state).chip || 'Claude');
-            // A sign-in lives in one user's home, so the title names the user it is about — a standing that
-            // named only the machine once reported a healthy account while the user doing that machine's
-            // work was expired.
+        const claudeTone = claude && claude.saysWhereTheSignInStands && claudeWords(claude.state).card;
+        if (!S.at && claudeTone) {
+            const c = mark(claudeTone, 'claude', claudeWords(claude.state).chip || 'Claude');
             c.title = 'Claude — ' + claudeWords(claude.state).label
                 + (claude.accountEmail ? ' as ' + claude.accountEmail : '')
                 + (claude.effectiveUsername ? ' (Vaier acts as ' + claude.effectiveUsername + ' here)' : '');
@@ -1144,6 +1117,15 @@
         return head;
     }
 
+    // The pane head's one action group, hugging the right — where a pane's standing verbs live, so the body's
+    // "What to do next" is left to real nudges.
+    function headActions(head, verbs) {
+        const acts = el('div', 'ex-pane-actions');
+        verbs.filter(Boolean).forEach((v) => acts.appendChild(v));
+        if (acts.childNodes.length) head.appendChild(acts);
+        return acts;
+    }
+
     function section(text) {
         const el = document.createElement('div');
         el.className = 'ex-sect';
@@ -1213,10 +1195,19 @@
     // in a terminal face is most of what made the machine pane read like a config file rather than an answer.
     const coord = (value) => ({ coord: value });
 
+    // A byte count said for reading, not auditing: "148 GB", never "159377442052".
+    function humanBytes(value) {
+        let n = Number(value) || 0;
+        const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        let i = 0;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return (n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
+    }
+
     function kv(rows) {
         const dl = document.createElement('dl');
         dl.className = 'ex-kv';
-        rows.forEach(([term, value]) => {
+        rows.filter(Boolean).forEach(([term, value]) => {
             const isCoord = value != null && typeof value === 'object' && 'coord' in value;
             const text = isCoord ? value.coord : value;
             const dt = document.createElement('dt');
@@ -1237,6 +1228,14 @@
 
     let _paneView = '';
 
+    // Every dialog closes on Escape through its own close(), which settles whatever awaits it; the sweep
+    // after is the backstop for one that does not listen.
+    function closeDialogs() {
+        if (!document.querySelector('.ex-scrim')) return;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        document.querySelectorAll('.ex-scrim').forEach((scrim) => scrim.remove());
+    }
+
     function renderPane() {
         const pane = $('exPane');
         // A repaint is not a navigation, and the pane is repainted constantly without being asked: the Claude
@@ -1249,6 +1248,8 @@
         // Chat reads from the bottom, as a messenger does: entering it, or a repaint while already at the
         // bottom, lands on the newest turn; only an operator who scrolled up to read back stays put.
         const atBottom = view !== _paneView || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
+        // A dialog belongs to the view it was opened over, so a move to another view closes it.
+        if (view !== _paneView) closeDialogs();
         _paneView = view;
 
         pane.className = 'ex-pane';
@@ -1290,9 +1291,12 @@
 
     function renderFleet(pane) {
         const online = S.machines.filter((m) => ['is-up', 'is-present'].includes(livenessOf(m.id))).length;
-        pane.appendChild(paneHead('Fleet', false,
+        const head = paneHead('Fleet', false,
             S.machines.length + (S.machines.length === 1 ? ' machine · ' : ' machines · ') + online
-            + ' online'));
+            + ' online');
+        // Adding a machine is a fleet-level act, so it lives on the fleet's own head.
+        headActions(head, [selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine())]);
+        pane.appendChild(head);
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -1337,11 +1341,13 @@
                 const c = card(svg(machineIcon(m.id), 'ex-ico'), m.name,
                     MACHINE_TYPE[m.type] + (purpose ? ' · ' + purpose : ''),
                     () => go(['fleet', m.id]), m.id);
-                // Everything the machine says without being opened, on one strip in one vocabulary: what it is
-                // (Docker, Backup server) and how it is doing (its last backup, its disks, Claude, containers
-                // wanting a newer image), each a glyph and its word. Splitting these across two places put two
-                // rows of small things on a card that only ever had one thing to say. This is what makes the
-                // fleet pane worth looking at without opening anything on it.
+                // What it is rides beside the name, wordless; how it is doing is said only when it is trouble,
+                // so a healthy card ends at its description.
+                const caps = capabilityStrip(m.id);
+                if (caps) {
+                    const top = c.querySelector('.ex-card-top');
+                    top.insertBefore(caps, top.querySelector('.ex-dot'));
+                }
                 const marks = machineMarks(m.id);
                 if (marks.childNodes.length) c.appendChild(marks);
                 // A long description is clamped to two lines so one card cannot stand taller than its
@@ -1363,18 +1369,8 @@
             () => go(['fleet', 'topology'])));
         body.appendChild(views);
 
-        // Adding a machine is a fleet-level act — it belongs on the fleet, not floating in the topbar over
-        // every path you happen to be standing in. It sits under the same heading a machine's own suggestions
-        // do, in the same place on the page: where you go is above, what you can do is here.
-        body.appendChild(section('What to do next'));
-        const addBar = el('div', 'ex-lactions is-static');
-        addBar.appendChild(selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine()));
-        body.appendChild(addBar);
-
-        // Discovery lives in the Add-a-machine flow and nowhere else. It used to have a second home here, but
-        // scanning is a step on the way to adding something, not a standing report about the fleet — a fleet
-        // page that lists things which are *not* in the fleet, each with its own Add and Ignore, is a second
-        // entry point competing with the one the button above opens. One road in.
+        // Discovery lives in the Add-a-machine flow and nowhere else: a fleet page listing things which are
+        // *not* in the fleet would be a second road in, competing with the head's Add machine.
 
         pane.appendChild(body);
     }
@@ -2059,7 +2055,7 @@
         const purpose = machineDescription(m);
         // Vaier's own machine answers differently in three places below, so the question is asked once here.
         const isVaierServer = !!m.vaierServer;
-        const head = paneHead(m.name, true, MACHINE_TYPE[m.type] + (purpose ? ' · ' + purpose : ''));
+        const head = paneHead(m.name, false, MACHINE_TYPE[m.type] + (purpose ? ' · ' + purpose : ''));
         head.querySelector('.ex-pane-title').appendChild(dot(m.id));
         // The machine's open verbs live where every other pane keeps the verbs that apply right now: the
         // head's one action group, hugging the right. Editing details is common, and a LAN server's setup
@@ -2281,7 +2277,7 @@
             wireRows.push(['Tunnel address', coord(tunnelAddress(m))]);
             wireRows.push(['Endpoint', coord(m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : '')]);
             wireRows.push(['Transfer', m.transferRx || m.transferTx
-                ? (m.transferTx || '0') + ' up / ' + (m.transferRx || '0') + ' down' : '']);
+                ? humanBytes(m.transferTx) + ' up / ' + humanBytes(m.transferRx) + ' down' : '']);
         }
         if (isLan) wireRows.push(['LAN address', coord(m.lanAddress || m.lanCidr)]);
         else if (m.lanCidr || m.lanAddress) wireRows.push(['LAN', coord(m.lanCidr || m.lanAddress)]);
@@ -2648,6 +2644,7 @@
             const desc = text(rec.description || '');
             const lanAddr = text(m.lanAddress || '', 'e.g. 192.168.1.10');
             const lanCidr = text(m.lanCidr || '', 'e.g. 192.168.1.0/24');
+            lanAddr.classList.add('is-coord'); lanCidr.classList.add('is-coord');
             const cat = catSelect(m.deviceCategory);
             form.append(field('Name', null, name), field('Description', 'Optional.', desc));
             if (isServerPeer) {
@@ -3304,7 +3301,7 @@
 
             const name = el('input', 'ex-input'); name.type = 'text'; name.placeholder = 'e.g. Roon server';
             name.autocomplete = 'off'; name.spellcheck = false;
-            const lanAddr = el('input', 'ex-input'); lanAddr.type = 'text'; lanAddr.placeholder = 'e.g. 192.168.1.50';
+            const lanAddr = el('input', 'ex-input is-coord'); lanAddr.type = 'text'; lanAddr.placeholder = 'e.g. 192.168.1.50';
             lanAddr.autocomplete = 'off'; lanAddr.spellcheck = false;
             const dockerBox = el('input'); dockerBox.type = 'checkbox';
             const dockerRow = el('label', 'ex-check-row');
@@ -4165,8 +4162,19 @@
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
         const found = containersOn(machineId);
-        pane.appendChild(paneHead('Containers', false,
-            found.length + (found.length === 1 ? ' container' : ' containers')));
+        const head = paneHead('Containers', false,
+            found.length + (found.length === 1 ? ' container' : ' containers'));
+        // The registry check is a single fleet-wide act, fronted here because this is where the operator lands
+        // after pulling a stack. Hidden in the past: there is no "now" back there to re-check.
+        if (!S.at && S.containersRead && found.length) {
+            const btn = selVerb('refresh', _updateChecking ? 'Checking…' : 'Check the registries now',
+                'ex-btn', () => checkForUpdates());
+            btn.title = 'Ask each registry whether it now serves a newer image for the tag these containers '
+                + 'run. Vaier only reads — it never pulls an image or touches a container.';
+            if (_updateChecking) btn.disabled = true;
+            headActions(head, [btn]);
+        }
+        pane.appendChild(head);
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -4184,44 +4192,32 @@
         }
 
         // --- go: the containers themselves, which is what the operator opened this for ----------------
-        const rows = document.createElement('div');
-        rows.className = 'ex-listing is-wide';
-        rows.appendChild(listHead(['Name', 'Image', 'State']));
-        found.forEach((c) => {
-            // `exited` is what a container stopped on purpose says too, and those are the many. A container
-            // the backend has watched run and now finds in trouble reads its trouble instead — the standing
-            // is the server's own verdict (#356, #317), never re-decided here. It matters most for the two
-            // troubles where Docker itself says `running`: unhealthy, and restart-looping.
+        // `exited` is what a container stopped on purpose says too, and those are the many. A container the
+        // backend has watched run and now finds in trouble reads its trouble instead — the standing is the
+        // server's own verdict (#356, #317), never re-decided here. It matters most for the two troubles where
+        // Docker itself says `running`: unhealthy, and restart-looping.
+        const said = found.map((c) => {
             const standing = S.containerStandings.get(standingKey(machineId, c.containerName));
             const trouble = standing && CONTAINER_TROUBLE_WORD[standing.standing];
-            rows.appendChild(listRow(
-                entryIco('container'), c.containerName,
-                () => go(['fleet', machineId, 'containers', c.containerName]),
-                [c.image || '—', trouble || c.state || 'unknown'],
-                trouble ? standing.standing : (c.state === 'running' ? 'OK' : 'DOWN'), updateMark(c)));
+            return { c, word: trouble || c.state || 'unknown',
+                     state: trouble ? standing.standing : (c.state === 'running' ? 'OK' : 'DOWN') };
         });
+        // The State column exists only while some row has something other than OK to say.
+        const withState = said.some((r) => r.state !== 'OK');
+        const rows = document.createElement('div');
+        rows.className = 'ex-listing is-wide' + (withState ? '' : ' is-stateless');
+        rows.appendChild(listHead(withState ? ['Name', 'Image', 'State'] : ['Name', 'Image']));
+        said.forEach(({ c, word, state }) => rows.appendChild(listRow(
+            entryIco('container'), c.containerName,
+            () => go(['fleet', machineId, 'containers', c.containerName]),
+            withState ? [c.image || '—', word] : [c.image || '—'],
+            withState ? state : undefined, updateMark(c))));
         body.appendChild(rows);
 
-        // --- do: the one thing to do here, under the list it re-reads ---------------------------------
-        //
-        // It is HERE, and only here, because this is where the operator lands — they pull a whole compose
-        // stack on one machine and then look at that machine's containers. Not on each container's Inspector
-        // (they did not pull one image) and not in three places, since the check is a single fleet-wide act
-        // however many buttons front it. The check covers everything Vaier can see, because the backend's
-        // sweep does; a per-machine control would be a lie about what happens.
-        // Hidden in the archive for the same reason the mark is: there is no "now" back there to re-check.
+        // The check's receipt, under the list it re-read.
         if (!S.at) {
-            body.appendChild(section('What to do next'));
-            const act = el('div', 'ex-lactions is-static');
-            const btn = selVerb('refresh', _updateChecking ? 'Checking…' : 'Check the registries now',
-                'ex-btn', () => checkForUpdates());
-            btn.title = 'Ask each registry whether it now serves a newer image for the tag these containers '
-                + 'run. Vaier only reads — it never pulls an image or touches a container.';
-            if (_updateChecking) btn.disabled = true;
-            act.appendChild(btn);
-            body.appendChild(act);
-            const said = updateCheckNote();
-            if (said) body.appendChild(said);
+            const receipt = updateCheckNote();
+            if (receipt) body.appendChild(receipt);
         }
         pane.appendChild(body);
     }
@@ -4268,10 +4264,11 @@
         // NOT mean the image is current — it means either "current" or "Vaier cannot tell", and those are very
         // different facts to an operator. A list row has no room for the difference; this row does, and #57 was
         // filed precisely because "cannot tell" had been quietly rendered as "fine".
+        const update = updateSays(c);
         body.appendChild(kv([
             ['Image', coord(c.image)],
             ['Version', coord(c.version)],
-            ['Update', updateSays(c)],
+            update && ['Update', update],
             ['State', trouble ? c.state + ' (' + trouble + ')' : c.state],
             ['Ports', coord(ports)],
             ['Networks', coord((c.networks || []).join(', '))],
@@ -4293,8 +4290,11 @@
         const found = servicesOn(machineId);
         const open = candidatesOn(machineId).filter((c) => !c.ignored);
         const hidden = candidatesOn(machineId).filter((c) => c.ignored);
-        pane.appendChild(paneHead('Services', false,
-            found.length + (found.length === 1 ? ' published service' : ' published services')));
+        const head = paneHead('Services', false,
+            found.length + (found.length === 1 ? ' published service' : ' published services'));
+        // A service Vaier did not discover — a LAN app, a device's own page — is published by hand.
+        headActions(head, [selVerb('route', 'Publish a service by hand', 'ex-btn', () => lanPublish(machineId))]);
+        pane.appendChild(head);
 
         const body = el('div', 'ex-pane-body');
 
@@ -4305,15 +4305,20 @@
         if (!found.length) {
             body.appendChild(note('Nothing is published from this machine yet.', false));
         } else {
-            const rows = el('div', 'ex-listing is-wide');
-            rows.appendChild(listHead(['Published at', 'Backend', 'State']));
+            // The State column exists only while some route is not OK.
+            const withState = found.some((s) => s.state !== 'OK');
+            const rows = el('div', 'ex-listing is-wide' + (withState ? '' : ' is-stateless'));
+            rows.appendChild(listHead(withState ? ['Published at', 'Backend', 'State'] : ['Published at', 'Backend']));
             // A stream is not reached at a URL, so the row shows what a client actually dials — the name
             // and the one TLS port — and says which kind of route it is in a word.
-            found.forEach((s) => rows.appendChild(listRow(entryIco('service'),
-                (s.stream ? s.connectAddress : s.dnsAddress) || serviceName(s),
-                () => go(['fleet', machineId, 'services', serviceName(s)]),
-                [(s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : ''), s.state || 'UNKNOWN'],
-                s.state, s.stream ? kindMark('stream') : null)));
+            found.forEach((s) => {
+                const backend = (s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : '');
+                rows.appendChild(listRow(entryIco('service'),
+                    (s.stream ? s.connectAddress : s.dnsAddress) || serviceName(s),
+                    () => go(['fleet', machineId, 'services', serviceName(s)]),
+                    withState ? [backend, s.state || 'UNKNOWN'] : [backend],
+                    withState ? s.state : undefined, s.stream ? kindMark('stream') : null));
+            });
             body.appendChild(rows);
         }
 
@@ -4342,16 +4347,6 @@
                 ])));
             }
         }
-        // --- do: the one thing here that is not already a list ----------------------------------------
-        //
-        // A service that isn't a container Vaier discovered — a LAN app, a device's own web page — is published
-        // by hand: name a port on this machine and Vaier makes the route just the same. "By hand" moved off
-        // the heading and onto the verb, because the heading is now the band's and every pane's Do band wears
-        // the same words.
-        body.appendChild(section('What to do next'));
-        const manual = el('div', 'ex-lactions is-static');
-        manual.appendChild(selVerb('route', 'Publish a service by hand', 'ex-btn', () => lanPublish(machineId)));
-        body.appendChild(manual);
         pane.appendChild(body);
     }
 
@@ -4866,7 +4861,7 @@
         if (!s) return pane.appendChild(note('That service is no longer published from ' + machineName + '.',
             true));
 
-        pane.appendChild(paneHead(s.dnsAddress || serviceName(s), true, machineName));
+        pane.appendChild(paneHead(s.dnsAddress || serviceName(s), false, machineName));
 
         const body = el('div', 'ex-pane-body');
 
@@ -5281,10 +5276,10 @@
         return mark;
     }
 
-    // The verdict in words, for the one place with room to be honest about not knowing.
+    // The verdict in words, for the one place with room to be honest about not knowing. Up to date says
+    // nothing: the Update row is left out rather than reporting health.
     const UPDATE_SAYS = {
         UPDATE_AVAILABLE: 'Update available',
-        UP_TO_DATE: 'Up to date',
         UNKNOWN: 'Vaier cannot tell',
     };
 
@@ -5296,6 +5291,7 @@
      */
     function updateSays(c) {
         if (c.updateEligibility === 'VAIER_OWN_STACK') return 'Moves with Vaier — update from Settings';
+        if (c.updateAvailable === 'UP_TO_DATE') return null;
         const said = UPDATE_SAYS[c.updateAvailable] || UPDATE_SAYS.UNKNOWN;
         // The one surface with room for the reason, so it is where the silence is explained rather than
         // left to look like Vaier having missed something.
@@ -5593,15 +5589,16 @@
             return pane.appendChild(note('This machine has no part in fleet backup — it is not the backup '
                 + 'server, and no job backs it up.', true));
         }
-        pane.appendChild(paneHead('Backup', false,
-            isServer ? 'The fleet’s backup server' : 'How this machine is backed up'));
+        const head = paneHead('Backup', false,
+            isServer ? 'The fleet’s backup server' : 'How this machine is backed up');
+        pane.appendChild(head);
         const body = el('div', 'ex-pane-body');
         // One machine can be both the store and a thing stored, and then this pane is two halves stacked.
         // The server half ends in what can undo work, so appending it in place would leave a danger fold
         // sitting in the middle of the page with a job's bands after it. It is handed back and landed last,
         // where danger belongs on every other pane.
         const serverRisk = isServer ? renderServerBackup(body, machineId, s) : null;
-        if (jobs.length) renderJobsBackup(body, machineId, jobs);
+        if (jobs.length) renderJobsBackup(body, machineId, jobs, head);
         if (serverRisk) body.appendChild(serverRisk);
         pane.appendChild(body);
     }
@@ -5941,6 +5938,7 @@
             };
 
             const host = input(existing.host, 'e.g. 192.168.3.3');
+            host.classList.add('is-coord');
             const sshPort = input(existing.sshPort || 8022, '8022', 'number');
             const borgUser = input(existing.borgUser || 'borg', 'borg');
             const baseRepoPath = input(existing.baseRepoPath || 'home/borg/backups', 'home/borg/backups');
@@ -6021,7 +6019,7 @@
         // saying out loud, not quietly rendering as an ordinary entry.
         const owner = repoLabel(r.name);
         const claimed = S.backupJobs.some((j) => j.repositoryName === r.name);
-        pane.appendChild(paneHead(owner, true,
+        pane.appendChild(paneHead(owner, false,
             claimed ? 'Backed up to ' + (s ? s.name : '') : 'Kept on ' + (s ? s.name : '')));
         const body = el('div', 'ex-pane-body');
         if (!claimed) {
@@ -6314,17 +6312,18 @@
     // protected is chosen in the file browser (tick and Back up); the schedule is fleet-wide; retention and
     // whether to read as root are Vaier's to decide, not knobs to turn. So the whole entry is a readout with a
     // single intent — run it now — and one way out — stop backing this machine up.
-    function renderJobsBackup(body, machineId, jobs) {
+    function renderJobsBackup(body, machineId, jobs, head) {
         const machineName = nameOf(machineId);
         if (S.preparing.has(machineId)) {
             const prep = el('div', 'ex-runline');
             prep.textContent = 'Getting this machine ready to back up — installing borg and trusting its key…';
             body.appendChild(prep);
         }
-        jobs.forEach((job) => renderOneJob(body, machineId, job, jobs.length > 1));
+        // One job's verbs ride on the pane head; several jobs each keep theirs under their own name.
+        jobs.forEach((job) => renderOneJob(body, machineId, job, jobs.length > 1, head));
     }
 
-    function renderOneJob(body, machineId, job, named) {
+    function renderOneJob(body, machineId, job, named, head) {
         const machineName = nameOf(machineId);
         if (named) {
             const h = el('div', 'ex-sub');
@@ -6381,7 +6380,8 @@
         const running = held && held.state === 'ready' && held.run.status === 'RUNNING';
         const staged = S.readying.get(machineId);
 
-        body.appendChild(section('What to do next'));
+        // "What to do next" only when there is a real fix to offer; the standing verbs go to the head.
+        if (needsReady || staged) body.appendChild(section('What to do next'));
         // The domain decides that a missing borg client is what happened (BackupRun.needsClientReadying) — the
         // shell never reads the error text to work it out — and the fix is offered on the spot rather than
         // named and left to be hunted for. The command appears only where Vaier could not gain root itself.
@@ -6396,12 +6396,13 @@
             cmd.textContent = staged;
             body.appendChild(cmd);
         }
-        const acts = el('div', 'ex-lactions is-static');
         if (needsReady) {
+            const fix = el('div', 'ex-lactions is-static');
             const ready = selVerb('shield', S.preparing.has(machineId) ? 'Getting ready…' : 'Get this machine ready',
                 'ex-btn is-accent', () => readyClient(job));
             if (S.preparing.has(machineId)) ready.disabled = true;
-            acts.appendChild(ready);
+            fix.appendChild(ready);
+            body.appendChild(fix);
         }
         const busy = running || S.starting.has(machineId);
         const run = selVerb('refresh', busy ? 'Backing up…' : 'Back up now',
@@ -6409,8 +6410,13 @@
         if (busy) run.disabled = true;
         // Protecting more is done where the files are: tick and Back up. This only opens that door (#335).
         const more = selVerb('archive', 'Back up more', 'ex-btn', () => go(['fleet', machineId, 'files']));
-        acts.append(run, more);
-        body.appendChild(acts);
+        if (named || !head) {
+            const acts = el('div', 'ex-lactions is-static');
+            acts.append(run, more);
+            body.appendChild(acts);
+        } else {
+            headActions(head, [run, more]);
+        }
 
         // --- know: how this backup stands, and the one setting behind it ------------------------------
         body.appendChild(section('Schedule'));
@@ -7031,6 +7037,7 @@
         const form = el('div', 'ex-form');
 
         const addr = el('input', 'ex-input');
+        addr.classList.add('is-coord');
         addr.type = 'text'; addr.placeholder = '203.0.113.9'; addr.autocomplete = 'off'; addr.spellcheck = false;
         addr.value = S.blockDraft;
         addr.oninput = () => { S.blockDraft = addr.value; };
@@ -7101,9 +7108,10 @@
             row.appendChild(cell);
         });
 
+        // The phone's line under the address: the origin is already there, so only the scenario and expiry.
         const sub = el('span', 'ex-lsub');
         const subText = el('span');
-        subText.textContent = [d.origin, d.scenario, d.duration].filter(Boolean).join(' · ');
+        subText.textContent = [d.scenario, d.duration].filter(Boolean).join(' · ');
         sub.appendChild(subText);
         row.appendChild(sub);
 
@@ -7258,7 +7266,12 @@
             ? (c.list.length ? c.list.length + (c.list.length === 1 ? ' credential' : ' credentials')
                              : 'Nothing stored')
             : '';
-        pane.appendChild(paneHead('Credentials', false, stored));
+        const head = paneHead('Credentials', false, stored);
+        // The empty state carries its own accented Add, so the head offers it only beside a list.
+        if (c.state === 'ready' && c.list.length) {
+            headActions(head, [selVerb('key', 'Add a credential', 'ex-btn', () => credentialFileDialog(null))]);
+        }
+        pane.appendChild(head);
 
         const body = el('div', 'ex-pane-body');
         pane.appendChild(body);
@@ -7280,12 +7293,6 @@
         const list = el('div', 'ex-creds');
         c.list.forEach((cred) => list.appendChild(credentialCard(cred)));
         body.appendChild(list);
-
-        // do: the one verb that is about the collection rather than about one credential.
-        body.appendChild(section('What to do next'));
-        const add = el('div', 'ex-cred-actions');
-        add.appendChild(selVerb('key', 'Add a credential', 'ex-btn', () => credentialFileDialog(null)));
-        body.appendChild(add);
 
         // know: how Vaier keeps them there, which is the promise the cards above are reporting against.
         body.appendChild(section('About these credentials'));
@@ -8555,7 +8562,8 @@
         // in the fleet is detect-only (see ImageUpdateWatcher): pulling someone else's container on a hunch is
         // not Vaier's business. Doing it to yourself, on request, is a different act.
         const upd = S.settings.update || {};
-        body.appendChild(section('Vaier'));
+        // Silent while Vaier is current: the section exists only for a newer image or a failed update.
+        if (upd.trouble || upd.available) body.appendChild(section('Vaier'));
         // A rollback is the one outcome nothing else reveals: Vaier is running, just on the build from before.
         if (upd.trouble) {
             body.appendChild(note(upd.outcome === 'ROLLED_BACK'
@@ -8564,12 +8572,10 @@
                 : 'The last update could not be carried out (' + (upd.detail || 'unknown')
                   + '). Vaier was not touched.', true));
         }
-        const upRow = el('div', 'ex-runline');
-        upRow.textContent = upd.available
-            ? 'A newer Vaier image is being served.'
-            : 'Vaier is running the newest image it can see.';
-        body.appendChild(upRow);
         if (upd.available) {
+            const upRow = el('div', 'ex-runline');
+            upRow.textContent = 'A newer Vaier image is being served.';
+            body.appendChild(upRow);
             const upActs = el('div', 'ex-lactions is-static');
             upActs.appendChild(selVerb('arrowup', 'Update Vaier', 'ex-btn is-accent', () => updateVaier()));
             body.appendChild(upActs);
@@ -8755,7 +8761,7 @@
         // here, not the location again. A refresh re-reads this one directory over SFTP: the fleet changes
         // under Vaier (a Transfer just landed, a shell just wrote a file), and the cache is otherwise sticky.
         const loaded = S.dirs.get(dirKey(machineId, path, S.at));
-        const head = paneHead(machineName, true, directorySubtitle(loaded));
+        const head = paneHead(machineName, false, directorySubtitle(loaded));
 
         // ONE bar. The head, the selection toolbar and the paste bar were the same row shape doing the same
         // job three times — label left, actions right — and stacked they made the top of a pane a pile of
