@@ -99,6 +99,8 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                         // the domain's to decide, not this adapter's to re-spell.
                         .health(ContainerHealth.fromStatus(container.getStatus()))
                         .imageDigest(resolveImageDigest(imageInfo, image))
+                        .imageDigests(imageInfo == null ? null
+                            : DockerService.digestsFromRepoDigests(imageInfo.getRepoDigests(), image))
                         .updateAvailable(UpdateAvailability.UNKNOWN)
                         // How compose started it, straight off the container's own labels. Whether the
                         // labels amount to coordinates at all is the domain's call, not this adapter's.

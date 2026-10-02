@@ -59,7 +59,7 @@ public final class SelfUpdate {
     public static boolean updateAvailable(List<DockerService> containers,
                                           ForResolvingRegistryDigest registry) {
         return findSelf(containers)
-            .map(self -> UpdateAvailability.compare(self.imageDigest(), servedDigest(self, registry))
+            .map(self -> UpdateAvailability.compare(self.imageDigests(), servedDigest(self, registry))
                 == UpdateAvailability.UPDATE_AVAILABLE)
             .orElse(false);
     }

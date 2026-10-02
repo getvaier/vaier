@@ -127,7 +127,7 @@ public final class ImageUpdateSweep {
                     resolveInto(registryDigests, image, reference.get(), registry, fresh);
                 }
                 verdicts.put(scoped,
-                    UpdateAvailability.compare(container.imageDigest(), registryDigests.get(image)));
+                    UpdateAvailability.compare(container.imageDigests(), registryDigests.get(image)));
             }
         }
         return new Result(verdicts, registryDigests, sweptAt);

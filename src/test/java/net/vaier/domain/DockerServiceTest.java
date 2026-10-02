@@ -25,6 +25,13 @@ class DockerServiceTest {
     }
 
     @Test
+    void digestsFromRepoDigests_keepsEveryDigestOfTheRepository_andOnlyThose() {
+        assertThat(DockerService.digestsFromRepoDigests(
+            List.of("phpmyadmin@sha256:old", "other/image@sha256:aaa", "phpmyadmin@sha256:new"), "phpmyadmin"))
+            .containsExactly("sha256:old", "sha256:new");
+    }
+
+    @Test
     void digestFromRepoDigests_fallsBackToTheSoleDigestWhenNoRepositoryMatches() {
         String digest = DockerService.digestFromRepoDigests(
             List.of("vaultwarden/server@sha256:bbb"), "registry-1.docker.io/vaultwarden/server:latest");

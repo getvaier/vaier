@@ -48,7 +48,8 @@ public record DockerService(
         ComposeCoordinates composeCoordinates,
         ContainerUpdateEligibility updateEligibility,
         boolean movingTag,
-        ContainerHealth health
+        ContainerHealth health,
+        List<String> imageDigests
 ) {
 
     /**
@@ -59,7 +60,7 @@ public record DockerService(
     public DockerService(String containerId, String containerName, String image, String version,
                          List<PortMapping> ports, List<String> networks, String state) {
         this(containerId, containerName, image, version, ports, networks, state, null,
-            UpdateAvailability.UNKNOWN, null, null, false, ContainerHealth.NONE);
+            UpdateAvailability.UNKNOWN, null, null, false, ContainerHealth.NONE, null);
     }
 
     /** A container known down to its update verdict, but not yet to how it was started or judged. */
@@ -67,7 +68,7 @@ public record DockerService(
                          List<PortMapping> ports, List<String> networks, String state,
                          String imageDigest, UpdateAvailability updateAvailable) {
         this(containerId, containerName, image, version, ports, networks, state, imageDigest,
-            updateAvailable, null, null, false, ContainerHealth.NONE);
+            updateAvailable, null, null, false, ContainerHealth.NONE, null);
     }
 
     /**
@@ -77,6 +78,10 @@ public record DockerService(
     public DockerService {
         updateAvailable = updateAvailable == null ? UpdateAvailability.UNKNOWN : updateAvailable;
         health = health == null ? ContainerHealth.NONE : health;
+        // The digest shown is always among the digests compared, however the record was built.
+        List<String> digests = new ArrayList<>(imageDigests == null ? List.of() : imageDigests);
+        if (imageDigest != null && !digests.contains(imageDigest)) digests.add(0, imageDigest);
+        imageDigests = List.copyOf(digests);
     }
 
     /** This container carrying {@code verdict}. The scrape stays as the host reported it. */
@@ -124,6 +129,25 @@ public record DockerService(
             return at > 0 ? only.substring(at + 1) : null;
         }
         return null;
+    }
+
+    /**
+     * Every registry digest {@code image} is known by. A registry can republish the same image under a new
+     * index digest, and Docker then records both, so the newest one may not be the first.
+     */
+    public static List<String> digestsFromRepoDigests(List<String> repoDigests, String image) {
+        if (repoDigests == null) return List.of();
+        String repository = repositoryOf(image);
+        List<String> digests = new ArrayList<>();
+        for (String entry : repoDigests) {
+            int at = entry == null ? -1 : entry.indexOf('@');
+            if (at > 0 && repositoryOf(entry.substring(0, at)).equals(repository)) digests.add(entry.substring(at + 1));
+        }
+        if (digests.isEmpty()) {
+            String only = digestFromRepoDigests(repoDigests, image);
+            return only == null ? List.of() : List.of(only);
+        }
+        return digests;
     }
 
     /** An image string reduced to its repository, so {@code RepoDigests} entries can be matched to it. */

@@ -1,5 +1,7 @@
 package net.vaier.domain;
 
+import java.util.Collection;
+
 /**
  * What Vaier has decided about one container's image: it is current, a newer image is being served for the
  * very tag it runs, or Vaier <b>cannot tell</b>.
@@ -35,6 +37,17 @@ public enum UpdateAvailability {
      * <p>Either digest missing or blank yields {@link #UNKNOWN}. Only two digests that are both present and
      * genuinely differ yield {@link #UPDATE_AVAILABLE}.
      */
+    /** Up to date when ANY digest the local image is known by is the one the registry serves. */
+    public static UpdateAvailability compare(Collection<String> localDigests, String registryDigest) {
+        if (localDigests == null || localDigests.isEmpty()) return compare((String) null, registryDigest);
+        UpdateAvailability verdict = UNKNOWN;
+        for (String local : localDigests) {
+            verdict = compare(local, registryDigest);
+            if (verdict != UPDATE_AVAILABLE) return verdict;
+        }
+        return verdict;
+    }
+
     public static UpdateAvailability compare(String localDigest, String registryDigest) {
         if (isBlank(localDigest) || isBlank(registryDigest)) {
             return UNKNOWN;

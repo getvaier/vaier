@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class UpdateAvailabilityTest {
@@ -19,6 +21,15 @@ class UpdateAvailabilityTest {
     }
 
     @Test
+    void anImageIsUpToDateWhenAnyOfItsDigestsIsTheServedOne() {
+        // One image can carry several digests for its repository once the registry republishes it.
+        assertThat(UpdateAvailability.compare(List.of("sha256:old", "sha256:new"), "sha256:new"))
+            .isEqualTo(UpdateAvailability.UP_TO_DATE);
+        assertThat(UpdateAvailability.compare(List.of("sha256:old", "sha256:older"), "sha256:new"))
+            .isEqualTo(UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    @Test
     void anUnresolvableRegistryDigestIsUnknownNeverOutdated() {
         // The registry was unreachable, rate-limited, or does not know the tag. Unknown is not outdated:
         // Vaier must never raise "update available" on the strength of a failed lookup.
@@ -29,7 +40,7 @@ class UpdateAvailabilityTest {
     @Test
     void anUnresolvableLocalDigestIsUnknownNeverUpToDate() {
         // A locally-built image has nothing to compare. It is not up to date — it is unknowable.
-        assertThat(UpdateAvailability.compare(null, "sha256:registry")).isEqualTo(UpdateAvailability.UNKNOWN);
+        assertThat(UpdateAvailability.compare((String) null, "sha256:registry")).isEqualTo(UpdateAvailability.UNKNOWN);
         assertThat(UpdateAvailability.compare("", "sha256:registry")).isEqualTo(UpdateAvailability.UNKNOWN);
     }
 

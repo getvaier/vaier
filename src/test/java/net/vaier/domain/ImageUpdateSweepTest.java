@@ -93,6 +93,18 @@ class ImageUpdateSweepTest {
     }
 
     @Test
+    void anImageAlsoKnownByTheServedDigestIsUpToDate() {
+        // phpMyAdmin on Apalveien 5: Docker Hub republished the same image under a new index digest, so the
+        // local image carries both. Comparing only the first one offered an update every day that never landed.
+        FakeRegistry registry = new FakeRegistry(Map.of("registry-1.docker.io/library/phpmyadmin:latest", "sha256:new"));
+        DockerService running = container("phpmyadmin", "phpmyadmin", "sha256:old").toBuilder()
+            .imageDigests(List.of("sha256:old", "sha256:new")).build();
+
+        assertThat(sweptVerdicts(on(HOST, running), registry))
+            .containsEntry(new ScopedImage(HOST, "phpmyadmin"), UpdateAvailability.UP_TO_DATE);
+    }
+
+    @Test
     void anUnreachableRegistryLeavesTheImageUnknownNotOutdated() {
         // Registry down, rate-limited, or no egress from the Vaier container: degrade quietly.
         FakeRegistry registry = new FakeRegistry(Map.of());

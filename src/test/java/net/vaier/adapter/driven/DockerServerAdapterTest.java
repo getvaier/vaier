@@ -516,7 +516,7 @@ class DockerServerAdapterTest {
         when(dockerClient.inspectImageCmd("sha256:configsha")).thenReturn(inspectImageCmd);
         InspectImageResponse imageResponse = mock(InspectImageResponse.class);
         when(imageResponse.getRepoDigests())
-            .thenReturn(List.of("vaultwarden/server@sha256:registrydigest"));
+            .thenReturn(List.of("vaultwarden/server@sha256:registrydigest", "vaultwarden/server@sha256:republished"));
         when(inspectImageCmd.exec()).thenReturn(imageResponse);
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
@@ -524,6 +524,9 @@ class DockerServerAdapterTest {
 
         assertThat(services).singleElement()
             .extracting(DockerService::imageDigest).isEqualTo("sha256:registrydigest");
+        // Every digest the image is known by reaches the sweep, not just the first.
+        assertThat(services).singleElement().extracting(DockerService::imageDigests)
+            .isEqualTo(List.of("sha256:registrydigest", "sha256:republished"));
     }
 
     @Test
