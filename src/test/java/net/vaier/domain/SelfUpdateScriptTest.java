@@ -105,7 +105,8 @@ class SelfUpdateScriptTest {
                 .doesNotContain("--remove-orphans");
             if (row.synced()) {
                 assertThat(calls).contains("raw.githubusercontent.com/getvaier/vaier/abc123/install.sh")
-                    .contains("installer VAIER_REF=abc123");
+                    // Never stops to ask a question or start the stack itself: the update brings the project up.
+                    .contains("installer VAIER_REF=abc123 VAIER_NONINTERACTIVE=1");
                 assertThat(calls.indexOf("compose pull vaier")).isLessThan(calls.indexOf("installer"));
                 assertThat(calls.indexOf("installer")).isLessThan(calls.indexOf("compose up -d\n"));
             } else {
@@ -180,7 +181,7 @@ class SelfUpdateScriptTest {
                 """.formatted(revision));
             executable(root.resolve("installer"), """
                 #!/bin/bash
-                echo "installer VAIER_REF=$VAIER_REF" >> "$CALLS"
+                echo "installer VAIER_REF=$VAIER_REF VAIER_NONINTERACTIVE=${VAIER_NONINTERACTIVE:-}" >> "$CALLS"
                 echo new > docker-compose.yml
                 echo new > offline/default.conf
                 echo new > offline/added-by-release

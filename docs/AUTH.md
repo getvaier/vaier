@@ -26,7 +26,7 @@ Registering an OAuth app is the slowest thing between a fresh server and a worki
 docker compose logs vaier
 ```
 
-The bordered block there gives the console URL, the email and the password. Open the console, press **Sign in with the first-run password** — the only button on the sign-in page while no provider exists — and sign in.
+The bordered block there gives the console URL, the email and the password. When you start Vaier from the [installer](ADVANCED.md#the-installer) at a terminal, it waits for the boot and prints those three lines for you. Open the console, press **Sign in with the first-run password** — the only button on the sign-in page while no provider exists — and sign in.
 
 That sign-in is the **first-run claim**: while the access store holds no admin, an identity arriving through the local connector *becomes* the admin, so you land straight in the console with nothing pre-seeded. Once an admin exists the claim is spent; a local sign-in for some other email lands as **pending** like anyone else.
 

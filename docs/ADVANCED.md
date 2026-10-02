@@ -6,16 +6,36 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 
 ---
 
+## The installer
+
+`install.sh` is how you install Vaier and how you update it by hand. It always does the same groundwork: fetches the runtime files (the compose file and the assets it bind-mounts) for one ref of the repository, scaffolds `.env` at mode `600` if there is none, and adds any auto-generated secret your `.env` lacks. It never changes a value you set. Pin the ref with `VAIER_REF` (a branch, tag or commit).
+
+**At a terminal, it finishes the job.** When it runs with a terminal — including `curl … | bash`, where it reads your answers from `/dev/tty` — it also:
+
+- **Asks three questions on a fresh install** (no `VAIER_DOMAIN` yet, or still the placeholder `yourdomain.com`): your **domain**, your **email** (Let's Encrypt's contact, and the first-run sign-in's account — see [AUTH](AUTH.md#the-first-run-password-before-you-have-registered-anything)), and your **time zone** for schedules such as the nightly backup (it suggests the server's own zone and refuses a name it doesn't know). The answers go into `.env` as `VAIER_DOMAIN`, `ACME_EMAIL` and `VAIER_TZ`.
+- **Checks DNS.** It looks up this server's public IP and `vaier.<domain>`. If they match it says so; otherwise it prints the exact wildcard record to make, IP filled in, and tells you that starting now is fine — Vaier waits for the record before asking Let's Encrypt for certificates. It writes no DNS itself ([Wildcard DNS](NETWORKING.md#wildcard-dns)).
+- **Offers to install Docker** with Docker's official script (`get.docker.com`) when it is missing.
+- **Offers to start Vaier**: `docker compose pull`, then `docker compose up -d` — through `sudo` when your user can't reach Docker yet. It waits for Vaier to boot and prints the first-run sign-in from the boot log: the URL, the email and the password. If a sign-in provider is already configured there is no first-run door, and it prints the console URL instead.
+
+It deliberately does **not** ask about sign-in providers or mail. Both are set later, in the console, under **Settings** — Google or GitHub under **Settings → Sign-in** ([AUTH](AUTH.md#registering-google-or-github)) — so nothing about OAuth stands between a bare server and a working console.
+
+**Re-run on an existing install**, it asks nothing and offers **Bring Vaier up to date now?** — the same pull and `up -d`.
+
+**Without a terminal** — output piped to a log, CI, or `VAIER_NONINTERACTIVE=1` set — it only does the groundwork and prints the next steps: point DNS, `docker compose up -d`, read the first-run password from `docker compose logs vaier`. Vaier's own **Settings → Update Vaier** runs it this way ([Monitoring](MONITORING.md#updating-vaier-itself)).
+
+---
+
 ## Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `VAIER_DOMAIN` | Yes | Base domain (e.g. `yourdomain.com`) |
-| `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications |
-| `VAIER_OIDC_GOOGLE_CLIENT_ID` | At least one provider required | Google OAuth 2.0 client id — a **Dex** connector uses it for sign-in. Register its redirect URI at Dex (`https://dex.<domain>/callback`). Only rendered as a connector — and only offered as a sign-in button — when both `VAIER_OIDC_GOOGLE_CLIENT_ID` and `VAIER_OIDC_GOOGLE_CLIENT_SECRET` are set |
-| `VAIER_OIDC_GOOGLE_CLIENT_SECRET` | At least one provider required | Google OAuth 2.0 client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
-| `VAIER_OIDC_GITHUB_CLIENT_ID` | At least one provider required | GitHub OAuth App client id — a **Dex** connector uses it for sign-in. Register its callback URL at Dex (`https://dex.<domain>/callback`). Any GitHub account may sign in; the pending → admin-approval gate decides access. Only rendered as a connector — and only offered as a sign-in button — when both `VAIER_OIDC_GITHUB_CLIENT_ID` and `VAIER_OIDC_GITHUB_CLIENT_SECRET` are set |
-| `VAIER_OIDC_GITHUB_CLIENT_SECRET` | At least one provider required | GitHub OAuth App client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
+| `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications. Also names the first-run account when `VAIER_ADMIN_EMAIL` is blank |
+| `VAIER_TZ` | No | Time zone Vaier schedules in, e.g. `Europe/Oslo` — the nightly backup hour is local time in this zone (default `UTC`). The installer asks for it |
+| `VAIER_OIDC_GOOGLE_CLIENT_ID` | Optional | Google OAuth 2.0 client id — a **Dex** connector uses it for sign-in. Register its redirect URI at Dex (`https://dex.<domain>/callback`). Only rendered as a connector — and only offered as a sign-in button — when both `VAIER_OIDC_GOOGLE_CLIENT_ID` and `VAIER_OIDC_GOOGLE_CLIENT_SECRET` are set |
+| `VAIER_OIDC_GOOGLE_CLIENT_SECRET` | Optional | Google OAuth 2.0 client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
+| `VAIER_OIDC_GITHUB_CLIENT_ID` | Optional | GitHub OAuth App client id — a **Dex** connector uses it for sign-in. Register its callback URL at Dex (`https://dex.<domain>/callback`). Any GitHub account may sign in; the pending → admin-approval gate decides access. Only rendered as a connector — and only offered as a sign-in button — when both `VAIER_OIDC_GITHUB_CLIENT_ID` and `VAIER_OIDC_GITHUB_CLIENT_SECRET` are set |
+| `VAIER_OIDC_GITHUB_CLIENT_SECRET` | Optional | GitHub OAuth App client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
 | `VAIER_ADMIN_EMAIL` | No | The email seeded as the first **admin** access entry, and restored to admin on startup whenever no admin remains, so the console can't lock everyone out |
 | `VAIER_OAUTH2_COOKIE_SECRET` | Auto | oauth2-proxy session cookie secret — generated automatically into `.env`, not operator-authored |
 | `VAIER_DEX_CLIENT_SECRET` | Auto | oauth2-proxy↔Dex shared client secret — generated automatically into `.env`, not operator-authored |
@@ -28,7 +48,7 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 | `TRAEFIK_CONFIG_PATH` | No | Traefik dynamic config dir (default: `/traefik/config`) |
 | `TRAEFIK_API_URL` | No | Traefik API URL (default: `http://traefik:8080`) |
 
-Each identity provider is independently optional — configure Google, GitHub, or both; `dex-init` only renders a connector when its client id and its client secret are both set. At least one provider must be fully configured, or `dex-init` fails fast (naming exactly which variables are missing) rather than starting Dex with no way to sign in. With only one provider configured, Dex's connector-selection screen is skipped and sign-in goes straight to that provider.
+Each identity provider is independently optional — configure Google, GitHub, or both; `dex-init` only renders a connector when its client id and its client secret are both set. With none configured, `dex-init` opens the [first-run door](AUTH.md#the-first-run-password-before-you-have-registered-anything) instead: a one-account password printed in Vaier's boot log, whose first sign-in becomes the admin. With only one provider configured, Dex's connector-selection screen is skipped and sign-in goes straight to that provider.
 
 On EC2, the public address is detected from instance metadata. On other hosts, set `VAIER_PUBLIC_HOST` or `VAIER_PUBLIC_IP` in `.env` — without one, Vaier can still check that `*.<domain>` resolves, but not that it resolves *here*.
 

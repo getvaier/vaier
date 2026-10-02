@@ -18,6 +18,10 @@
 # .env without it, and compose now refuses to start rather than interpolate an empty one (see the
 # ${VAIER_..._SECRET:?} guards in docker-compose.yml). Re-running here is what clears that.
 #
+# Run at a terminal it also asks for your domain, email and time zone, offers to install Docker and to
+# start the stack, and prints your first sign-in. Without a terminal — piped to a log, CI, or Vaier's own
+# self-update, which sets VAIER_NONINTERACTIVE=1 — it only fetches and scaffolds, and asks nothing.
+#
 # Override the ref (branch, tag or commit) with VAIER_REF, e.g. VAIER_REF=v1.2.3.
 set -euo pipefail
 
@@ -48,8 +52,12 @@ die() { printf '\033[1;31m error:\033[0m %s\n' "$*" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || die "curl is required."
 command -v tar  >/dev/null 2>&1 || die "tar is required."
 
+# A person at a terminal. Under `curl | bash` stdin is the script itself, so answers come from /dev/tty.
+interactive=false
+if [ -z "${VAIER_NONINTERACTIVE:-}" ] && [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then interactive=true; fi
+
 if ! command -v docker >/dev/null 2>&1; then
-  warn "docker not found. Install it first:  curl -fsSL https://get.docker.com | sh"
+  $interactive || warn "docker not found. Install it first:  curl -fsSL https://get.docker.com | sh"
 elif ! docker compose version >/dev/null 2>&1; then
   warn "docker compose v2 not found. Vaier needs Compose v2.23+ (bundled with current Docker)."
 fi
@@ -142,7 +150,111 @@ ensure_secret VAIER_OAUTH2_COOKIE_SECRET gen_b64
 # two secrets above.
 ensure_secret VAIER_CROWDSEC_BOUNCER_KEY gen_hex
 
-cat <<EOF
+# --- The interactive finish (#304) ---------------------------------------------------------------------
+ask() {       # $1=question $2=default — prints the answer
+  local reply=''
+  read -r -p "$1${2:+ [$2]}: " reply </dev/tty || true
+  printf '%s' "${reply:-${2:-}}"
+}
+confirm() {   # $1=question — yes unless the answer starts with n
+  local reply=''
+  read -r -p "$1 [Y/n] " reply </dev/tty || true
+  case "$reply" in [nN]*) return 1 ;; *) return 0 ;; esac
+}
+env_value() { sed -n "s/^$1=//p" .env | tail -1; }
+set_env() {   # $1=key $2=value — replaces the key's line, or appends it
+  local tmp; tmp=$(mktemp)
+  awk -v k="$1" -v v="$2" '$0 ~ "^" k "=" { print k "=" v; done = 1; next } { print } END { if (!done) print k "=" v }' .env > "$tmp"
+  cat "$tmp" > .env && rm -f "$tmp"   # cat, not mv: .env keeps its 600 mode
+}
+
+if $interactive; then
+  sudo=''; [ "$(id -u)" -eq 0 ] || sudo='sudo'
+  domain=$(env_value VAIER_DOMAIN)
+  fresh=false
+  if [ -z "$domain" ] || [ "$domain" = yourdomain.com ]; then
+    fresh=true
+    printf '\n'; say "Three questions, then Vaier can start. Everything else is set up later in its console."
+    while :; do
+      domain=$(ask "Your domain — Vaier will live at vaier.<domain>, e.g. example.com" "")
+      [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] && break
+      warn "That doesn't look like a domain name."
+    done
+    while :; do
+      email=$(ask "Your email — for Let's Encrypt, and your first sign-in" "")
+      [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] && break
+      warn "That doesn't look like an email address."
+    done
+    tz_here=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)
+    while :; do
+      tz=$(ask "Time zone for schedules such as the nightly backup" "${tz_here:-UTC}")
+      [ "$tz" = UTC ] || [ -f "/usr/share/zoneinfo/$tz" ] && break
+      warn "No time zone called '$tz' (try a name like Europe/Oslo)."
+    done
+    set_env VAIER_DOMAIN "$domain"; set_env ACME_EMAIL "$email"; set_env VAIER_TZ "$tz"
+    say "Saved to .env."
+
+    # Vaier makes no DNS; the one wildcard record is the operator's, so say exactly which one.
+    ip=$(curl -fsS -m 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]' || true)
+    seen=$(getent ahostsv4 "vaier.$domain" 2>/dev/null | awk 'NR == 1 { print $1 }' || true)
+    if [ -n "$ip" ] && [ "$seen" = "$ip" ]; then
+      say "DNS: vaier.$domain already points at this server ($ip)."
+    else
+      warn "vaier.$domain doesn't point at this server yet${seen:+ (it points at $seen)}. Make this one record at your DNS host:
+     *.$domain   A   ${ip:-<the public IP of this server>}
+   You can start now: Vaier waits for it before asking Let's Encrypt for certificates."
+    fi
+  fi
+
+  if ! command -v docker >/dev/null 2>&1 && confirm "Docker isn't installed. Install it now with Docker's official script?"; then
+    curl -fsSL https://get.docker.com | $sudo sh || die "Docker did not install — see the output above."
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    docker_cmd=(docker); docker info >/dev/null 2>&1 || docker_cmd=($sudo docker)
+    if confirm "$($fresh && echo "Start Vaier now?" || echo "Bring Vaier up to date now?")"; then
+      "${docker_cmd[@]}" compose pull --quiet && "${docker_cmd[@]}" compose up -d \
+        || die "The stack didn't start — see the output above."
+      if ! $fresh; then say "Vaier is up to date."; exit 0; fi
+      say "Waiting for Vaier to start (a minute or two the first time)…"
+      first_sign_in='' started=0
+      for _ in $(seq 1 120); do
+        logs=$("${docker_cmd[@]}" compose logs --no-log-prefix vaier 2>/dev/null || true)
+        first_sign_in=$(printf '%s\n' "$logs" | grep -E '^  (Open|Sign in|Email|Password) ' | tail -4 || true)
+        [ -n "$first_sign_in" ] && break
+        printf '%s' "$logs" | grep -q 'Started VaierApplication' && started=$((started + 1))
+        [ "$started" -gt 5 ] && break   # up, but no first-run door: a sign-in provider is already set
+        sleep 2
+      done
+      if [ -n "$first_sign_in" ]; then
+        printf '\n%s\n\n%s\n\n%s\n' "$(say "Vaier is up. Your first sign-in:")" "$first_sign_in" \
+          "  That first sign-in becomes the admin. Add Google or GitHub under Settings, Sign-in, to invite anyone else."
+      elif [ "$started" -gt 0 ]; then
+        say "Vaier is up: https://vaier.$domain"
+      else
+        warn "Vaier hasn't finished starting yet. Watch it with:  docker compose logs -f vaier"
+      fi
+      exit 0
+    fi
+  fi
+fi
+
+domain=$(env_value VAIER_DOMAIN)
+if [ -n "$domain" ] && [ "$domain" != yourdomain.com ]; then
+  # The interactive run already worked out the address and whether DNS points here.
+  record_ip=${ip:-"<this server's public IP>"}
+  dns_step="  - Point DNS       — one record, once:  *.$domain  A  $record_ip
+"
+  [ -n "${ip:-}" ] && [ "${seen:-}" = "$ip" ] && dns_step=''
+  cat <<EOF
+
+$(say "Done.")
+Next:
+${dns_step}  - Start the stack — docker compose up -d
+  - Sign in         — docker compose logs vaier   prints the first-run password at the bottom;
+                       that first sign-in becomes the admin.
+EOF
+else
+  cat <<EOF
 
 $(say "Done.")
 Next:
@@ -156,3 +268,4 @@ Next:
 
 Upgrading an existing install? Steps 1 and 2 are already done — just: docker compose up -d
 EOF
+fi

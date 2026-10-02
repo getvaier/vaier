@@ -3942,11 +3942,11 @@ must not fetch `claude-sign-in` at all and must not carry a state map of its own
 
 ### 7.5 First-time setup
 
-1. User creates **one DNS record** at their own DNS host: `*.<domain>  A  <this server's public IP>` (§6.4)
-2. User runs `install.sh`, which fetches the runtime files and scaffolds `.env` with every auto-generated secret already filled in (§6.35), then fills in the operator-authored half: `VAIER_DOMAIN`, `ACME_EMAIL`, the Google OAuth credentials (`VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET`), `VAIER_ADMIN_EMAIL`, and `VAIER_PUBLIC_HOST` / `VAIER_PUBLIC_IP` when not on EC2
-3. `docker compose up -d` — oauth2-proxy(+init) start unconditionally as the auth gateway (no `social` profile)
-4. Vaier verifies the wildcard record, states the **wildcard DNS report**, and seeds the **configured administrator** (`VAIER_ADMIN_EMAIL`) as the first admin access entry
-5. User opens `https://vaier.<domain>`, signs in with Google as that admin, and lands in the console
+1. User runs `install.sh` at a terminal (`curl … | bash` works). It fetches the runtime files, scaffolds `.env` with every auto-generated secret already filled in (§6.35), and asks three questions: the domain, the email (`ACME_EMAIL`, which also names the first-run account) and the time zone (§6.67)
+2. It reports whether `vaier.<domain>` already reaches this server, or prints the **one DNS record** to create at the operator's DNS host: `*.<domain>  A  <this server's public IP>` (§6.4)
+3. It offers to install Docker if missing, then to start the stack (`docker compose pull` + `up -d`)
+4. Vaier verifies the wildcard record and states the **wildcard DNS report**; with no sign-in provider configured, `dex-init` opens the first-run door and the installer prints the first-run sign-in from the boot log
+5. User opens `https://vaier.<domain>`, signs in with the first-run password, becomes the admin, and adds Google or GitHub later under **Settings → Sign-in**
 
 ## 8. Technical Constraints
 
@@ -4461,4 +4461,19 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 
 **Explorer.** **Add a machine → A peer → A server** goes straight to the name and the Ubuntu handoff (the OS step is gone). **A personal device** opens **Add a personal device**: open this Vaier's address on the device and install the Vaier app from the launchpad's card (Download on Windows), join to get a four-digit code, and approve it under **Waiting to join**. The WireGuard-app and QR handoffs are gone, and the danger fold of a personal device offers only Remove, with a hint to rejoin from the app.
 
-**Open drift.** The remove confirmation for a machine whose browser comes through its own tunnel still says to turn the tunnel off "in the WireGuard app"; that now fits only a legacy personal peer. The in-app Concepts page (`OperatorGlossary`) still describes Reissue and Regenerate without saying they do not apply to a personal device.
+**Follow-up ✅ (768e177).** The remove confirmation now says to stop the machine's tunnel rather than "turn it off in the WireGuard app", and the in-app Concepts page says Reissue, Regenerate and Out-of-date config apply to servers only.
+
+### 6.67 One-command interactive installer ✅ (implemented 2026-10-02, closes [#304](https://github.com/getvaier/vaier/issues/304))
+
+**Why.** A fresh install was five steps of copy-paste: install Docker, add yourself to the `docker` group and log back in, run `install.sh`, hand-edit `.env`, start the stack, then dig the first-run password out of the log. `install.sh` already did the groundwork; nothing in it knew a person was there.
+
+**What.** `install.sh` decides it is **interactive** when stdout is a terminal and `/dev/tty` opens — true under `curl … | bash`, where stdin is the script itself, so every answer is read from `/dev/tty`. Then:
+- **Fresh install only** (`VAIER_DOMAIN` empty or still the placeholder `yourdomain.com`): three questions — domain, email, time zone (default the server's own from `timedatectl` or `/etc/timezone`, validated against `/usr/share/zoneinfo`) — written to `VAIER_DOMAIN`, `ACME_EMAIL` and `VAIER_TZ` in `.env`. The rewrite goes through `cat` into the existing file so `.env` keeps mode `600`.
+- **DNS verdict.** The public IP comes from `checkip.amazonaws.com`, `vaier.<domain>` from `getent`. A match is reported; anything else prints the exact `*.<domain> A <ip>` record and says starting now is fine, since Vaier waits for DNS before Let's Encrypt. The installer writes no DNS (§6.4).
+- **Docker.** Missing → offers Docker's official `get.docker.com` script.
+- **Start.** Offers `docker compose pull` + `up -d`, through `sudo` when `docker info` fails for the user (so the `docker` group and re-login are no longer a prerequisite). It polls `docker compose logs vaier` for up to ~4 minutes and prints the first-run block's `Open` / `Sign in` / `Email` / `Password` lines; when Vaier has started but no first-run block appears (a provider is already configured) it prints the console URL.
+- **Re-run** of an existing install asks nothing and offers **Bring Vaier up to date now?** (pull + up).
+
+**Deliberately not asked: OAuth and SMTP.** Sign-in providers and mail stay in the console (**Settings → Sign-in**, **Settings** mail); the first-run door (§6.17 / [#264](https://github.com/getvaier/vaier/issues/264)) means no provider is needed to reach it.
+
+**Non-interactive is unchanged.** With no terminal (piped to a log, CI) or `VAIER_NONINTERACTIVE=1`, it fetches and scaffolds and prints the next steps, now filled with the real domain once `.env` has one. `SelfUpdateScript` runs the target release's installer with `VAIER_NONINTERACTIVE=1` (§6.61), so a self-update can never stop at a prompt even if it ever ran with a terminal.

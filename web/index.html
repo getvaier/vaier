@@ -667,7 +667,7 @@
     <section id="quickstart">
         <div class="section-heading">
             <span class="crumb">// quick start</span>
-            <h2>From bare server to first HTTPS service in five steps.</h2>
+            <h2>From bare server to first HTTPS service in one command.</h2>
         </div>
         <div class="steps">
             <div class="step">
@@ -680,39 +680,25 @@
             <div class="step">
                 <div class="step-num">02</div>
                 <div class="step-body">
-                    <h3>Install Docker</h3>
-<pre class="code"><span class="comment"># run as your regular user, not root</span>
-<span class="cmd">curl</span> -fsSL https://get.docker.com | sh
-<span class="cmd">sudo</span> usermod -aG docker $USER   <span class="comment"># then log out and back in</span></pre>
-                </div>
-            </div>
-            <div class="step">
-                <div class="step-num">03</div>
-                <div class="step-body">
-                    <h3>Rig the machine</h3>
-                    <p>One script fetches the runtime files Vaier needs — the compose file and the assets it bind-mounts — and scaffolds a <code>.env</code> with three secrets already generated for you. No git clone.</p>
+                    <h3>Run the installer</h3>
+                    <p>Three questions — domain, email, time zone — and that's the lot. No git clone, no hand-edited <code>.env</code>, no OAuth app. No Docker yet? It offers to install it.</p>
 <pre class="code"><span class="cmd">mkdir</span> -p vaier &amp;&amp; <span class="cmd">cd</span> vaier
 <span class="cmd">curl</span> -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/install.sh | <span class="cmd">bash</span></pre>
                 </div>
             </div>
             <div class="step">
-                <div class="step-num">04</div>
+                <div class="step-num">03</div>
                 <div class="step-body">
-                    <h3>Point DNS, then fill in two values</h3>
-                    <p>Make one wildcard record, before first boot, at whatever DNS host your domain lives on — it covers the console, sign-in, and every service you'll ever publish:</p>
+                    <h3>Make the one DNS record it gives you</h3>
+                    <p>The installer checks whether your domain already reaches the server. If not, it prints the single wildcard record to make, IP filled in — it covers the console, sign-in, and every service you'll ever publish. Start anyway: Vaier waits for it before asking Let's Encrypt.</p>
 <pre class="code"><span class="comment"># *.yourdomain.com   A   &lt;this server's public IP&gt;</span></pre>
-                    <p>Then open the <code>.env</code> that step 3 created and set two things. That's the lot — no OAuth app yet. Don't recreate the file; it already holds three secrets <code>install.sh</code> generated for you.</p>
-<pre class="code"><span class="var">VAIER_DOMAIN</span>=<span class="str">yourdomain.com</span>
-<span class="var">ACME_EMAIL</span>=<span class="str">you@yourdomain.com</span></pre>
                 </div>
             </div>
             <div class="step">
-                <div class="step-num">05</div>
+                <div class="step-num">04</div>
                 <div class="step-body">
-                    <h3>Start the stack and sign in</h3>
-                    <p>Bring everything up, then read the <strong>first-run password</strong> from the bordered block at the bottom of Vaier's own log. Open <code>https://vaier.yourdomain.com</code>, press <strong>Sign in with the first-run password</strong>, and you're in — that first sign-in becomes the admin. When you want to invite others, register a Google or GitHub OAuth client and paste its id and secret under <strong>Settings → Sign-in</strong> (or into <code>.env</code>); the first-run door closes once you sign in with it. Anyone who signs in after you lands as a <strong>pending</strong> request until you approve them on the Users page.</p>
-<pre class="code"><span class="cmd">docker</span> compose up -d
-<span class="cmd">docker</span> compose logs vaier   <span class="comment"># the first-run password is at the bottom</span></pre>
+                    <h3>Say yes, and sign in</h3>
+                    <p>Let the installer start Vaier. It waits for the boot and prints your <strong>first-run sign-in</strong> — URL, email, password. Press <strong>Sign in with the first-run password</strong> and you're in — that first sign-in becomes the admin. Google or GitHub sign-in and mail come later, under <strong>Settings</strong>, whenever you want to invite others; anyone who signs in after you waits as <strong>pending</strong> until you approve them. Updating later? Run the same command again.</p>
                 </div>
             </div>
         </div>

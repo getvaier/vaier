@@ -149,7 +149,7 @@ public final class SelfUpdateScript {
         sb.append("if [ -n \"$REVISION\" ]; then\n");
         sb.append("    if curl -fsSL \"https://raw.githubusercontent.com/").append(SOURCE_REPOSITORY)
             .append("/$REVISION/install.sh\" -o \"$INSTALLER\" "
-                + "&& VAIER_REF=\"$REVISION\" bash \"$INSTALLER\" >> \"$LOG\" 2>&1; then\n");
+                + "&& VAIER_REF=\"$REVISION\" VAIER_NONINTERACTIVE=1 bash \"$INSTALLER\" >> \"$LOG\" 2>&1; then\n");
         sb.append("        STACK=\"stack@$REVISION\"\n");
         sb.append("    else\n");
         sb.append("        put_back\n");

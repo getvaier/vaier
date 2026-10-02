@@ -64,7 +64,7 @@ Every published service resolves to the single Vaier server through your one `*.
 ## Prerequisites
 
 - A Linux server with a public IP (EC2 t3.small or similar)
-- Docker and Docker Compose v2.23+ (the compose file embeds an inline `configs:` entry, which requires Compose v2.23 or newer — December 2023). The `curl get.docker.com | sh` step below installs current.
+- Docker and Docker Compose v2.23+ (the compose file embeds an inline `configs:` entry, which requires Compose v2.23 or newer — December 2023). The installer offers to install current Docker if it is missing.
 - A domain name you control, hosted anywhere that can serve a wildcard `A` record
 
 ### Server ports to open
@@ -80,48 +80,32 @@ Every published service resolves to the single Vaier server through your one `*.
 
 ## Quick start
 
-### 1. Install Docker and rig the machine
+### 1. Run the installer
 
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # then log out and back in
-```
-
-Confirm with `docker ps` (no `sudo`). Then fetch the runtime files Vaier needs (the compose file, and the assets it bind-mounts) and scaffold a `.env` — **no git clone**:
+On the server, in the folder Vaier should live in — **no git clone**:
 
 ```bash
 mkdir -p vaier && cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/install.sh | bash
 ```
 
+It asks three things — your domain, your email and your time zone — and offers to install Docker if it is missing. Sign-in providers and mail are set later, in the console's **Settings**. More in [`docs/ADVANCED.md`](docs/ADVANCED.md#the-installer).
+
 ### 2. Point your domain at it
 
-Make one DNS record, before first boot, at whatever DNS host your domain lives on:
+The installer checks whether `vaier.yourdomain.com` already reaches this server. If not, it prints the one record to make, with this server's public IP filled in:
 
 | Record | Type | Value |
 |--------|------|-------|
 | `*.yourdomain.com` | A | the public IP of this server |
 
-That single wildcard covers the console, the sign-in hosts, and every service you publish from now on — nothing to add, ever, when you publish a service. Vaier checks it for you at every boot and reports the verdict in the boot log and in **Settings**. Caveats and the full mechanics are in [`docs/NETWORKING.md`](docs/NETWORKING.md#wildcard-dns).
+That single wildcard covers the console, the sign-in hosts, and every service you publish from now on. You can start Vaier before it resolves: Vaier waits for it before asking Let's Encrypt. Caveats are in [`docs/NETWORKING.md`](docs/NETWORKING.md#wildcard-dns).
 
-### 3. Configure `.env`
+### 3. Start Vaier and sign in
 
-Step 1 already created `.env` with three secrets generated for you. Open it and fill in your own values — **don't recreate the file**, or you'll wipe those secrets:
+Say yes when the installer offers to start Vaier. It waits for the boot and prints your **first-run sign-in**: the console URL, the email and the password. Open the URL, press **Sign in with the first-run password**, and that first sign-in becomes the admin. Anyone who signs in later lands as **pending** until you approve them on the **Users** page. More in [`docs/AUTH.md`](docs/AUTH.md).
 
-```ini
-VAIER_DOMAIN=yourdomain.com
-ACME_EMAIL=you@yourdomain.com
-```
-
-Those two are all Vaier needs before the first `docker compose up -d`. A sign-in provider — Google and/or GitHub — is optional and can come later, from **Settings → Sign-in** in the console, whenever you want to invite anyone else; the registration walkthrough is in [`docs/AUTH.md`](docs/AUTH.md). `VAIER_ADMIN_EMAIL` is optional too: set it and the first-run account uses that address instead of `admin@yourdomain.com`.
-
-### 4. Start the stack and sign in
-
-```bash
-docker compose up -d
-```
-
-Once `docker compose ps` shows every service `Up`, run `docker compose logs vaier` and read the **first-run password** from the bordered block at the bottom: it gives the console URL, the email and the password. Open `https://vaier.yourdomain.com`, press **Sign in with the first-run password**, and sign in — that first sign-in becomes the admin. Anyone who signs in after that lands as **pending** until you approve them on the **Users** page. What the first-run door is, and how configuring a provider closes it, is in [`docs/AUTH.md`](docs/AUTH.md).
+No terminal (piped to a log, CI)? The installer then only fetches files and writes `.env`: set `VAIER_DOMAIN` and `ACME_EMAIL` in it, run `docker compose up -d`, and read the password at the bottom of `docker compose logs vaier`.
 
 From here: add your machines and publish their services from the **Explorer** — see [`docs/NETWORKING.md`](docs/NETWORKING.md). Want to ask Vaier about your fleet instead of clicking through it? Paste your own Anthropic API key under **Settings** and the **Chat** pane appears in the **Vaier** menu — see [`docs/CHAT.md`](docs/CHAT.md). For optional environment variables, secret-file hardening, and other advanced topics, see [`docs/ADVANCED.md`](docs/ADVANCED.md).
 
@@ -129,15 +113,14 @@ From here: add your machines and publish their services from the **Explorer** �
 
 ## Updating an existing install
 
-Re-run the same installer in your install directory, then bring the stack up:
+Re-run the same installer in your install directory:
 
 ```bash
 cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/install.sh | bash
-docker compose up -d
 ```
 
-It is safe to re-run: it refreshes the compose file and the assets the stack bind-mounts, leaves your `.env` untouched, and adds any secret a newer release generates but your `.env` predates. There is no DNS record to add and nothing to edit.
+It asks nothing this time, and offers to bring Vaier up to date (without a terminal, follow it with `docker compose up -d`). It refreshes the compose file and the assets the stack bind-mounts, leaves your `.env` values untouched, and adds any secret a newer release generates but your `.env` predates.
 
 Or press **Settings → Update Vaier**, which does the same and rolls it all back if the new Vaier doesn't answer. See [Monitoring](docs/MONITORING.md#updating-vaier-itself).
 
