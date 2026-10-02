@@ -17,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiConsumer;
@@ -692,6 +693,20 @@ class WireguardConfigFileAdapterTest {
     }
 
     @Test
+    void updateSwitchedOffSince_writesTheMarkIntoMetadata_andClearsIt() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6", "{\"peerType\":\"UBUNTU_SERVER\"}");
+        Instant since = Instant.parse("2026-09-14T08:00:00Z");
+
+        adapter.updateSwitchedOffSince("apalveien5", since);
+        assertThat(adapter.getPeerConfigByName("apalveien5").orElseThrow().switchedOffSince()).isEqualTo(since);
+
+        adapter.updateSwitchedOffSince("apalveien5", null);
+        assertThat(adapter.getPeerConfigByName("apalveien5").orElseThrow().switchedOffSince()).isNull();
+        assertThat(Files.readString(configDir.resolve("apalveien5").resolve("apalveien5.conf")))
+            .doesNotContain("switchedOffSince");
+    }
+
+    @Test
     void getPeerConfig_legacyWithoutSshAccess_readsNullOverride_andUsesDefault() throws IOException {
         // A pre-#307 config has no sshAccess key: override is null, effective = smart default (server → on).
         createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
@@ -770,14 +785,16 @@ class WireguardConfigFileAdapterTest {
         for (Mutation mutation : mutations) {
             Files.deleteIfExists(configDir.resolve("phone").resolve("phone.conf"));
             createPeerConfWithVaierMetadata("phone", "10.13.13.7",
-                "{\"peerType\":\"MOBILE_CLIENT\",\"publicKey\":\"" + DEVICE_KEY + "\"}");
+                "{\"peerType\":\"MOBILE_CLIENT\",\"publicKey\":\"" + DEVICE_KEY + "\",\"switchedOffSince\":1790000000}");
 
             mutation.action().run();
 
-            assertThat(adapter.getPeerConfigByName("phone")).get()
-                .extracting(PeerConfiguration::publicKey)
-                .as("%s must not erase the device-held key", mutation.label())
+            PeerConfiguration after = adapter.getPeerConfigByName("phone").orElseThrow();
+            assertThat(after.publicKey()).as("%s must not erase the device-held key", mutation.label())
                 .isEqualTo(DEVICE_KEY);
+            // Nor turn monitoring back on for a machine switched off on purpose.
+            assertThat(after.switchedOffSince()).as("%s must not erase the switched-off mark", mutation.label())
+                .isEqualTo(Instant.ofEpochSecond(1790000000L));
         }
     }
 

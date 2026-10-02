@@ -240,12 +240,14 @@ public record FleetNudge(Kind kind, String title, String evidence, String action
 
     /**
      * The backup rows — what went wrong with each enabled job's last run, and the fix Vaier has for it.
-     * A run that kept everything, or merely grumbled, says nothing; neither does a machine that is down.
+     * A run that kept everything, or merely grumbled, says nothing; neither does a machine that is down or
+     * switched off on purpose.
      */
     public static List<FleetNudge> backups(FleetSignals s) {
         List<FleetNudge> rows = new ArrayList<>();
         for (Machine m : byName(s.machines())) {
-            if (m.isDown(s.lanReachability())) continue;
+            // Down already says it; switched off on purpose is not expected to back up at all.
+            if (m.isDown(s.lanReachability()) || m.isSwitchedOffOnPurpose()) continue;
             Optional<BackupJob> job = jobOf(m, s).filter(BackupJob::enabled);
             Optional<BackupRun> run = lastRun(m, s);
             if (job.isEmpty() || run.isEmpty()) continue;

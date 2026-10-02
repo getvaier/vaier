@@ -1,21 +1,29 @@
 package net.vaier.rest;
 
+import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import net.vaier.application.NoticeMachinesBackOnUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.ResolveVpnPeerIdUseCase;
+import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.Machine;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,6 +35,8 @@ class PeerConnectivityWatcherTest {
     ResolveVpnPeerIdUseCase peerIdResolver;
     GetPeerConfigUseCase peerConfigs;
     NotifyAdminsOfPeerTransitionUseCase notifier;
+    GetMachinesUseCase machines;
+    NoticeMachinesBackOnUseCase backOn;
     PeerConnectivityWatcher watcher;
 
     @BeforeEach
@@ -35,7 +45,9 @@ class PeerConnectivityWatcherTest {
         peerIdResolver = mock(ResolveVpnPeerIdUseCase.class);
         peerConfigs = mock(GetPeerConfigUseCase.class);
         notifier = mock(NotifyAdminsOfPeerTransitionUseCase.class);
-        watcher = new PeerConnectivityWatcher(vpnClients, peerIdResolver, peerConfigs, notifier);
+        machines = mock(GetMachinesUseCase.class);
+        backOn = mock(NoticeMachinesBackOnUseCase.class);
+        watcher = new PeerConnectivityWatcher(vpnClients, peerIdResolver, peerConfigs, notifier, machines, backOn);
     }
 
     private VpnClient client(String allowedIps, String latestHandshake) {
@@ -120,5 +132,27 @@ class PeerConnectivityWatcherTest {
 
         org.assertj.core.api.Assertions.assertThatCode(() -> watcher.checkConnectivity())
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void aServerSwitchedOffOnPurpose_isNeverMailed_andEachTickEndsByAskingWhoIsBackOn() {
+        when(peerIdResolver.resolvePeerIdByIp("10.0.0.2")).thenReturn("server-a");
+        when(peerConfigs.getPeerConfigByIp("10.0.0.2"))
+                .thenReturn(Optional.of(configResult("server-a", "10.0.0.2", MachineType.UBUNTU_SERVER)));
+        Machine off = Machine.builder().id(MachineId.generate()).name("server-a").type(MachineType.UBUNTU_SERVER)
+            .publicKey("pk-10.0.0.2/32").allowedIps("10.0.0.2/32").latestHandshake("0")
+            .deviceCategory(DeviceCategory.SERVER).switchedOffSince(Instant.EPOCH).build();
+        when(machines.getAllMachines()).thenReturn(List.of(off));
+
+        when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.2/32", "0")));
+        watcher.checkConnectivity();
+        // It handshakes again: the comeback is judged while the mark still stands, and is not news.
+        when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.2/32", recent())));
+        watcher.checkConnectivity();
+
+        verify(notifier, never()).notifyAdmins(any());
+        InOrder order = inOrder(vpnClients, backOn);
+        order.verify(vpnClients).getClients();
+        order.verify(backOn).noticeMachinesBackOn();
     }
 }

@@ -102,4 +102,18 @@ class BackupServerHealthTrackerTest {
         assertThat(tracker.update("nas-borg", false))
             .isEqualTo(BackupServerHealthTracker.Transition.NONE);
     }
+
+    @Test
+    void aDownNobodyWasToldAbout_comesBackQuietlyToo() {
+        // Switched off on purpose: the watcher keeps the going-down to itself, so the coming back is not news.
+        BackupServerHealthTracker tracker = new BackupServerHealthTracker();
+        tracker.update("nas-borg", false);
+        assertThat(tracker.update("nas-borg", false)).isEqualTo(BackupServerHealthTracker.Transition.CROSSED_TO_DOWN);
+        tracker.wentDownQuietly("nas-borg");
+
+        assertThat(tracker.update("nas-borg", true)).isEqualTo(BackupServerHealthTracker.Transition.NONE);
+        // …and the next real outage is news again.
+        tracker.update("nas-borg", false);
+        assertThat(tracker.update("nas-borg", false)).isEqualTo(BackupServerHealthTracker.Transition.CROSSED_TO_DOWN);
+    }
 }

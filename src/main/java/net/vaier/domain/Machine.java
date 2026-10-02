@@ -1,7 +1,9 @@
 package net.vaier.domain;
 
+import lombok.Builder;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
@@ -11,8 +13,10 @@ import java.util.Optional;
  * (the four {@link MachineType#isVpnPeer() VPN-backed} types) and {@link MachineType#LAN_SERVER}
  * entries that sit on a relay's LAN. WG-only fields ({@code publicKey}, {@code allowedIps},
  * runtime state) are null for {@code LAN_SERVER}; {@code dockerPort} is non-null only for
- * LAN servers with {@code runsDocker=true}.
+ * LAN servers with {@code runsDocker=true}. {@code switchedOffSince} is when the operator said the machine is
+ * switched off on purpose, or null.
  */
+@Builder(toBuilder = true)
 public record Machine(
     MachineId id,
     String name,
@@ -30,8 +34,19 @@ public record Machine(
     Integer dockerPort,
     DeviceCategory deviceCategory,
     Boolean sshAccessOverride,
-    long goodbyeEpoch
+    long goodbyeEpoch,
+    Instant switchedOffSince
 ) {
+
+    /** A machine nobody has said is switched off. */
+    public Machine(MachineId id, String name, MachineType type, String publicKey, String allowedIps,
+                   String endpointIp, String endpointPort, String latestHandshake, String transferRx,
+                   String transferTx, String lanCidr, String lanAddress, boolean runsDocker, Integer dockerPort,
+                   DeviceCategory deviceCategory, Boolean sshAccessOverride, long goodbyeEpoch) {
+        this(id, name, type, publicKey, allowedIps, endpointIp, endpointPort, latestHandshake, transferRx,
+            transferTx, lanCidr, lanAddress, runsDocker, dockerPort, deviceCategory, sshAccessOverride, goodbyeEpoch,
+            null);
+    }
 
     /** A machine whose app has not said goodbye — every machine but a peer read from a live tunnel. */
     public Machine(MachineId id, String name, MachineType type, String publicKey, String allowedIps,
@@ -106,25 +121,25 @@ public record Machine(
      * runtime, or null when the peer has no current session — every runtime field is then null.
      */
     public static Machine fromPeer(PeerConfiguration peer, VpnClient client) {
-        return new Machine(
-            peer.machineId(),
-            peer.name(),
-            peer.peerType(),
-            client == null ? null : client.publicKey(),
-            client == null ? null : client.allowedIps(),
-            client == null ? null : client.endpointIp(),
-            client == null ? null : client.endpointPort(),
-            client == null ? null : client.latestHandshake(),
-            client == null ? null : client.transferRx(),
-            client == null ? null : client.transferTx(),
-            peer.lanCidr(),
-            peer.lanAddress(),
-            peer.peerType().isServerType(),
-            null,
-            peer.effectiveDeviceCategory(),
-            peer.sshAccess(),
-            client == null ? 0L : client.goodbyeEpoch()
-        );
+        return Machine.builder()
+            .id(peer.machineId())
+            .name(peer.name())
+            .type(peer.peerType())
+            .publicKey(client == null ? null : client.publicKey())
+            .allowedIps(client == null ? null : client.allowedIps())
+            .endpointIp(client == null ? null : client.endpointIp())
+            .endpointPort(client == null ? null : client.endpointPort())
+            .latestHandshake(client == null ? null : client.latestHandshake())
+            .transferRx(client == null ? null : client.transferRx())
+            .transferTx(client == null ? null : client.transferTx())
+            .lanCidr(peer.lanCidr())
+            .lanAddress(peer.lanAddress())
+            .runsDocker(peer.peerType().isServerType())
+            .deviceCategory(peer.effectiveDeviceCategory())
+            .sshAccessOverride(peer.sshAccess())
+            .goodbyeEpoch(client == null ? 0L : client.goodbyeEpoch())
+            .switchedOffSince(peer.switchedOffSince())
+            .build();
     }
 
     /**
@@ -132,18 +147,18 @@ public record Machine(
      * relay peer (or Vaier server) that routes to it, or null when no anchor covers it.
      */
     public static Machine fromLanServer(LanServer server, String anchorLanCidr) {
-        return new Machine(
-            server.machineId(),
-            server.name(),
-            MachineType.LAN_SERVER,
-            null, null, null, null, null, null, null,
-            anchorLanCidr,
-            server.lanAddress(),
-            server.runsDocker(),
-            server.dockerPort(),
-            server.effectiveDeviceCategory(),
-            server.sshAccessOverride()
-        );
+        return Machine.builder()
+            .id(server.machineId())
+            .name(server.name())
+            .type(MachineType.LAN_SERVER)
+            .lanCidr(anchorLanCidr)
+            .lanAddress(server.lanAddress())
+            .runsDocker(server.runsDocker())
+            .dockerPort(server.dockerPort())
+            .deviceCategory(server.effectiveDeviceCategory())
+            .sshAccessOverride(server.sshAccessOverride())
+            .switchedOffSince(server.switchedOffSince())
+            .build();
     }
 
     /**
@@ -186,15 +201,43 @@ public record Machine(
 
     /**
      * Whether this machine should be answering and is not — a server, never a personal device that is
-     * simply away. A LAN server nobody has probed yet is {@link Reachability#UNKNOWN}, which is not a verdict.
+     * simply away, and never one switched off on purpose. A LAN server nobody has probed yet is
+     * {@link Reachability#UNKNOWN}, which is not a verdict.
      */
     public boolean isDown(Map<String, Reachability> lanReachability) {
+        if (isSwitchedOffOnPurpose()) {
+            return false;   // it is not supposed to answer
+        }
         if (type == MachineType.LAN_SERVER) {
             return lanReachability != null && lanReachability.get(lanAddress) == Reachability.DOWN;
         }
         return type != null && type.isServerType() && !isReachable(lanReachability);
     }
 
+
+    /** Whether the operator said this machine is switched off on purpose. */
+    public boolean isSwitchedOffOnPurpose() {
+        return switchedOffSince != null;
+    }
+
+    /** A machine switched off on purpose that Vaier reaches again: the mark has done its job and goes. */
+    public boolean isBackOn(Map<String, Reachability> lanReachability) {
+        return isSwitchedOffOnPurpose() && isReachable(lanReachability);
+    }
+
+    /**
+     * This machine, said to be switched off on purpose at {@code now}. Only a server can be: a phone or a
+     * laptop is never down, only away, and the Vaier server is the one machine serving the page that says so.
+     */
+    public Machine switchedOffAt(Instant now, MachineId vaierServer) {
+        if (type == null || !type.isServerType()) {
+            throw new IllegalArgumentException(name + " is a personal device; it is away, never down");
+        }
+        if (id != null && id.isSameAs(vaierServer)) {
+            throw new IllegalArgumentException("The Vaier server is the machine serving this page; it is not off");
+        }
+        return toBuilder().switchedOffSince(now).build();
+    }
 
     /**
      * Whether Vaier can open a shell on this machine — and therefore whether anything that needs one can

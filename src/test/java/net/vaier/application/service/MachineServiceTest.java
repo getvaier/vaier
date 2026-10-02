@@ -25,7 +25,9 @@ import net.vaier.domain.SshTarget;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.Reachability;
 import net.vaier.domain.port.ForCachingMachineNetworks;
+import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -54,7 +56,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
@@ -67,6 +71,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -103,6 +108,7 @@ class MachineServiceTest {
     @Mock ForPublishingEvents forPublishingEvents;
     @Mock ForRunningInBackground forRunningInBackground;
     @Mock ForSendingAdminNotification forSendingAdminNotification;
+    @Mock ForCheckingLanReachability forCheckingLanReachability;
 
     MachineService service;
 
@@ -119,7 +125,7 @@ class MachineServiceTest {
             forTrackingHostKeys, forPersistingDiskWatches,
             forResolvingVaierServerIdentity, forReadingMachineNetworks, forCachingMachineNetworks,
             forHoldingMachineDiskStandings, forHoldingClaudeSignInStandings, forPublishingEvents,
-            forRunningInBackground, forSendingAdminNotification, configResolver);
+            forRunningInBackground, forSendingAdminNotification, forCheckingLanReachability, configResolver);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -366,6 +372,83 @@ class MachineServiceTest {
         org.mockito.Mockito.verifyNoInteractions(forUpdatingPeerConfigurations);
         org.mockito.Mockito.verify(forPersistingLanServers, org.mockito.Mockito.never())
             .save(org.mockito.ArgumentMatchers.any());
+    }
+
+    // --- switched off on purpose ----------------------------------------------------------------------
+
+    @Test
+    void markSwitchedOff_storesTheInstantWhereTheMachineLives_andTellsTheOpenBrowsers() {
+        lenient().when(forResolvingVaierServerIdentity.identity()).thenReturn(mid(LanAnchor.VAIER_SERVER_NAME));
+        LanServer roon = new LanServer("Roon", "192.168.3.118", false, null, null, null, null, mid("Roon"));
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(roon));
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("relay-id", "Relay", "10.13.13.2", "", MachineType.UBUNTU_SERVER,
+                null, null, null, null, null, mid("Relay"), null)));
+        Instant before = Instant.now();
+
+        service.markSwitchedOff(mid("Roon"));
+        service.markSwitchedOff(mid("Relay"));
+
+        ArgumentCaptor<LanServer> saved = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(saved.capture());
+        assertThat(saved.getValue().machineId()).isEqualTo(mid("Roon"));
+        assertThat(saved.getValue().switchedOffSince()).isBetween(before, Instant.now());
+        ArgumentCaptor<Instant> since = ArgumentCaptor.forClass(Instant.class);
+        verify(forUpdatingPeerConfigurations).updateSwitchedOffSince(eq("relay-id"), since.capture());
+        assertThat(since.getValue()).isBetween(before, Instant.now());
+        verify(forPublishingEvents, times(2)).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void markSwitchedOff_refusesAPersonalDevice_andTheVaierServer() {
+        when(forResolvingVaierServerIdentity.identity()).thenReturn(mid(LanAnchor.VAIER_SERVER_NAME));
+        lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
+        lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("ruten", "Ruten", "10.13.13.9", "", MachineType.MOBILE_CLIENT,
+                null, null, null, null, null, mid("Ruten"), null)));
+
+        for (MachineId refused : List.of(mid("Ruten"), mid(LanAnchor.VAIER_SERVER_NAME))) {
+            assertThatThrownBy(() -> service.markSwitchedOff(refused)).as(refused.value())
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        verify(forUpdatingPeerConfigurations, never()).updateSwitchedOffSince(any(), any());
+        verify(forPersistingLanServers, never()).save(any());
+    }
+
+    @Test
+    void markBackOn_clearsTheMarkWhereverItIsStored() {
+        lenient().when(forResolvingVaierServerIdentity.identity()).thenReturn(mid(LanAnchor.VAIER_SERVER_NAME));
+        LanServer roon = new LanServer("Roon", "192.168.3.118", false, null, null, null, null, mid("Roon"))
+            .withSwitchedOffSince(Instant.EPOCH);
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(roon));
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("relay-id", "Relay", "10.13.13.2", "", MachineType.UBUNTU_SERVER,
+                null, null, null, null, null, mid("Relay"), null, Instant.EPOCH)));
+
+        service.markBackOn(mid("Roon"));
+        service.markBackOn(mid("Relay"));
+
+        verify(forPersistingLanServers).save(roon.withSwitchedOffSince(null));
+        verify(forUpdatingPeerConfigurations).updateSwitchedOffSince("relay-id", null);
+    }
+
+    @Test
+    void noticeMachinesBackOn_clearsOnlyMarkedMachinesVaierReachesAgain() {
+        lenient().when(forResolvingVaierServerIdentity.identity()).thenReturn(mid(LanAnchor.VAIER_SERVER_NAME));
+        LanServer answering = new LanServer("Roon", "192.168.3.118", false, null, null, null, null, mid("Roon"))
+            .withSwitchedOffSince(Instant.EPOCH);
+        LanServer stillOff = new LanServer("Roon kjøkken", "192.168.3.126", false, null, null, null, null,
+            mid("Roon kjøkken")).withSwitchedOffSince(Instant.EPOCH);
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
+            new LanServerView(answering, "relay"), new LanServerView(stillOff, "relay")));
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(answering, stillOff));
+        when(forCheckingLanReachability.snapshot()).thenReturn(Map.of(
+            "192.168.3.118", Reachability.OK, "192.168.3.126", Reachability.DOWN));
+
+        service.noticeMachinesBackOn();
+
+        verify(forPersistingLanServers).save(answering.withSwitchedOffSince(null));
+        verify(forPersistingLanServers, never()).save(stillOff.withSwitchedOffSince(null));
     }
 
     // --- a machine's filesystems (#323 slice C, fixed by #325) ---------------------------------------

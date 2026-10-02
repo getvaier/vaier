@@ -12,6 +12,9 @@ import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
+import net.vaier.application.MarkBackOnUseCase;
+import net.vaier.application.MarkSwitchedOffUseCase;
+import net.vaier.application.NoticeMachinesBackOnUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.config.ConfigResolver;
@@ -26,6 +29,7 @@ import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.Reachability;
 import net.vaier.domain.ReadOnlyCommand;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.NotFoundException;
@@ -35,6 +39,7 @@ import net.vaier.domain.SshTarget;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCachingMachineNetworks;
+import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -57,6 +62,7 @@ import net.vaier.domain.port.ForTrackingHostKeys;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +70,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -72,7 +79,12 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     SetMachineSshAccessUseCase, GetMachineDiskUsageUseCase, GetMachineDiskStandingsUseCase,
     GetClaudeSignInStandingsUseCase, GetDiskWatchesUseCase, SetDiskWatchUseCase,
     DetectMachineNetworksUseCase, GetMachineNetworksUseCase, ForgetMachineNetworksUseCase,
-    RunReadOnlyCommandUseCase, UpgradeOsUseCase {
+    RunReadOnlyCommandUseCase, UpgradeOsUseCase, MarkSwitchedOffUseCase, MarkBackOnUseCase,
+    NoticeMachinesBackOnUseCase {
+
+    /** The stream the fleet page already listens on; peers-updated makes it re-read the machines. */
+    private static final String PEERS_TOPIC = "vpn-peers";
+    private static final String PEERS_UPDATED = "peers-updated";
 
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingVpnClients forGettingVpnClients;
@@ -93,6 +105,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     private final ForPublishingEvents forPublishingEvents;
     private final ForRunningInBackground forRunningInBackground;
     private final ForSendingAdminNotification forSendingAdminNotification;
+    private final ForCheckingLanReachability forCheckingLanReachability;
     private final ConfigResolver configResolver;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
@@ -114,6 +127,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                           ForPublishingEvents forPublishingEvents,
                           ForRunningInBackground forRunningInBackground,
                           ForSendingAdminNotification forSendingAdminNotification,
+                          ForCheckingLanReachability forCheckingLanReachability,
                           ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -134,6 +148,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         this.forPublishingEvents = forPublishingEvents;
         this.forRunningInBackground = forRunningInBackground;
         this.forSendingAdminNotification = forSendingAdminNotification;
+        this.forCheckingLanReachability = forCheckingLanReachability;
         this.configResolver = configResolver;
     }
 
@@ -433,5 +448,54 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
             return enabled;
         }
         throw new NotFoundException("Machine not found: " + machineId);
+    }
+
+    // --- switched off on purpose ---------------------------------------------------------------------
+
+    @Override
+    public void markSwitchedOff(MachineId machineId) {
+        MachineId vaierServer = forResolvingVaierServerIdentity.identity();
+        Instant now = Instant.now();
+        if (machineId.isSameAs(vaierServer)) {
+            vaierServerMachine().switchedOffAt(now, vaierServer);   // the domain refuses it
+        }
+        storeSwitchedOff(machineId, target -> target.switchedOffAt(now, vaierServer).switchedOffSince());
+    }
+
+    @Override
+    public void markBackOn(MachineId machineId) {
+        storeSwitchedOff(machineId, target -> null);
+    }
+
+    @Override
+    public void noticeMachinesBackOn() {
+        Map<String, Reachability> lanReachability = forCheckingLanReachability.snapshot();
+        for (Machine machine : getAllMachines()) {
+            if (machine.isBackOn(lanReachability)) {
+                markBackOn(machine.id());
+                log.info("{} answers again; it is no longer switched off on purpose", machine.name());
+            }
+        }
+    }
+
+    /** Writes the mark (null clears it) where the machine already lives: its peer config or lan-servers.yml. */
+    private void storeSwitchedOff(MachineId machineId, Function<Machine, Instant> since) {
+        Optional<LanServer> lanServer = forPersistingLanServers.getAll().stream()
+            .filter(server -> machineId.isSameAs(server.machineId()))
+            .findFirst();
+        Optional<PeerConfiguration> peer = lanServer.isPresent() ? Optional.empty()
+            : forGettingPeerConfigurations.getAllPeerConfigs().stream()
+                .filter(p -> machineId.isSameAs(p.machineId()))
+                .findFirst();
+        if (lanServer.isPresent()) {
+            forPersistingLanServers.save(lanServer.get().withSwitchedOffSince(
+                since.apply(Machine.fromLanServer(lanServer.get(), null))));
+        } else if (peer.isPresent()) {
+            forUpdatingPeerConfigurations.updateSwitchedOffSince(peer.get().id(),
+                since.apply(Machine.fromPeer(peer.get(), null)));
+        } else {
+            throw new NotFoundException("Machine not found: " + machineId);
+        }
+        forPublishingEvents.publish(PEERS_TOPIC, PEERS_UPDATED, "");
     }
 }

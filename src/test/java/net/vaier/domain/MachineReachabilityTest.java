@@ -3,9 +3,12 @@ package net.vaier.domain;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MachineReachabilityTest {
 
@@ -64,5 +67,39 @@ class MachineReachabilityTest {
         assertThat(serverPeer.isDown(Map.of())).isTrue();
         assertThat(phone.isDown(Map.of())).isFalse();
         assertThat(Machine.vaierServer(MachineId.generate(), null).isDown(Map.of())).isFalse();
+        // Switched off on purpose: it is not supposed to answer, so its silence is not trouble.
+        assertThat(nas.toBuilder().switchedOffSince(Instant.EPOCH).build()
+            .isDown(Map.of("192.168.3.50", Reachability.DOWN))).isFalse();
+        assertThat(serverPeer.toBuilder().switchedOffSince(Instant.EPOCH).build().isDown(Map.of())).isFalse();
+    }
+
+    @Test
+    void isBackOn_onlyForAMachineSwitchedOffOnPurpose_thatVaierReachesAgain() {
+        Machine nas = new Machine(MachineId.generate(), "nas", MachineType.LAN_SERVER, null, null, null, null, null, null,
+            null, null, "192.168.3.50", true, 2375, DeviceCategory.NAS, null);
+        Machine off = nas.toBuilder().switchedOffSince(Instant.EPOCH).build();
+
+        assertThat(off.isSwitchedOffOnPurpose()).isTrue();
+        assertThat(off.isBackOn(Map.of("192.168.3.50", Reachability.OK))).isTrue();
+        assertThat(off.isBackOn(Map.of("192.168.3.50", Reachability.DOWN))).isFalse();
+        assertThat(off.isBackOn(Map.of())).as("not probed yet is not back").isFalse();
+        assertThat(nas.isBackOn(Map.of("192.168.3.50", Reachability.OK))).as("never marked").isFalse();
+    }
+
+    @Test
+    void onlyAServerOtherThanVaiersOwn_canBeSwitchedOffOnPurpose() {
+        // A phone or a laptop is never down — it is away — so there is nothing to say about it.
+        Machine phone = new Machine(MachineId.generate(), "phone", MachineType.MOBILE_CLIENT, "pk", "10.13.13.4/32",
+            null, null, null, null, null, null, null, false, null, DeviceCategory.PHONE, null);
+        MachineId vaierServerId = MachineId.generate();
+        Machine vaierServer = Machine.vaierServer(vaierServerId, null);
+        // Nor the Vaier server: it is the machine serving the page that would say so.
+        for (Machine refused : List.of(phone, vaierServer)) {
+            assertThatThrownBy(() -> refused.switchedOffAt(Instant.EPOCH, vaierServerId)).as(refused.name())
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        Machine nas = new Machine(MachineId.generate(), "nas", MachineType.LAN_SERVER, null, null, null, null, null, null,
+            null, null, "192.168.3.50", true, 2375, DeviceCategory.NAS, null);
+        assertThat(nas.switchedOffAt(Instant.EPOCH, vaierServerId).switchedOffSince()).isEqualTo(Instant.EPOCH);
     }
 }

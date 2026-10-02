@@ -2,6 +2,7 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,6 +41,17 @@ class LanServerTest {
     @Test
     void withSshAccessOverride_preservesTheMachineId() {
         assertThat(nas().withSshAccessOverride(false).machineId()).isEqualTo(ID);
+    }
+
+    @Test
+    void everyEdit_keepsTheSwitchedOffMark() {
+        // Renaming a machine that is switched off on purpose must not quietly turn its monitoring back on.
+        LanServer off = nas().withSwitchedOffSince(Instant.EPOCH);
+        for (LanServer edited : List.of(off.renamedTo("Storage"), off.withDescription("x"),
+                off.withDeviceCategory(DeviceCategory.PRINTER), off.withSshAccessOverride(false))) {
+            assertThat(edited.switchedOffSince()).isEqualTo(Instant.EPOCH);
+            assertThat(edited.machineId()).isEqualTo(ID);
+        }
     }
 
     @Test

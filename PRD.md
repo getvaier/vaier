@@ -4504,4 +4504,16 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Pre-flight and the reverse proxy audit left Settings** (`/settings/pre-flight` and `/settings/reverse-proxy-audit` are gone); the audit row's **See which** opens its findings. The "Waiting to join" section is now Needs you rows. **Back up as root** moved from a machine's What to do next into Needs you, so an incomplete backup is said once.
 - Re-read on pushes that can change it (a tunnel or LAN server flipping, a backup settling, a disk standing moving, a publish, a join request); the browser never polls.
 
-**Still to come in #376.** 2b: *switched off on purpose* — a machine that is off by intent goes grey and quiet, its backup pauses instead of failing. 2c: pending OS updates counted on the five-minute sweep, replacing the always-present fold. Backlog: a container in trouble and a missing default route still live only in a machine's What to do next — they belong in Needs you too; two machines sharing a name ("Printer") read the same in a row — the row could say where it is.
+**Still to come in #376.** 2b: see §6.70. 2c: pending OS updates counted on the five-minute sweep, replacing the always-present fold. Backlog: a container in trouble and a missing default route still live only in a machine's What to do next — they belong in Needs you too; two machines sharing a name ("Printer") read the same in a row — the row could say where it is.
+
+### 6.70 Switched off on purpose ✅ (part 2b of [#376](https://github.com/getvaier/vaier/issues/376))
+
+**Why.** Three Roon players and a printer that are off by intent painted the fleet red every day, filled Needs you, and failed a backup every night.
+
+**What.**
+- **I switched it off** on a server's "not answering" row (fleet and its own page) — `POST /machines/{id}/switched-off`; **It's back on** beside the calm line on its page — `DELETE …/switched-off`. Admin-only, like the rest of `/machines`.
+- Stored with the machine as `switchedOffSince` (epoch seconds): in the peer's `# VAIER:` metadata, or in `lan-servers.yml`. Every other metadata rewrite now copies with `@With`, so no edit can drop it. Refusals (a personal device, the Vaier server) are the domain's `Machine.switchedOffAt`.
+- While marked: `Machine.isDown` is false (no Needs-you row), backup rows are not trouble, its page shows no container-trouble cards (`MachineNudges`), the card is grey with no marks, the backup door wears no mark, the backup page says the schedule is paused; no up/down mail (LAN probe and server-peer watcher), no backup-server-down/recovered mail, and the nightly backup is skipped without recording a run.
+- **Auto-clear:** every 30 s, after judging its tick's transitions, `PeerConnectivityWatcher` asks `NoticeMachinesBackOnUseCase`, which clears the mark on every machine where `Machine.isBackOn` holds (switched off and reachable again — the LAN probe answers or the tunnel handshakes). Nothing is mailed: the domain's `PeerConnectivityTracker` and `BackupServerHealthTracker` keep a switched-off machine's comings and goings to themselves.
+
+**Backlog.** Container trouble and a missing default route never fire for an unreachable machine (the scrape and the network read only judge answers), so they needed no change; if they ever do, the mark should silence them too.

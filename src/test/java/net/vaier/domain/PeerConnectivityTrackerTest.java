@@ -3,6 +3,7 @@ package net.vaier.domain;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,5 +80,14 @@ class PeerConnectivityTrackerTest {
         List<PeerSnapshot> transitions = tracker.update(List.of());
 
         assertThat(transitions).isEmpty();
+    }
+
+    @Test
+    void aPeerSwitchedOffOnPurpose_isTrackedButNeverReported() {
+        // Its state is still kept, so once the mark is gone a later change is judged from where it really is.
+        tracker.update(List.of(snap("server-1", true)), Set.of("server-1"));
+        assertThat(tracker.update(List.of(snap("server-1", false)), Set.of("server-1"))).isEmpty();
+        assertThat(tracker.update(List.of(snap("server-1", true)), Set.of("server-1"))).isEmpty();
+        assertThat(tracker.update(List.of(snap("server-1", true)))).isEmpty();
     }
 }

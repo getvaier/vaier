@@ -7,6 +7,7 @@ import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -54,6 +55,7 @@ public interface ForGettingPeerConfigurations {
      *             on the device and has never existed in Vaier. Null for every peer whose keypair Vaier
      *             generated, because there the public key is derived from the private one on demand.
      *             Its presence is what {@link #deviceHeldKey()} answers.
+     * @param switchedOffSince when the operator said this machine is switched off on purpose, or null.
      */
     record PeerConfiguration(
         String id,
@@ -67,12 +69,22 @@ public interface ForGettingPeerConfigurations {
         DeviceCategory deviceCategory,
         Boolean sshAccess,
         MachineId machineId,
-        String publicKey
+        String publicKey,
+        Instant switchedOffSince
     ) {
         public PeerConfiguration {
             if (machineId == null) {
                 throw new IllegalArgumentException("Peer machineId must not be null");
             }
+        }
+
+        /** A peer nobody has said is switched off. */
+        public PeerConfiguration(String id, String name, String ipAddress, String configContent,
+                                 MachineType peerType, String lanCidr, String lanAddress, String description,
+                                 DeviceCategory deviceCategory, Boolean sshAccess, MachineId machineId,
+                                 String publicKey) {
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, deviceCategory,
+                sshAccess, machineId, publicKey, null);
         }
 
         /**

@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -96,9 +97,11 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
                         parseDeviceCategory(asString(m.get("deviceCategory")));
                     Boolean sshAccessOverride = m.get("sshAccessOverride") instanceof Boolean b2 ? b2 : null;
                     MachineId machineId = readMachineId(asString(m.get("id")), name);
+                    Instant switchedOffSince = m.get("switchedOffSince") instanceof Number since
+                        ? Instant.ofEpochSecond(since.longValue()) : null;
                     if (name != null && lanAddress != null && machineId != null) {
                         result.add(new LanServer(name, lanAddress, runsDocker, dockerPort, description,
-                            deviceCategory, sshAccessOverride, machineId));
+                            deviceCategory, sshAccessOverride, machineId, switchedOffSince));
                     }
                 }
             }
@@ -153,6 +156,10 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
             // Persist the SSH-access override only when the operator has pinned one; absent = smart default.
             if (s.sshAccessOverride() != null) {
                 entry.put("sshAccessOverride", s.sshAccessOverride());
+            }
+            // Epoch seconds, present only while it is switched off on purpose.
+            if (s.switchedOffSince() != null) {
+                entry.put("switchedOffSince", s.switchedOffSince().getEpochSecond());
             }
             serialized.add(entry);
         }

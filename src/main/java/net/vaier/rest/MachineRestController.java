@@ -18,6 +18,8 @@ import net.vaier.application.GetSshServerPresenceUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.MarkBackOnUseCase;
+import net.vaier.application.MarkSwitchedOffUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.BackupFleet;
 import net.vaier.domain.BackupJob;
@@ -72,6 +74,8 @@ public class MachineRestController {
     private final GetMachineNetworksUseCase getMachineNetworksUseCase;
     private final GetContainerStandingsUseCase getContainerStandingsUseCase;
     private final UpgradeOsUseCase upgradeOsUseCase;
+    private final MarkSwitchedOffUseCase markSwitchedOffUseCase;
+    private final MarkBackOnUseCase markBackOnUseCase;
     // Read for its zone alone: the one a machine's cards write their times in, so the domain never has to
     // ask the environment where the operator is.
     private final Clock clock;
@@ -472,6 +476,20 @@ public class MachineRestController {
     record DiskWatchResponse(String machineId, String mountPoint, boolean watched,
                              Integer thresholdPercent) {}
 
+    /** The operator says this server is switched off on purpose: quiet until Vaier reaches it again. */
+    @PostMapping("/{machineId}/switched-off")
+    public ResponseEntity<Void> markSwitchedOff(@PathVariable String machineId) {
+        markSwitchedOffUseCase.markSwitchedOff(MachineId.of(machineId));
+        return ResponseEntity.noContent().build();
+    }
+
+    /** "It's back on", said by hand; Vaier also clears the mark itself the first time it reaches the machine. */
+    @DeleteMapping("/{machineId}/switched-off")
+    public ResponseEntity<Void> markBackOn(@PathVariable String machineId) {
+        markBackOnUseCase.markBackOn(MachineId.of(machineId));
+        return ResponseEntity.noContent().build();
+    }
+
     /**
      * Forget the pinned SSH host key for a machine (#308), so the next terminal connect re-pins on
      * first use. Use after a host is legitimately rebuilt and a host-key mismatch is refusing connects.
@@ -509,7 +527,8 @@ public class MachineRestController {
         String effectiveUsername,
         boolean effectiveUserPrivileged,
         boolean canRelayALan,
-        boolean acceptsSetupScript
+        boolean acceptsSetupScript,
+        String switchedOffSince
     ) {
         static MachineResponse from(Machine m, boolean hasCredential) {
             return from(m, hasCredential, false, SshServerPresence.UNKNOWN);
@@ -553,7 +572,9 @@ public class MachineRestController {
                 // to decide this itself, from a type set that included LAN_SERVER — a machine with no
                 // tunnel to route into. The domain owns the rule; the answer travels as a boolean.
                 m.canRelayALan(),
-                m.acceptsSetupScript()
+                m.acceptsSetupScript(),
+                // When the operator said it is switched off on purpose; null while it is not.
+                m.switchedOffSince() == null ? null : m.switchedOffSince().toString()
             );
         }
     }

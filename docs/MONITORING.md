@@ -12,6 +12,8 @@ SMTP-powered admin alerts when any server-type machine (VPN server peers and LAN
 
 It will *not* mail you about the routine bans, and that is deliberate — see [What the edge blocks](#what-the-edge-blocks) below.
 
+Nor about a machine you said is [switched off on purpose](EXPLORER.md#switched-off-on-purpose): its going down and its coming back are both expected, so neither the up/down mail, the backup-server-down mail nor a backup-failure mail is sent for it — its nightly backup is simply skipped. The first time Vaier reaches it again the mark clears itself, silently, and every alert applies as before.
+
 ---
 
 ## Host disk monitoring

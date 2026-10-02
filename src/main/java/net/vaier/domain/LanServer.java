@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Optional;
 
@@ -12,7 +13,7 @@ import java.util.Optional;
  */
 public record LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                         String description, DeviceCategory deviceCategory, Boolean sshAccessOverride,
-                        MachineId machineId) {
+                        MachineId machineId, Instant switchedOffSince) {
 
     private static final int MIN_PORT = 1;
     private static final int MAX_PORT = 65535;
@@ -21,6 +22,13 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (machineId == null) {
             throw new IllegalArgumentException("LAN server machineId must not be null");
         }
+    }
+
+    /** A LAN server nobody has said is switched off. */
+    public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort, String description,
+                     DeviceCategory deviceCategory, Boolean sshAccessOverride, MachineId machineId) {
+        this(name, lanAddress, runsDocker, dockerPort, description, deviceCategory, sshAccessOverride, machineId,
+            null);
     }
 
     /**
@@ -78,7 +86,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
             throw new IllegalArgumentException("LAN server name must not contain '/'");
         }
         return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description,
-            deviceCategory, sshAccessOverride, machineId);
+            deviceCategory, sshAccessOverride, machineId, switchedOffSince);
     }
 
     /**
@@ -89,7 +97,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         String normalized = (newDescription == null || newDescription.isBlank())
             ? null : newDescription.trim();
         return new LanServer(name, lanAddress, runsDocker, dockerPort, normalized, deviceCategory,
-            sshAccessOverride, machineId);
+            sshAccessOverride, machineId, switchedOffSince);
     }
 
     /**
@@ -98,7 +106,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
      */
     public LanServer withDeviceCategory(DeviceCategory newDeviceCategory) {
         return new LanServer(name, lanAddress, runsDocker, dockerPort, description, newDeviceCategory,
-            sshAccessOverride, machineId);
+            sshAccessOverride, machineId, switchedOffSince);
     }
 
     /**
@@ -107,7 +115,18 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
      */
     public LanServer withSshAccessOverride(Boolean newSshAccessOverride) {
         return new LanServer(name, lanAddress, runsDocker, dockerPort, description, deviceCategory,
-            newSshAccessOverride, machineId);
+            newSshAccessOverride, machineId, switchedOffSince);
+    }
+
+    /** This LAN server, said to be switched off on purpose since {@code since}; null clears it. */
+    public LanServer withSwitchedOffSince(Instant since) {
+        return new LanServer(name, lanAddress, runsDocker, dockerPort, description, deviceCategory,
+            sshAccessOverride, machineId, since);
+    }
+
+    /** Whether the operator said this LAN server is switched off on purpose. */
+    public boolean isSwitchedOffOnPurpose() {
+        return switchedOffSince != null;
     }
 
     /**

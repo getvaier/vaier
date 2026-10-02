@@ -85,9 +85,16 @@ public class BackupServerWatcher {
         // WireGuard container. Doing it eagerly cost that on every quiet sweep and — because it sits
         // outside notifyQuietly's guard — let a restarting container take the whole sweep down.
         switch (tracker.update(server.name(), healthy)) {
-            case CROSSED_TO_DOWN -> notifyQuietly(
-                () -> notifier.notifyAdminsOfBackupServerDown(server, machineLabelFor(server), result),
-                "down alert for backup server " + server.name());
+            case CROSSED_TO_DOWN -> {
+                // Switched off on purpose: going down was expected, and so is coming back — say neither.
+                if (switchedOffOnPurpose(server)) {
+                    tracker.wentDownQuietly(server.name());
+                    return;
+                }
+                notifyQuietly(
+                    () -> notifier.notifyAdminsOfBackupServerDown(server, machineLabelFor(server), result),
+                    "down alert for backup server " + server.name());
+            }
             case CROSSED_TO_HEALTHY -> notifyQuietly(
                 () -> notifier.notifyAdminsOfBackupServerRecovered(server, machineLabelFor(server)),
                 "recovery alert for backup server " + server.name());
@@ -119,6 +126,17 @@ public class BackupServerWatcher {
             name = Optional.empty();
         }
         return Machine.labelFor(server.machineId(), name);
+    }
+
+    /** Read only on a crossing, like the label; an unreadable registry is not a reason to stay quiet. */
+    private boolean switchedOffOnPurpose(BackupServer server) {
+        try {
+            return machines.getAllMachines().stream()
+                .filter(m -> m.id().isSameAs(server.machineId()))
+                .anyMatch(Machine::isSwitchedOffOnPurpose);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Run a notification, swallowing any failure so one bad send can never break the rest of the sweep. */

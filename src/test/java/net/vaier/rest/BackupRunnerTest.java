@@ -658,6 +658,21 @@ class BackupRunnerTest {
     }
 
     @Test
+    void runDueJobs_skipsAMachineSwitchedOffOnPurpose_withoutRecordingAFailedNight() {
+        // Not a failure: nobody expects a machine that is off to be backed up. Nothing is run, nothing is
+        // recorded, so no red mark and no failure mail; the night after it is back, it runs as usual.
+        when(configResolver.getBackupScheduleHour()).thenReturn(2);
+        when(jobs.getBackupJobs()).thenReturn(List.of(job()));
+        when(machines.getAllMachines()).thenReturn(List.of(
+            sshMachine("Colina 27").toBuilder().switchedOffSince(Instant.EPOCH).build()));
+
+        backupRunner.runDueJobs();
+
+        verify(runner, never()).run(any(), any());
+        assertThat(runs.getAll()).isEmpty();
+    }
+
+    @Test
     void runDueJobsFiresNothingOutsideScheduleHour() {
         // A due job exists, but the current hour (03:00) is not the configured schedule hour (2).
         Clock atNextHour = Clock.fixed(Instant.parse("2026-07-08T03:00:00Z"), ZoneOffset.UTC);

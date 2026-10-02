@@ -20,9 +20,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -346,6 +348,21 @@ class LanServerReachabilityServiceTest {
         assertThat(snap.name()).isEqualTo("printer");
         assertThat(snap.peerType()).isEqualTo(MachineType.LAN_SERVER);
         assertThat(snap.connected()).isTrue();
+    }
+
+    @Test
+    void aServerSwitchedOffOnPurpose_goingAndComingBack_isNeverMailed_thoughItsReachabilityIsStillKept() {
+        when(forGettingLanServers.getAll()).thenReturn(List.of(new LanServerView(
+            new LanServer("roon", "192.168.3.118", false, null).withSwitchedOffSince(Instant.EPOCH), "relay")));
+        when(forProbingTcp.probe(eq("192.168.3.118"), eq(80), anyInt())).thenReturn(ProbeResult.CONNECTED);
+        refreshN(CONFIRM);
+        when(forProbingTcp.probe(eq("192.168.3.118"), eq(80), anyInt())).thenReturn(ProbeResult.UNREACHABLE);
+        refreshN(CONFIRM);
+        when(forProbingTcp.probe(eq("192.168.3.118"), eq(80), anyInt())).thenReturn(ProbeResult.CONNECTED);
+        refreshN(CONFIRM);
+
+        verify(notifier, never()).notifyAdmins(any());
+        assertThat(service.getReachability("192.168.3.118")).isEqualTo(Reachability.OK);
     }
 
     @Test

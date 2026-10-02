@@ -38,8 +38,11 @@ public final class MachineNudges {
         MachineNudge.noDefaultRoute(machine.name(), signals.networks()).ifPresent(nudges::add);
         // #356/#317 sit with it, for the same reason: a service that is down, unwell, or restart-looping
         // is not an invitation.
-        nudges.addAll(MachineNudge.containersInTrouble(machine.name(), signals.containerStandings(),
-            signals.zone()));
+        // Not while it is switched off on purpose: what its containers did before it went off is not trouble now.
+        if (!machine.isSwitchedOffOnPurpose()) {
+            nudges.addAll(MachineNudge.containersInTrouble(machine.name(), signals.containerStandings(),
+                signals.zone()));
+        }
         MachineNudge.publish(machine.name(), signals.publishableCount()).ifPresent(nudges::add);
         MachineNudge.backUp(machine.name(), signals.reachable(), signals.hasCredential(),
             signals.job().isPresent()).ifPresent(nudges::add);

@@ -141,6 +141,8 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         // started, or the server was just registered) — baseline silently to avoid an email
         // storm on restart. Same rule the VPN PeerConnectivityTracker applies.
         if (previous == null || previous == current) return;
+        // Switched off on purpose: its going and its coming back are both expected, so neither is mailed.
+        if (server.isSwitchedOffOnPurpose()) return;
         boolean connected = current == Reachability.OK;
         Long lastSeen = cache.getLastSeenEpochSec(server.lanAddress());
         PeerSnapshot snapshot = new PeerSnapshot(

@@ -854,6 +854,8 @@
     function livenessOf(machineId) {
         // We are standing inside the answer.
         if (isVaierServerMachine(machineId)) return 'is-up';
+        // Switched off on purpose: quiet and grey, never the red of a server that fell over.
+        if ((machineById(machineId) || {}).switchedOffSince) return 'is-off';
 
         const peer = S.peers.get(machineId);
         if (peer) {
@@ -887,6 +889,7 @@
             host.classList.toggle('is-down', state === 'is-down');
             host.classList.toggle('is-degraded', state === 'is-degraded');
             host.classList.toggle('is-away', state === 'is-away');
+            host.classList.toggle('is-off', state === 'is-off');
         }
     }
 
@@ -975,6 +978,8 @@
     // beside its name as the capability strip.
     function machineMarks(machineId) {
         const marks = el('span', 'ex-card-marks');
+        // Switched off on purpose says nothing: its last failed run or a stale disk reading is not news now.
+        if ((machineById(machineId) || {}).switchedOffSince) return marks;
 
         const run = runMark(machineId);
         if (run) marks.appendChild(run);
@@ -1909,7 +1914,7 @@
         const backupId = S.backupServer ? S.backupServer.machineId : null;
         // The picture speaks plainly: what a thing is and whether it is there, never how it is wired.
         const WORD = { 'is-up': 'connected', 'is-present': 'connected', 'is-down': 'switched off or out of reach',
-            'is-away': 'not connected', 'is-idle': 'not checked yet', 'is-degraded': 'on, but something is wrong' };
+            'is-away': 'not connected', 'is-off': 'switched off on purpose', 'is-idle': 'not checked yet', 'is-degraded': 'on, but something is wrong' };
         const KIND = { PHONE: 'a phone', LAPTOP: 'a laptop', DESKTOP: 'a computer', SERVER: 'a computer that stays on',
             NAS: 'a storage box', PRINTER: 'a printer', ROUTER: 'the internet box', GATEWAY: 'the internet box',
             IOT: 'a smart home gadget', CAMERA: 'a camera', MEDIA: 'a TV or media player' };
@@ -1919,7 +1924,7 @@
         const house = (m, role) => {
             const l = livenessOf(m.id);
             const stabbur = m.id === backupId;
-            const dark = l === 'is-down' || l === 'is-away';
+            const dark = l === 'is-down' || l === 'is-away' || l === 'is-off';
             // One that is not connected says when it was last seen, as its machine pane does.
             const peer = S.peers.get(m.id);
             return { id: m.id, name: m.name, role: stabbur ? 'keeps the backups' : role, state: WORD[l] || '', dark, stabbur,
@@ -2061,6 +2066,8 @@
         // to a page that never mentions why. A fact about now, so it stands down in the past.
         const mine = S.at ? [] : S.needs.filter((n) => n.trouble && n.value === m.id);
         if (mine.length) body.appendChild(needsBlock(mine, m));
+        // Said once, calmly, with the way back. Vaier also clears it itself the first time the machine answers.
+        if (m.switchedOffSince && !S.at) body.appendChild(switchedOffLine(m));
 
         // Whether Vaier may open a session at all. It appears in one of two places depending on the answer:
         // while it is off it is the next step and stands in the open, because granting it is what gives this
@@ -2115,7 +2122,7 @@
             // The containers and backup doors wear the fleet card's own marks: the operator who came here for
             // that mark should not have to open the door to find it again.
             const stale = kid.kind === 'containers' ? updateCountMark(m.id)
-                : kid.kind === 'backup' && !S.at ? runMark(m.id) : null;
+                : kid.kind === 'backup' && !S.at && !m.switchedOffSince ? runMark(m.id) : null;
             if (stale) {
                 const marks = el('span', 'ex-card-marks');
                 marks.appendChild(stale);
@@ -2490,8 +2497,8 @@
         // offers. `quiet` rows carry their fix in the evidence and say nothing more.
         DEVICE_WAITING:          (m, n) => waitingAction(n),
         VAIER_BASICS:            () => ({ icon: 'warn', quiet: true }),
-        MACHINE_DOWN:            (m, n) => (m ? { icon: 'warn' }
-            : { icon: 'warn', label: 'Open', run: () => go(['fleet', n.value]) }),
+        // The one answer Vaier can take from here: it is off on purpose, so stop saying so.
+        MACHINE_DOWN:            (m, n) => ({ icon: 'warn', label: 'I switched it off', run: () => markSwitchedOff(n.value) }),
         BACKUP_FAILED:           (m, n) => ({ icon: 'archive', label: 'Open its backup', run: () => go(['fleet', n.value, 'backup']) }),
         BACKUP_INCOMPLETE:       (m, n) => ({ icon: 'archive', label: 'Open its backup', run: () => go(['fleet', n.value, 'backup']) }),
         BACKUP_NEEDS_READYING:   (m, n) => readyingAction(n),
@@ -2620,6 +2627,39 @@
         ok.onclick = close;
         document.addEventListener('keydown', onKey);
         ok.focus();
+    }
+
+    function switchedOffLine(m) {
+        const row = el('div', 'ex-off');
+        const words = el('span', 'ex-off-words');
+        words.textContent = 'Switched off on purpose since ' + new Date(m.switchedOffSince)
+            .toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + '. Vaier stays quiet about it '
+            + 'and skips its backups until it answers again.';
+        const back = el('button', 'ex-btn');
+        back.textContent = 'It’s back on';
+        back.onclick = () => markBackOn(m.id);
+        row.append(words, back);
+        return row;
+    }
+
+    async function markSwitchedOff(machineId) {
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machineId) + '/switched-off', { method: 'POST' });
+            if (!res.ok) { toast('Vaier could not note that.'); return; }
+            toast(nameOf(machineId) + ' is switched off on purpose — Vaier stays quiet until it answers again.');
+        } catch (e) { toast('Vaier could not note that.'); return; }
+        await Promise.all([loadFleet(), loadNeeds()]);
+        render();
+    }
+
+    async function markBackOn(machineId) {
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machineId) + '/switched-off', { method: 'DELETE' });
+            if (!res.ok) { toast('Vaier could not note that.'); return; }
+            toast('Vaier is watching ' + nameOf(machineId) + ' again.');
+        } catch (e) { toast('Vaier could not note that.'); return; }
+        await Promise.all([loadFleet(), loadNeeds()]);
+        render();
     }
 
     // Says yes to a detected network. It goes through the one endpoint that has always routed a LAN — the
@@ -6495,7 +6535,9 @@
         // --- know: how this backup stands, and the one setting behind it ------------------------------
         body.appendChild(section('Schedule'));
         const sched = el('div', 'ex-runline');
-        sched.textContent = 'Runs every night. A failed run emails the admins.';
+        sched.textContent = (machineById(machineId) || {}).switchedOffSince
+            ? 'Paused while it is switched off on purpose — the nightly backup resumes once it answers again.'
+            : 'Runs every night. A failed run emails the admins.';
         body.appendChild(sched);
 
         // The last run, read on view and refreshed when the backend says it settled.

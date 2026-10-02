@@ -22,6 +22,8 @@ import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.MarkBackOnUseCase;
+import net.vaier.application.MarkSwitchedOffUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.BackupJob;
@@ -91,6 +93,8 @@ class MachineRestControllerTest {
     @Mock GetMachineNetworksUseCase getMachineNetworksUseCase;
     @Mock GetContainerStandingsUseCase getContainerStandingsUseCase;
     @Mock UpgradeOsUseCase upgradeOsUseCase;
+    @Mock MarkSwitchedOffUseCase markSwitchedOffUseCase;
+    @Mock MarkBackOnUseCase markBackOnUseCase;
 
     @Mock Clock clock;
     @InjectMocks MachineRestController controller;
@@ -134,6 +138,20 @@ class MachineRestControllerTest {
         assertThat(response.get(1).dockerPort()).isEqualTo(2375);
         assertThat(response.get(0).deviceCategory()).isEqualTo("SERVER");
         assertThat(response.get(1).deviceCategory()).isEqualTo("NAS");
+    }
+
+    @Test
+    void switchedOff_isSaidAndUnsaidThroughItsUseCases_andTheListCarriesSince() {
+        Machine roon = new Machine(mid("Roon"), "Roon", MachineType.LAN_SERVER, null, null, null, null, null,
+            null, null, null, "192.168.3.118", false, null, DeviceCategory.MEDIA, null)
+            .toBuilder().switchedOffSince(Instant.parse("2026-09-14T08:00:00Z")).build();
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(roon));
+
+        assertThat(controller.list().get(0).switchedOffSince()).isEqualTo("2026-09-14T08:00:00Z");
+        assertThat(controller.markSwitchedOff(mid("Roon").value()).getStatusCode().value()).isEqualTo(204);
+        assertThat(controller.markBackOn(mid("Roon").value()).getStatusCode().value()).isEqualTo(204);
+        verify(markSwitchedOffUseCase).markSwitchedOff(mid("Roon"));
+        verify(markBackOnUseCase).markBackOn(mid("Roon"));
     }
 
     @Test

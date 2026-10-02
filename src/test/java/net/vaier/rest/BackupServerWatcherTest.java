@@ -13,6 +13,7 @@ import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -77,6 +78,23 @@ class BackupServerWatcherTest {
         watcher.checkBackupServers(); // steady down, no re-page
 
         verify(notifier, times(1)).notifyAdminsOfBackupServerDown(any(BackupServer.class), any(), eq(ProbeResult.REFUSED));
+    }
+
+    @Test
+    void aBackupServerSwitchedOffOnPurpose_isMailedNeitherGoingNorComingBack() {
+        when(machines.getAllMachines()).thenReturn(List.of(nas().toBuilder().switchedOffSince(Instant.EPOCH).build()));
+        when(servers.getBackupServers()).thenReturn(List.of(server("nas-borg")));
+        when(probe.probe(eq("192.168.3.3"), eq(8022), anyInt()))
+            .thenReturn(ProbeResult.UNREACHABLE, ProbeResult.UNREACHABLE, ProbeResult.CONNECTED);
+
+        watcher.checkBackupServers();
+        watcher.checkBackupServers();
+        // By the time it answers again the mark has been cleared — the quiet going-down keeps it quiet.
+        when(machines.getAllMachines()).thenReturn(List.of(nas()));
+        watcher.checkBackupServers();
+
+        verify(notifier, never()).notifyAdminsOfBackupServerDown(any(), any(), any());
+        verify(notifier, never()).notifyAdminsOfBackupServerRecovered(any(), any());
     }
 
     @Test

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -302,6 +303,18 @@ class LanServerFileAdapterTest {
         LanServer loaded = fresh.getAll().get(0);
         assertThat(loaded.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.CAMERA);
         assertThat(loaded.description()).isEqualTo("Front door");
+    }
+
+    @Test
+    void save_switchedOffSince_roundTripsThroughFreshAdapter_andIsAbsentWhenCleared() throws Exception {
+        Instant since = Instant.parse("2026-09-14T08:00:00Z");
+        LanServer roon = new LanServer("Roon", "192.168.3.118", false, null).withSwitchedOffSince(since);
+        adapter.save(roon);
+        assertThat(new LanServerFileAdapter(tempDir.toString()).getAll().get(0).switchedOffSince()).isEqualTo(since);
+
+        adapter.save(roon.withSwitchedOffSince(null));
+        assertThat(new LanServerFileAdapter(tempDir.toString()).getAll().get(0).switchedOffSince()).isNull();
+        assertThat(Files.readString(tempDir.resolve("lan-servers.yml"))).doesNotContain("switchedOffSince");
     }
 
     // --- SSH access override (#307) ---

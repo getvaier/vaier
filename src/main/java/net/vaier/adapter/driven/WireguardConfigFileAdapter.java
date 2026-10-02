@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.With;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -38,13 +40,18 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
      * <p>{@code id} is the peer's {@link net.vaier.domain.MachineId} — its identity, and {@code publicKey}
      * is a {@code Device-held key}. <b>Every {@code update*} rewrites this whole line, so a field a mutator
      * does not carry is a field erased from disk</b> — each one must pass {@code id} and {@code publicKey}
-     * through explicitly. Erasing a device-held key is unrecoverable: Vaier has no private key to derive it
+     * through explicitly — which is why every mutator below is a {@code with*} copy. Erasing a device-held key is unrecoverable: Vaier has no private key to derive it
      * from again, and the peer would silently regain downloads it must never have.
      */
+    @With
     private record VaierMetadata(String peerType, String lanCidr, String lanAddress, String description,
                                  String name, String deviceCategory, Boolean sshAccess, String id,
-                                 String publicKey) {
-        VaierMetadata() { this(null, null, null, null, null, null, null, null, null); }
+                                 String publicKey, Long switchedOffSince) {
+        VaierMetadata() { this(null, null, null, null, null, null, null, null, null, null); }
+
+        Instant switchedOffInstant() {
+            return switchedOffSince == null ? null : Instant.ofEpochSecond(switchedOffSince);
+        }
     }
 
     /**
@@ -107,7 +114,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             return Optional.of(new PeerConfiguration(peerId, effectiveName(peerId, meta), ipAddress,
                     configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
                     meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess(),
-                    machineId, meta.publicKey()));
+                    machineId, meta.publicKey(), meta.switchedOffInstant()));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -151,7 +158,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 return Optional.of(new PeerConfiguration(peerId, effectiveName(peerId, meta), ipAddress,
                         configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
                         meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess(),
-                        machineId, meta.publicKey()));
+                        machineId, meta.publicKey(), meta.switchedOffInstant()));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -247,45 +254,35 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     public void updateLanAddress(String peerId, String lanAddress) {
         String normalized = blankToNull(lanAddress);
         rewriteVaierMetadata(peerId, "lanAddress", normalized,
-            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                normalized, existing.description(), existing.name(), existing.deviceCategory(),
-                existing.sshAccess(), existing.id(), existing.publicKey()));
+            existing -> existing.withLanAddress(normalized));
     }
 
     @Override
     public void updateLanCidr(String peerId, String lanCidr) {
         String normalized = blankToNull(lanCidr);
         rewriteVaierMetadata(peerId, "lanCidr", normalized,
-            existing -> new VaierMetadata(existing.peerType(), normalized,
-                existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory(),
-                existing.sshAccess(), existing.id(), existing.publicKey()));
+            existing -> existing.withLanCidr(normalized));
     }
 
     @Override
     public void updateDescription(String peerId, String description) {
         String normalized = blankToNull(description);
         rewriteVaierMetadata(peerId, "description", normalized,
-            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), normalized, existing.name(), existing.deviceCategory(),
-                existing.sshAccess(), existing.id(), existing.publicKey()));
+            existing -> existing.withDescription(normalized));
     }
 
     @Override
     public void updateName(String peerId, String name) {
         String normalized = blankToNull(name);
         rewriteVaierMetadata(peerId, "name", normalized,
-            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), existing.description(), normalized, existing.deviceCategory(),
-                existing.sshAccess(), existing.id(), existing.publicKey()));
+            existing -> existing.withName(normalized));
     }
 
     @Override
     public void updateDeviceCategory(String peerId, String deviceCategory) {
         String normalized = blankToNull(deviceCategory);
         rewriteVaierMetadata(peerId, "deviceCategory", normalized,
-            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), existing.description(), existing.name(), normalized,
-                existing.sshAccess(), existing.id(), existing.publicKey()));
+            existing -> existing.withDeviceCategory(normalized));
     }
 
     @Override
@@ -293,9 +290,14 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         // Always writes an explicit override (true/false); the effective state then equals it,
         // never falling back to the smart default until the field is cleared out-of-band.
         rewriteVaierMetadata(peerId, "sshAccess", String.valueOf(enabled),
-            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory(),
-                enabled, existing.id(), existing.publicKey()));
+            existing -> existing.withSshAccess(enabled));
+    }
+
+    @Override
+    public void updateSwitchedOffSince(String peerId, Instant since) {
+        Long epoch = since == null ? null : since.getEpochSecond();
+        rewriteVaierMetadata(peerId, "switchedOffSince", String.valueOf(epoch),
+            existing -> existing.withSwitchedOffSince(epoch));
     }
 
     @Override
@@ -331,10 +333,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata existing = extractVaierMetadata(content);
             // A peer without a # VAIER comment predates metadata — default its type so the
             // rewritten comment is well-formed rather than missing peerType entirely.
-            VaierMetadata withType = new VaierMetadata(
-                existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
-                existing.lanCidr(), existing.lanAddress(), existing.description(), existing.name(),
-                existing.deviceCategory(), existing.sshAccess(), existing.id(), existing.publicKey());
+            VaierMetadata withType = existing.withPeerType(
+                existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name());
             VaierMetadata updated = mutator.apply(withType);
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
 

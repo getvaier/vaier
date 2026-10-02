@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import java.time.Instant;
 import java.util.Optional;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,18 @@ class MachineTest {
         assertThat(machine.lanAddress()).isEqualTo("172.31.5.20");
         assertThat(machine.runsDocker()).isTrue();
         assertThat(machine.dockerPort()).isEqualTo(2375);
+    }
+
+    @Test
+    void aMachineSwitchedOffOnPurpose_carriesWhenItWasMarked_fromWhereverItIsStored() {
+        Instant since = Instant.parse("2026-09-14T08:00:00Z");
+        PeerConfiguration peer = new PeerConfiguration("relay", "Relay", "10.13.13.2", "",
+            MachineType.UBUNTU_SERVER, null, null, null, null, null, MachineId.generate(), null, since);
+        LanServer server = new LanServer("roon", "192.168.3.118", false, null).withSwitchedOffSince(since);
+
+        assertThat(Machine.fromPeer(peer, null).switchedOffSince()).isEqualTo(since);
+        assertThat(Machine.fromLanServer(server, null).switchedOffSince()).isEqualTo(since);
+        assertThat(Machine.fromLanServer(server.withSwitchedOffSince(null), null).isSwitchedOffOnPurpose()).isFalse();
     }
 
     // --- device category (effective) ---

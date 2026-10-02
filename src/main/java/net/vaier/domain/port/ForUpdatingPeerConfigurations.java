@@ -1,5 +1,7 @@
 package net.vaier.domain.port;
 
+import java.time.Instant;
+
 public interface ForUpdatingPeerConfigurations {
 
     void updateLanAddress(String peerId, String lanAddress);
@@ -22,6 +24,12 @@ public interface ForUpdatingPeerConfigurations {
      * equals it rather than falling back to the smart default derived from the device type.
      */
     void updateSshAccess(String peerId, boolean enabled);
+
+    /**
+     * Sets when the operator said this peer is switched off on purpose; null clears the mark. Every other
+     * Vaier-owned field carries over.
+     */
+    void updateSwitchedOffSince(String peerId, Instant since);
 
     /**
      * Sets a peer's display name — the freely editable, operator-facing label. The peer's

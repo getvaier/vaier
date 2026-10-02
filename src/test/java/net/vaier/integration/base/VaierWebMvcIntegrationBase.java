@@ -390,6 +390,12 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected UpgradeOsUseCase upgradeOsUseCase;
 
+    @MockBean
+    protected MarkSwitchedOffUseCase markSwitchedOffUseCase;
+
+    @MockBean
+    protected MarkBackOnUseCase markBackOnUseCase;
+
     // --- LAN server use cases ---
     @MockBean
     protected RegisterLanServerUseCase registerLanServerUseCase;

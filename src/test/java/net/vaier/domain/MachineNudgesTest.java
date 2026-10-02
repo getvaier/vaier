@@ -152,6 +152,11 @@ class MachineNudgesTest {
         assertThat(nudges).extracting(MachineNudge::kind).containsExactly(
             MachineNudge.Kind.CONTAINER_TROUBLE, MachineNudge.Kind.PUBLISH,
             MachineNudge.Kind.DESIGNATE_BACKUP_SERVER);
+        // Switched off on purpose: what its containers did before it went off is not trouble now.
+        Machine resting = machine(DeviceCategory.SERVER).toBuilder().switchedOffSince(Instant.EPOCH).build();
+        assertThat(MachineNudges.forMachine(resting,
+            signals().publishableCount(1).containerStandings(List.of(gone)).build()))
+            .extracting(MachineNudge::kind).doesNotContain(MachineNudge.Kind.CONTAINER_TROUBLE);
     }
 
     @Test

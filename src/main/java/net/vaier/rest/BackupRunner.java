@@ -273,6 +273,12 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase, L
                 if (!job.isDue(today, clock.getZone(), runs.latestForMachine(job.machineId()))) {
                     continue;
                 }
+                // Skipped, not failed: nobody expects a machine switched off on purpose to back up, so no
+                // run is recorded and nothing turns red. It runs the first night after it is back.
+                if (findMachine(job.machineId()).filter(Machine::isSwitchedOffOnPurpose).isPresent()) {
+                    log.info("Skipping tonight's backup of {}: switched off on purpose", LogSafe.forLog(job.name()));
+                    continue;
+                }
                 Optional<BackupRepository> repo = repositories.getBackupRepositories().stream()
                     .filter(r -> r.name().equals(job.repositoryName())).findFirst();
                 if (repo.isEmpty()) {

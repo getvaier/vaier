@@ -167,30 +167,32 @@ class FleetNudgeTest {
 
     @Test
     void backups_sayWhatWentWrongWithTheLastRun_andOfferTheFixVaierHas() {
-        record Row(String why, boolean down, boolean enabled, boolean asRoot, Function<BackupJob, BackupRun> run,
-                   FleetNudge.Kind expected) {}
         Machine up = peer("Colina 27", MachineType.UBUNTU_SERVER, String.valueOf(Instant.now().getEpochSecond()));
         Machine stale = peer("Colina 27", MachineType.UBUNTU_SERVER, "1000");
+        Machine resting = stale.toBuilder().switchedOffSince(Instant.EPOCH).build();
+        record Row(String why, Machine on, boolean enabled, boolean asRoot, Function<BackupJob, BackupRun> run,
+                   FleetNudge.Kind expected) {}
         for (Row row : List.of(
-            new Row("a failure names what happened", false, true, false,
+            new Row("a failure names what happened", up, true, false,
                 j -> BackupRun.failed(j, "r", Instant.EPOCH, "Could not reach it"), FleetNudge.Kind.BACKUP_FAILED),
-            new Row("no borg client is the one failure Vaier fixes", false, true, false,
+            new Row("no borg client is the one failure Vaier fixes", up, true, false,
                 j -> BackupRun.borgMissing(j, "r", Instant.EPOCH, "Colina 27"), FleetNudge.Kind.BACKUP_NEEDS_READYING),
-            new Row("files lost to permissions are read as root", false, true, false,
+            new Row("files lost to permissions are read as root", up, true, false,
                 j -> BackupRun.fromExitCode(j, "r", Instant.EPOCH, Instant.EPOCH, 1, DENIALS),
                 FleetNudge.Kind.BACK_UP_AS_ROOT),
-            new Row("root already reads everything, so only the verdict is left", false, true, true,
+            new Row("root already reads everything, so only the verdict is left", up, true, true,
                 j -> BackupRun.fromExitCode(j, "r", Instant.EPOCH, Instant.EPOCH, 1, DENIALS),
                 FleetNudge.Kind.BACKUP_INCOMPLETE),
-            new Row("a run that kept everything is not news", false, true, false,
+            new Row("a run that kept everything is not news", up, true, false,
                 j -> BackupRun.fromExitCode(j, "r", Instant.EPOCH, Instant.EPOCH, 0, "ok"), null),
-            new Row("a stopped job is not watched", false, false, false,
+            new Row("a stopped job is not watched", up, false, false,
                 j -> BackupRun.failed(j, "r", Instant.EPOCH, "x"), null),
-            new Row("a machine that is down already says it", true, true, false,
+            new Row("a machine that is down already says it", stale, true, false,
+                j -> BackupRun.failed(j, "r", Instant.EPOCH, "x"), null),
+            new Row("a machine switched off on purpose is not expected to back up", resting, true, false,
                 j -> BackupRun.failed(j, "r", Instant.EPOCH, "x"), null))) {
-            Machine on = row.down() ? stale : up;
-            BackupJob theJob = job(on, row.enabled(), row.asRoot());
-            List<FleetNudge> said = FleetNudge.backups(FleetSignals.builder().machines(List.of(on))
+            BackupJob theJob = job(row.on(), row.enabled(), row.asRoot());
+            List<FleetNudge> said = FleetNudge.backups(FleetSignals.builder().machines(List.of(row.on()))
                 .backupJobs(List.of(theJob)).latestRuns(List.of(row.run().apply(theJob))).build());
             if (row.expected() == null) {
                 assertThat(said).as(row.why()).isEmpty();
@@ -198,7 +200,7 @@ class FleetNudgeTest {
                 assertThat(said).as(row.why()).singleElement().satisfies(n -> {
                     assertThat(n.kind()).isEqualTo(row.expected());
                     assertThat(n.kind().isTrouble()).isTrue();
-                    assertThat(n.value()).isEqualTo(on.id().value());
+                    assertThat(n.value()).isEqualTo(row.on().id().value());
                 });
             }
         }

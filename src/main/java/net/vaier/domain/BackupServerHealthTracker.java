@@ -44,6 +44,14 @@ public class BackupServerHealthTracker {
     }
 
     /**
+     * The going-down just reported for {@code serverName} was not told — its machine is switched off on
+     * purpose — so its coming back is not news either.
+     */
+    public void wentDownQuietly(String serverName) {
+        perServer.computeIfAbsent(serverName, s -> new ServerHealthState()).quiet = true;
+    }
+
+    /**
      * Drop {@code serverName}'s tracked state — call when a Backup server is deleted, so the map never grows
      * unbounded and a re-created server of the same name starts fresh (seeded healthy).
      */
@@ -56,13 +64,16 @@ public class BackupServerHealthTracker {
 
         private boolean healthy = true;
         private int consecutiveFailures = 0;
+        private volatile boolean quiet = false;
 
         synchronized Transition update(boolean healthyNow) {
             if (healthyNow) {
                 consecutiveFailures = 0;
                 if (!healthy) {
                     healthy = true;
-                    return Transition.CROSSED_TO_HEALTHY;
+                    boolean told = !quiet;
+                    quiet = false;
+                    return told ? Transition.CROSSED_TO_HEALTHY : Transition.NONE;
                 }
                 return Transition.NONE;
             }
