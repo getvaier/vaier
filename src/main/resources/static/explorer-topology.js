@@ -589,8 +589,8 @@
         // Wakes run on water only: a village up the coast is seen sailing out from the shore below it.
         const onWater = el('clipPath', { id: 'tp-onwater' }, defs);
         el('rect', { x: 0, y: SHORE + 2, width: W, height: H - SHORE }, onWater);
-        const wakes = el('g', { 'clip-path': 'url(#tp-onwater)' });
-        const lanterns = el('g', { 'clip-path': 'url(#tp-onwater)' });
+        const wakes = el('g', { 'clip-path': 'url(#tp-onwater)', 'data-layer': 'wakes' });
+        const lanterns = el('g', { 'clip-path': 'url(#tp-onwater)', 'data-layer': 'lanterns' });
         // Every wake's course as points on the water, so a moored boat can be kept off them.
         const wakeTrack = [];
         // segs: cubic Béziers [p0, c1, c2, p3], each point [x, y], one running on from the last.
@@ -612,30 +612,33 @@
             return `M ${f(segs[0][0])} ` + segs.map(([, b, c, e]) => `C ${f(b)}, ${f(c)}, ${f(e)}`).join(' ');
         }
         // By day a wake is white foam and what travels it a fleck of spray; after dark, a lantern.
-        function wake(segs, faint, dur, seed, x) {
+        // key names the tunnel, so a repaint can fade a wake in or out rather than switch it.
+        function wake(segs, faint, dur, seed, x, key) {
             const d = course(segs);
             const day = lookOf(bandAt(x)) === 'day';
+            const w = el('g', { 'data-key': 'wake:' + key + (faint ? ':dark' : '') }, wakes);
             el('path', { d, fill: 'none', stroke: day ? '#f6f9fc' : '#e9d7a8', 'stroke-width': faint ? 1.2 : 2,
-                'stroke-dasharray': faint ? '2 7' : '3 9', 'stroke-linecap': 'round', opacity: faint ? 0.3 : day ? 0.7 : 0.55 }, wakes);
+                'stroke-dasharray': faint ? '2 7' : '3 9', 'stroke-linecap': 'round', opacity: faint ? 0.3 : day ? 0.7 : 0.55 }, w);
             el('path', { d, fill: 'none', stroke: day ? '#ffffff' : '#ffe2a4', 'stroke-width': 8, opacity: faint ? 0.03 : 0.06,
-                filter: 'url(#tp-soft)' }, wakes);
+                filter: 'url(#tp-soft)' }, w);
             // A dark tunnel carries no lantern.
             if (still || faint) return;
             const begin = (rng(seed)() * dur).toFixed(2) + 's';
-            const lamp = el('circle', { r: day ? 2.4 : 3, fill: day ? '#ffffff' : '#ffe7b0' }, lanterns);
-            const halo = el('circle', day ? { r: 6, fill: '#ffffff', opacity: 0.25 } : { r: 10, fill: 'url(#tp-glow)' }, lanterns);
+            const lit = el('g', { 'data-key': 'lamp:' + key }, lanterns);
+            const lamp = el('circle', { r: day ? 2.4 : 3, fill: day ? '#ffffff' : '#ffe7b0' }, lit);
+            const halo = el('circle', day ? { r: 6, fill: '#ffffff', opacity: 0.25 } : { r: 10, fill: 'url(#tp-glow)' }, lit);
             [lamp, halo].forEach((n) => {
                 el('animateMotion', { dur: dur + 's', repeatCount: 'indefinite', path: d, keyPoints: '0;1;0',
                     keyTimes: '0;0.5;1', calcMode: 'linear', begin }, n);
             });
         }
-        function villageWake(x1, y1, i, faint, seed) {
+        function villageWake(x1, y1, i, faint, seed, key) {
             const k = i % 5;
             if (L.two) {
                 // Straight out across the sea between the coasts.
                 const x2 = X + (x1 < X ? -60 : 60), y2 = LIGHT.y + 30, sag = 150 + k * 30;
                 wake([[[x1, y1], [x1 + (x2 - x1) * 0.25, y1 + sag], [x1 + (x2 - x1) * 0.7, y2 + sag * 0.7], [x2, y2]]],
-                    faint, 20 + k * 5, seed, x1);
+                    faint, 20 + k * 5, seed, x1, key);
                 return;
             }
             // Out through the fjord mouth, over the open sea, and in to the lighthouse.
@@ -643,7 +646,7 @@
             const x2 = X + 30, y2 = LIGHT.y + 40;
             wake([[[x1, y1], [x1 + 120, y1 + sea.dip], [sea.x - 160, sea.y + 40], [sea.x, sea.y]],
                   [[sea.x, sea.y], [sea.x + 160, sea.y - 40], [x2 + 90, y2 + 10], [x2, y2]]],
-                faint, 22 + k * 5, seed, x1);
+                faint, 22 + k * 5, seed, x1, key);
         }
 
         // --- buildings ------------------------------------------------------------------------------------
@@ -807,7 +810,7 @@
                     // The tunnel leaves from the village's own peer; the machines behind it reach the
                     // internet through that house and have no wake of their own.
                     villageWake(peerX, ri === 0 ? SHORE + 10 : R.base + 4, wakeIndex++, v.site.peer.dark,
-                        hash(v.site.peer.id || v.site.name));
+                        hash(v.site.peer.id || v.site.name), v.site.peer.id || v.site.name);
                     harbours.push({ band: coast.band, country: v.site.country, latitude: v.site.latitude, row: ri,
                         left: vx + hx0 * k, right: vx + (hx0 + v.housesW) * k });
                 });
@@ -838,7 +841,8 @@
         el('path', { d: `M ${skL + 20} 632 C ${X - 40} 612, ${X} 606, ${X + 50} 612`, fill: 'none', stroke: lightLook === 'day' ? '#6a717c' : '#2d3342', 'stroke-width': 3 }, lh);
         // The beam: Vaier's light, what the internet sees — the published services, sweeping the open sea.
         const published = fleet.server.published;
-        const beam = el('g', { class: 'tp-beam tp-anim' + (L.two ? ' is-up' : ''), style: `transform-origin: ${X}px 484px` }, lh);
+        // A still picture keeps its beam still: the stylesheet's reduced-motion rule loses to .tp-beam.is-up.
+        const beam = el('g', still ? {} : { class: 'tp-beam tp-anim' + (L.two ? ' is-up' : ''), style: `transform-origin: ${X}px 484px` }, lh);
         el('path', { d: L.two ? `M ${X} 484 L ${X - 90} 0 L ${X + 90} 0 Z` : `M ${X} 484 L 2000 380 L 2000 560 Z`,
             fill: 'url(#tp-beam)', opacity: (published ? (L.two ? 0.32 : 0.4) : 0.12) * (lightLook === 'day' ? 0.3 : 1), filter: 'url(#tp-soft)' }, beam);
         const tower = el('g', {}, lh);
@@ -901,104 +905,12 @@
             : el('rect', { x: s0 + 40, y: SHORE + 40, width: s1 - s0 - 40, height: H - SHORE - 40, fill: 'transparent' });
         hoverable(seaHit, { name: 'The internet', role: 'open sea', state: 'every tunnel crosses it to reach the lighthouse' }, null);
 
-        // --- boats ------------------------------------------------------------------------------------------
-        // A peer that is online sails the open sea, each in a cell of its own, the cell picked by the machine's
-        // identity so a boat keeps its water when another joins. One that is offline lies moored at a jetty off
-        // the coast where it was last seen (see mooringOf): sail furled, lantern out, no wake.
-        const boats = fleet.boats.slice().sort(byName);
-        const sailing = boats.filter((b) => !b.dark);
-        const moored = boats.filter((b) => b.dark);
-        const quays = [];   // each jetty with its boats, as a box
-        const skerryBox = [skL - 10, 540, skR + 10, 704];
-        const overlaps = (p, q) => p[0] < q[2] && p[2] > q[0] && p[1] < q[3] && p[3] > q[1];
-        if (moored.length) {
-            const groups = new Map();
-            moored.forEach((b) => {
-                const m = mooringOf(b, harbours, L.coasts.map((c) => c.band));
-                const key = m.harbour ? harbours.indexOf(m.harbour) : m.band;
-                if (!groups.has(key)) groups.set(key, { m, boats: [] });
-                groups.get(key).boats.push(b);
-            });
-            // The houses' reflections and window light, the busiest water under a village.
-            const busy = harbours.filter((h) => h.row === 0).map((h) => [h.left - 6, SHORE, h.right + 6, SHORE + 44]);
-            const quay = el('g', {});
-            groups.forEach(({ m, boats: group }) => {
-                const [from, to] = L.two ? (m.band === 'nordic' ? [20, 620] : [1040, W - 20]) : [20, W - 20];
-                const s = Math.max(0.7, Math.min(0.9, (to - from - 20) / (group.length * 100)));
-                const len = group.length * 100 * s + 20;
-                const want = m.harbour ? (m.harbour.left + m.harbour.right) / 2 : (from + to) / 2;
-                // The clearest stretch of water nearest the place, as close in to the shore as it can lie.
-                let best = null;
-                for (const dy of [40, 58, 76, 94, 112, 130]) {
-                    for (let x = from; x + len <= to; x += 8) {
-                        const deck = SHORE + dy;
-                        const box = [x - 4, deck - 50 * s, x + len + 4, deck + 26 * s];
-                        // The pier out from the shore leaves from the jetty's end nearest the village.
-                        const gx = x + len / 2 < want ? x + len - 10 : x + 10;
-                        const clash = [skerryBox].concat(busy, quays).filter((q) => overlaps(box, q)).length
-                            + (crosses(wakeTrack, box) ? 1 : 0) + (crosses(wakeTrack, [gx - 4, SHORE, gx + 4, deck]) ? 1 : 0);
-                        const score = clash * 10000 + Math.abs(x + len / 2 - want) + dy * 3;
-                        if (!best || score < best.score) best = { score, x, deck, box, gx };
-                    }
-                }
-                const { x: a, deck, gx } = best;
-                el('path', { d: `M ${gx - 2.5} ${SHORE + 1} L ${gx + 2.5} ${SHORE + 1} L ${gx + 6} ${deck + 2} L ${gx - 6} ${deck + 2} Z`, fill: '#5a4a3e' }, quay);
-                for (let y = SHORE + 14; y < deck - 4; y += 14) {
-                    const w = 2.5 + 3.5 * (y - SHORE) / (deck - SHORE);
-                    el('rect', { x: (gx - w).toFixed(1), y: y.toFixed(1), width: 1.4, height: 5, fill: '#2a2320' }, quay);
-                    el('rect', { x: (gx + w - 1.4).toFixed(1), y: y.toFixed(1), width: 1.4, height: 5, fill: '#2a2320' }, quay);
-                }
-                group.forEach((b, i) => { b.at = { x: a + 10 + (50 + i * 100) * s, y: deck + 13 * s, s, deck }; });
-                for (let x = a + 6; x < a + len; x += 22) el('rect', { x: x.toFixed(1), y: deck + 3, width: 3, height: (18 * s).toFixed(1), fill: '#2a2320' }, quay);
-                el('rect', { x: a.toFixed(1), y: deck, width: len.toFixed(1), height: 4, fill: '#4a3c33' }, quay);
-                el('rect', { x: a.toFixed(1), y: (deck + 22 * s).toFixed(1), width: len.toFixed(1), height: 3, fill: '#4a3c33', opacity: 0.15, filter: 'url(#tp-tiny)' }, quay);
-                quays.push(best.box);
-            });
-            town.appendChild(quay);
-        }
-
-        const keepOut = [skerryBox].concat(quays);
-        // An online boat's wake: a curve from its stern in to the lighthouse.
-        function sailWake(at) {
-            const left = at.x < X;
-            const x1 = at.x + (left ? 34 : -34) * at.s, y1 = at.y + 4 * at.s, x2 = X + (left ? -40 : 40), y2 = LIGHT.y + 44;
-            const q = [(x1 + x2) / 2, Math.max(y1, y2) + 40];
-            return [[[x1, y1], [x1 + (q[0] - x1) * 2 / 3, y1 + (q[1] - y1) * 2 / 3], [x2 + (q[0] - x2) * 2 / 3, y2 + (q[1] - y2) * 2 / 3], [x2, y2]]];
-        }
-
-        const [coreFrom, coreTo] = L.two ? [s0 - 110, s1 + 110] : [960, W - 6];
-        const [wideFrom, wideTo] = L.two ? [300, 1380] : [640, W - 6];
-        let bs = 1, slots = [], spare = [];
-        for (const s of [1, 0.8, 0.62, 0.48, 0.36]) {
-            bs = s;
-            slots = [];
-            spare = [];
-            const cw = 116 * s, ch = 100 * s;
-            for (let y = 628; y + ch <= H - 8; y += ch) {
-                const [from, to] = y > 740 ? [wideFrom, wideTo] : [coreFrom, coreTo];
-                for (let x = from; x + cw <= to; x += cw) {
-                    const hit = keepOut.some(([a, b, c, d]) => x < c && x + cw > a && y < d && y + ch > b);
-                    const slot = { x: x + cw / 2, y: y + ch * 0.45, cw, s };
-                    if (!hit) (quays.some((q) => crosses(track(sailWake(slot)), q)) ? spare : slots).push(slot);
-                }
-            }
-            if (slots.length >= sailing.length) break;
-        }
-        // A sea too crowded to keep every wake off the jetties still finds each boat its water.
-        if (slots.length < sailing.length) slots = slots.concat(spare);
-        const taken = new Set();
-        sailing.forEach((b) => {
-            let i = hash(b.id) % Math.max(1, slots.length);
-            for (let n = 0; n < slots.length && taken.has(i); n++) i = (i + 1) % slots.length;
-            taken.add(i);
-            b.at = Object.assign({ s: bs }, slots[i]);
-        });
-
         // --- pirate ships: addresses the edge is keeping out ------------------------------------------------
         // A fresh ban sits close in, just turned away; as it runs down its ship drifts out toward the horizon.
-        // Spread over the whole water, clear of the lighthouse, its quay and each other.
-        const pirates = el('g', {});
-        const placed = sailing.map((b) => ({ x: b.at.x, y: b.at.y }));
+        // Where it lies follows from the ban and the fixed lie of the land alone, clear of the lighthouse and of
+        // the other pirates, so a boat coming or going never moves one; the boats keep clear of the pirates.
+        const pirates = el('g', { 'data-layer': 'pirates' });
+        const placed = [], pirateBoxes = [];
         fleet.bans.slice().sort((a, b) => a.drift - b.drift || a.ip.localeCompare(b.ip)).forEach((ban) => {
             const t = Math.min(1, ban.drift / 240);
             const hr = rng(hash(ban.ip));
@@ -1007,14 +919,14 @@
             let x = 70 + hr() * (W - 140);
             for (let tries = 0; tries < 60; tries++) {
                 const nearLight = Math.abs(x - X) < 260 && y < 760;
-                const nearQuay = quays.some(([a, b, c, d]) => x > a - 40 && x < c + 40 && y > b - 30 && y < d + 30);
-                if (!nearLight && !nearQuay && placed.every((p) => Math.hypot(p.x - x, (p.y - y) * 2) > 150)) break;
+                if (!nearLight && placed.every((p) => Math.hypot(p.x - x, (p.y - y) * 2) > 150)) break;
                 x = 70 + hr() * (W - 140);
             }
             placed.push({ x, y });
+            pirateBoxes.push([x - 52 * k - 10, y - 82 * k - 10, x + 52 * k + 10, y + 14 * k + 10]);
             const away = x < X ? -1 : 1;   // the bow points away from the lighthouse
             const outer = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${k.toFixed(3)})`,
-                opacity: (0.55 + t * 0.45).toFixed(2) }, pirates);
+                opacity: (0.55 + t * 0.45).toFixed(2), 'data-key': 'ban:' + ban.ip }, pirates);
             const g = el('g', { transform: `scale(${away} 1)` }, outer);
             el('path', { d: 'M -40 0 L 44 0 L 36 12 L -32 12 Q -42 8 -46 -6 Z', fill: '#0c0d12', class: 'tp-ring' }, g);
             el('path', { d: 'M -46 -6 L -30 -6 L -30 0 L -40 0 Z', fill: '#16171d' }, g);
@@ -1047,6 +959,124 @@
                 if ((e.key === 'Enter' || e.key === ' ') && opts.onBan) { e.preventDefault(); tip.hidden = true; opts.onBan(); }
             });
         });
+
+        // --- boats ------------------------------------------------------------------------------------------
+        // A peer that is online sails the open sea, each in a cell of its own, the cell picked by the machine's
+        // identity so a boat keeps its water when another joins. One that is offline lies moored at a jetty off
+        // the coast where it was last seen (see mooringOf): sail furled, lantern out, no wake.
+        const boats = fleet.boats.slice().sort(byName);
+        const sailing = boats.filter((b) => !b.dark);
+        const moored = boats.filter((b) => b.dark);
+        const quays = [];   // each jetty with its boats, as a box
+        const piers = [];   // each jetty's pier back to the shore, as a box
+        const skerryBox = [skL - 10, 540, skR + 10, 704];
+        const overlaps = (p, q) => p[0] < q[2] && p[2] > q[0] && p[1] < q[3] && p[3] > q[1];
+        const keepOut = [skerryBox];
+        // An online boat's wake: a curve from its stern in to the lighthouse.
+        function sailWake(at) {
+            const left = at.x < X;
+            const x1 = at.x + (left ? 34 : -34) * at.s, y1 = at.y + 4 * at.s, x2 = X + (left ? -40 : 40), y2 = LIGHT.y + 44;
+            const q = [(x1 + x2) / 2, Math.max(y1, y2) + 40];
+            return [[[x1, y1], [x1 + (q[0] - x1) * 2 / 3, y1 + (q[1] - y1) * 2 / 3], [x2 + (q[0] - x2) * 2 / 3, y2 + (q[1] - y2) * 2 / 3], [x2, y2]]];
+        }
+
+        const [coreFrom, coreTo] = L.two ? [s0 - 110, s1 + 110] : [960, W - 6];
+        const [wideFrom, wideTo] = L.two ? [300, 1380] : [640, W - 6];
+        let bs = 1, slots = [];
+        for (const s of [1, 0.8, 0.62, 0.48, 0.36]) {
+            bs = s;
+            slots = [];
+            const cw = 116 * s, ch = 100 * s;
+            for (let y = 628; y + ch <= H - 8; y += ch) {
+                const [from, to] = y > 740 ? [wideFrom, wideTo] : [coreFrom, coreTo];
+                for (let x = from; x + cw <= to; x += cw) {
+                    if (keepOut.some(([a, b, c, d]) => x < c && x + cw > a && y < d && y + ch > b)) continue;
+                    const slot = { x: x + cw / 2, y: y + ch * 0.45, cw, s, box: [x, y, x + cw, y + ch] };
+                    // A cell under a pirate is taken for now; nothing else ever moves an online boat.
+                    slot.busy = pirateBoxes.some((q) => overlaps(slot.box, q));
+                    slots.push(slot);
+                }
+            }
+            // Sized for the whole fleet, online or not, so a boat coming or going never reshapes the grid.
+            if (slots.length >= boats.length * 1.5 + 2) break;
+        }
+        // First come, first served: a boat already at sea keeps its cell; a newcomer takes the cell its identity
+        // picks, or the next free one, so it never pushes aside a boat that was there first.
+        const taken = new Set(), cellOf = new Map();
+        const spare = slots.filter((c) => !c.busy).length >= sailing.length;
+        const index = new Map(slots.map((c, i) => [`${c.x.toFixed(1)} ${c.y.toFixed(1)} ${c.s}`, i]));
+        const free = (i) => !taken.has(i) && !(spare && slots[i].busy);
+        sailing.forEach((b) => {
+            const i = index.get(seaCells.get(b.id));
+            if (i != null && free(i)) { taken.add(i); cellOf.set(b.id, i); }
+        });
+        sailing.forEach((b) => {
+            if (cellOf.has(b.id)) return;
+            let i = hash(b.id) % Math.max(1, slots.length);
+            for (let n = 0; n < slots.length && !free(i); n++) i = (i + 1) % slots.length;
+            taken.add(i);
+            cellOf.set(b.id, i);
+        });
+        seaCells = new Map();
+        sailing.forEach((b) => {
+            const c = slots[cellOf.get(b.id)];
+            b.at = Object.assign({ s: bs }, c);
+            seaCells.set(b.id, `${c.x.toFixed(1)} ${c.y.toFixed(1)} ${c.s}`);
+        });
+
+        // Where the online boats and their wakes lie, for the jetties to keep clear of.
+        const sailTrack = [].concat(...sailing.map((b) => track(sailWake(b.at))));
+        const sailBoxes = sailing.map(({ at }) => [at.x - 44 * at.s, at.y - 66 * at.s, at.x + 44 * at.s, at.y + 14 * at.s]);
+
+        if (moored.length) {
+            const groups = new Map();
+            moored.forEach((b) => {
+                const m = mooringOf(b, harbours, L.coasts.map((c) => c.band));
+                const key = m.harbour ? harbours.indexOf(m.harbour) : m.band;
+                if (!groups.has(key)) groups.set(key, { m, boats: [] });
+                groups.get(key).boats.push(b);
+            });
+            // The houses' reflections and window light, the busiest water under a village.
+            const busy = harbours.filter((h) => h.row === 0).map((h) => [h.left - 6, SHORE, h.right + 6, SHORE + 44]);
+            groups.forEach(({ m, boats: group }, key) => {
+                const quay = el('g', { 'data-key': 'quay:' + key }, town);
+                const [from, to] = L.two ? (m.band === 'nordic' ? [20, 620] : [1040, W - 20]) : [20, W - 20];
+                const s = Math.max(0.7, Math.min(0.9, (to - from - 20) / (group.length * 100)));
+                const len = group.length * 100 * s + 20;
+                const want = m.harbour ? (m.harbour.left + m.harbour.right) / 2 : (from + to) / 2;
+                // The clearest stretch of water nearest the place, as close in to the shore as it can lie.
+                let best = null;
+                for (const dy of [40, 58, 76, 94, 112, 130]) {
+                    for (let x = from; x + len <= to; x += 8) {
+                        const deck = SHORE + dy;
+                        const box = [x - 4, deck - 50 * s, x + len + 4, deck + 26 * s];
+                        // The pier out from the shore leaves from the jetty's end nearest the village.
+                        const gx = x + len / 2 < want ? x + len - 10 : x + 10;
+                        const clash = [skerryBox].concat(busy, quays, pirateBoxes, sailBoxes).filter((q) => overlaps(box, q)).length
+                            + (crosses(wakeTrack, box) || crosses(sailTrack, box) ? 1 : 0)
+                            + (crosses(wakeTrack, [gx - 4, SHORE, gx + 4, deck]) || crosses(sailTrack, [gx - 4, SHORE, gx + 4, deck]) ? 1 : 0);
+                        const score = clash * 10000 + Math.abs(x + len / 2 - want) + dy * 3;
+                        if (!best || score < best.score) best = { score, x, deck, box, gx };
+                    }
+                }
+                const { x: a, deck, gx } = best;
+                // Drawn in its own coordinates, deck at y = 0, so a repaint can glide it to a new berth.
+                quay.setAttribute('transform', `translate(${a.toFixed(1)} ${deck})`);
+                const px = gx - a, up = SHORE - deck;
+                piers.push([gx - 8, SHORE, gx + 8, deck]);
+                el('path', { d: `M ${px - 2.5} ${up + 1} L ${px + 2.5} ${up + 1} L ${px + 6} 2 L ${px - 6} 2 Z`, fill: '#5a4a3e' }, quay);
+                for (let y = up + 14; y < -4; y += 14) {
+                    const w = 2.5 + 3.5 * (y - up) / -up;
+                    el('rect', { x: (px - w).toFixed(1), y: y.toFixed(1), width: 1.4, height: 5, fill: '#2a2320' }, quay);
+                    el('rect', { x: (px + w - 1.4).toFixed(1), y: y.toFixed(1), width: 1.4, height: 5, fill: '#2a2320' }, quay);
+                }
+                group.forEach((b, i) => { b.at = { x: a + 10 + (50 + i * 100) * s, y: deck + 13 * s, s, deck }; });
+                for (let x = 6; x < len; x += 22) el('rect', { x: x.toFixed(1), y: 3, width: 3, height: (18 * s).toFixed(1), fill: '#2a2320' }, quay);
+                el('rect', { x: 0, y: 0, width: len.toFixed(1), height: 4, fill: '#4a3c33' }, quay);
+                el('rect', { x: 0, y: (22 * s).toFixed(1), width: len.toFixed(1), height: 3, fill: '#4a3c33', opacity: 0.15, filter: 'url(#tp-tiny)' }, quay);
+                quays.push(best.box);
+            });
+        }
 
         // A boat in profile, bow to the right, its waterline at y = 0: a sheer rising to stem and stern, the
         // side below a pale top strake, plank lines, and its shadow and reflection on the water.
@@ -1084,7 +1114,7 @@
         }
         function boat(b) {
             const { x, y, s } = b.at;
-            const g = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${s.toFixed(3)})` });
+            const g = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${s.toFixed(3)})`, 'data-key': 'boat:' + b.id, 'data-state': b.dark ? 'moored' : 'sea' });
             const look = lookOf(bandAt(x));
             const H = HULLS[b.kind] || HULLS.faering;
             const wood = '#c9a06a', rig = '#3a2c24';
@@ -1149,7 +1179,7 @@
 
         // --- assemble ----------------------------------------------------------------------------------------
         svg.appendChild(wakes);
-        sailing.forEach((b, i) => wake(sailWake(b.at), false, 12 + (i % 4) * 3, hash(b.id), b.at.x));
+        sailing.forEach((b, i) => wake(sailWake(b.at), false, 12 + (i % 4) * 3, hash(b.id), b.at.x, b.id));
         svg.appendChild(seaHit);
         svg.appendChild(town);
         svg.appendChild(pirates);
@@ -1163,38 +1193,102 @@
         el('stop', { offset: 1, 'stop-color': '#000', 'stop-opacity': lightLook === 'day' ? 0.22 : 0.5 }, vg);
         el('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#tp-vig)', 'pointer-events': 'none' });
 
-        // The scenery is complete now the villages have added their smears: paint it once, under everything.
-        const fresh = [];
-        const picture = (root) => {
-            const u = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(root)], { type: 'image/svg+xml' }));
-            fresh.push(u);
-            return u;
-        };
-        svg.insertBefore(el('image', { href: picture(scene), x: 0, y: 0, width: W, height: H, 'pointer-events': 'none' }),
-            defs.nextSibling);
-        // Film grain over everything, where there is room and motion to carry it.
-        if (!narrow && !still) {
-            const grain = document.createElementNS(NS, 'svg');
-            grain.setAttribute('xmlns', NS);
-            grain.setAttribute('viewBox', `0 0 ${W} ${H}`);
-            grain.setAttribute('width', W);
-            grain.setAttribute('height', H);
-            filter(grain, 'grain', (f) => {
-                el('feTurbulence', { type: 'fractalNoise', baseFrequency: '0.85', numOctaves: 2, seed: 2, stitchTiles: 'stitch', result: 'g' }, f);
-                el('feColorMatrix', { in: 'g', type: 'saturate', values: 0 }, f);
-            });
-            el('rect', { x: 0, y: 0, width: W, height: H, filter: 'url(#grain)' }, grain);
-            el('image', { href: picture(grain), x: 0, y: 0, width: W, height: H, opacity: 0.035,
-                'pointer-events': 'none', style: 'mix-blend-mode: overlay' });
+        // A boat moving between two places goes round what it cannot cross: the shore, the lighthouse's rock (deep
+        // enough that its mast clears it), other jetties and their piers. A clear straight line stays straight;
+        // otherwise it goes down into open water, along beneath the obstacle, and back up.
+        const rockBox = [skL - 40, SHORE, skR + 40, 718];
+        function route(a, b) {
+            const inside = (p, q) => p.x > q[0] && p.x < q[2] && p.y > q[1] && p.y < q[3];
+            const walls = [rockBox].concat(quays, piers).filter((q) => !inside(a, q) && !inside(b, q));
+            const blocked = (p, q) => {
+                const n = Math.ceil(Math.hypot(q.x - p.x, q.y - p.y) / 6);
+                for (let i = 0; i <= n; i++) {
+                    const c = { x: p.x + (q.x - p.x) * i / n, y: p.y + (q.y - p.y) * i / n };
+                    if (c.y < SHORE + 8 || walls.some((w) => inside(c, w))) return true;
+                }
+                return false;
+            };
+            if (!blocked(a, b)) return [a, b];
+            const floor = Math.max(a.y, b.y, ...walls.map((w) => w[3])) + 20;
+            for (let low = Math.min(floor, H - 12); low <= H - 12; low += 20) {
+                const pts = [a, { x: a.x, y: low }, { x: b.x, y: low }, b];
+                if (pts.slice(1).every((p, i) => !blocked(pts[i], p))) {
+                    let r = pts;
+                    for (let k = 0; k < 2; k++) {
+                        r = [r[0]].concat(...r.slice(0, -1).map((p, i) => {
+                            const q = r[i + 1];
+                            return [{ x: p.x * 0.75 + q.x * 0.25, y: p.y * 0.75 + q.y * 0.25 }, { x: p.x * 0.25 + q.x * 0.75, y: p.y * 0.25 + q.y * 0.75 }];
+                        }), [r[r.length - 1]]);
+                    }
+                    return r;
+                }
+            }
+            return [a, b];
         }
-        Promise.all(fresh.map(decoded)).then(() => {
-            if (mine !== drawing) { fresh.forEach((u) => URL.revokeObjectURL(u)); return; }
-            live.replaceChildren(...svg.childNodes);
+
+        // The scenery is complete now the villages have added their smears: paint it once, under everything. A
+        // repaint that leaves it unchanged (a boat coming or going) keeps the picture already on screen.
+        const sceneText = new XMLSerializer().serializeToString(scene);
+        const reuse = sceneNow && sceneNow.text === sceneText;
+        const sceneUrl = reuse ? sceneNow.url : URL.createObjectURL(new Blob([sceneText], { type: 'image/svg+xml' }));
+        const waits = reuse ? [] : [decoded(sceneUrl)];
+        svg.insertBefore(el('image', { href: sceneUrl, x: 0, y: 0, width: W, height: H, 'pointer-events': 'none', 'data-scene': '',
+            // Its own layer, so a crossfade's end never makes the browser paint the heavy scenery again.
+            style: 'will-change: opacity' }), defs.nextSibling);
+        // Film grain over everything, where there is room and motion to carry it. It never changes.
+        if (!narrow && !still) {
+            if (!grainUrl) {
+                const grain = document.createElementNS(NS, 'svg');
+                grain.setAttribute('xmlns', NS);
+                grain.setAttribute('viewBox', `0 0 ${W} ${H}`);
+                grain.setAttribute('width', W);
+                grain.setAttribute('height', H);
+                filter(grain, 'grain', (f) => {
+                    el('feTurbulence', { type: 'fractalNoise', baseFrequency: '0.85', numOctaves: 2, seed: 2, stitchTiles: 'stitch', result: 'g' }, f);
+                    el('feColorMatrix', { in: 'g', type: 'saturate', values: 0 }, f);
+                });
+                el('rect', { x: 0, y: 0, width: W, height: H, filter: 'url(#grain)' }, grain);
+                grainUrl = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(grain)], { type: 'image/svg+xml' }));
+                waits.push(decoded(grainUrl));
+            }
+            el('image', { href: grainUrl, x: 0, y: 0, width: W, height: H, opacity: 0.035,
+                'pointer-events': 'none', style: 'mix-blend-mode: overlay', 'data-grain': '' });
+        }
+        Promise.all(waits).then(() => {
+            if (mine !== drawing) { if (!reuse) URL.revokeObjectURL(sceneUrl); return; }
+            const before = still ? null : where(live);
+            const kids = Array.from(svg.childNodes);
+            const newScene = kids.find((n) => n.hasAttribute('data-scene')), newGrain = kids.find((n) => n.hasAttribute('data-grain'));
+            const oldScene = live.querySelector('image[data-scene]'), oldGrain = live.querySelector('image[data-grain]');
+            // Images that stay are left where they are: moving one makes the browser paint it all over again.
+            const keepScene = reuse && oldScene && oldScene.getAttribute('href') === sceneUrl ? oldScene : null;
+            const under = !still && !keepScene && oldScene ? oldScene : null;
+            const keepGrain = newGrain && oldGrain ? oldGrain : null;
+            Array.from(live.childNodes).forEach((n) => { if (n !== keepScene && n !== under && n !== keepGrain) n.remove(); });
+            let cursor = null;
+            const put = (n) => { if (cursor) cursor.after(n); else live.prepend(n); cursor = n; };
+            kids.forEach((n) => {
+                if (n === newScene && keepScene) { cursor = keepScene; return; }
+                if (n === newGrain && keepGrain) { cursor = keepGrain; return; }
+                if (n === newScene && under) cursor = under;
+                put(n);
+            });
             // An animation keeps the clock of the picture it was made in, and the buffer's never runs.
             live.querySelectorAll('animateMotion, animateTransform').forEach((a) => a.replaceWith(a.cloneNode(true)));
-            urls.forEach((u) => URL.revokeObjectURL(u));
-            urls = fresh;
             resync(live);
+            const was = sceneNow;
+            sceneNow = { text: sceneText, url: sceneUrl };
+            const release = () => { if (was && was.url !== sceneUrl) URL.revokeObjectURL(was.url); };
+            if (before) glide(live, before, route);
+            if (under) {
+                // The old scenery stays under the new while the new fades in, then goes.
+                under.removeAttribute('data-scene');
+                const a = newScene.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE, easing: 'ease-in-out' });
+                const done = () => { under.remove(); release(); };
+                a.finished.then(done, done);
+            } else {
+                release();
+            }
         });
     }
 
@@ -1205,8 +1299,132 @@
         return img.decode().catch(() => {});
     }
 
+    // --- the change from one picture to the next ------------------------------------------------------------
+    // Everything a repaint keeps (a boat, a pirate, a wake) carries a data-key. Before the swap the picture notes
+    // where each one is, mid-move included; after it, each glides from there to its new place, what is new fades
+    // in, and what is gone fades out over the new picture.
+    const GLIDE = 2200, FADE = 800;
+    function cssTransform(attr) {
+        if (!attr) return 'none';
+        const t = attr.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/), s = attr.match(/scale\(([-\d.]+)\)/);
+        return (t ? `translate(${t[1]}px, ${t[2]}px)` : '') + (s ? ` scale(${s[1]})` : '') || 'none';
+    }
+    // A glide as keyframes along the route, its speed steady: longer detours take a little longer.
+    function place(t) {
+        const m = t.match(/matrix\(([^)]+)\)/);
+        if (m) { const v = m[1].split(',').map(Number); return { x: v[4], y: v[5], s: v[0] }; }
+        const tt = t.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/), ss = t.match(/scale\(([-\d.]+)\)/);
+        return { x: tt ? +tt[1] : 0, y: tt ? +tt[2] : 0, s: ss ? +ss[1] : 1 };
+    }
+    function voyage(from, to, route) {
+        const a = place(from), b = place(to), pts = route(a, b);
+        const cum = [0];
+        for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+        const L = cum[cum.length - 1] || 1, straight = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const frames = pts.map((p, i) => ({ offset: cum[i] / L,
+            transform: `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) scale(${(a.s + (b.s - a.s) * cum[i] / L).toFixed(3)})` }));
+        frames[0].transform = from;
+        frames[frames.length - 1].transform = to;
+        return { frames, duration: Math.min(3000, Math.max(GLIDE, GLIDE * L / straight)) };
+    }
+    function where(live) {
+        const at = new Map();
+        live.querySelectorAll('[data-key]').forEach((n) => {
+            const moving = n.getAnimations && n.getAnimations().some((a) => a.playState === 'running');
+            at.set(n.getAttribute('data-key'), { n, state: n.getAttribute('data-state'), unseen: getComputedStyle(n).opacity === '0',
+                t: moving ? getComputedStyle(n).transform : cssTransform(n.getAttribute('transform')) });
+        });
+        return at;
+    }
+    // A boat that goes offline sails in as it was, under way, and only at the jetty turns into a boat tied up;
+    // one that comes online makes ready at the jetty first and then sails out. Whichever drawing is travelling
+    // carries the key, so a repaint mid-trip turns the boat round from where it is.
+    const TURN = 600;
+    function glide(live, before, route) {
+        const now = Array.from(live.querySelectorAll('[data-key]')).map((n) => [n, n.getAttribute('data-key')]);
+        const casting = new Set();
+        now.forEach(([n, key]) => {
+            const was = before.get(key), state = n.getAttribute('data-state');
+            if (key.startsWith('boat:') && was && was.state && state && was.state !== state && state === 'sea') casting.add(key.slice(5));
+            // A wake still waiting for its boat when this repaint came keeps waiting for the boat's new trip.
+            const id = /^(wake|lamp):/.test(key) && key.replace(/^(wake|lamp):/, '').replace(/:dark$/, '');
+            if (id && was && was.unseen) casting.add(id);
+        });
+        const quit = (n) => { n.removeAttribute('data-key'); n.setAttribute('pointer-events', 'none'); n.getAnimations().forEach((a) => a.cancel()); };
+        // A boat casting off draws its tunnel only once it is out at sea: its wake and lantern wait, unseen, for
+        // its trip to end. A repaint meanwhile replaces them, so they are never left waiting.
+        const waiting = new Map(), underway = new Set();
+        const reveal = (n) => n.animate([{ opacity: 0 }, { opacity: n.getAttribute('opacity') || 1 }], { duration: FADE, easing: 'ease-out' });
+        now.forEach(([n, key]) => {
+            const was = before.get(key);
+            before.delete(key);
+            const tid = /^(wake|lamp):/.test(key) && key.replace(/^(wake|lamp):/, '').replace(/:dark$/, '');
+            if (tid && casting.has(tid) && (!was || was.unseen)) {
+                const hold = n.animate([{ opacity: 0 }, { opacity: 0 }], { duration: 1, fill: 'forwards' });
+                if (!waiting.has(tid)) waiting.set(tid, []);
+                waiting.get(tid).push(() => { hold.cancel(); reveal(n); });
+                return;
+            }
+            if (!was) {
+                reveal(n);
+                return;
+            }
+            const to = cssTransform(n.getAttribute('transform')), state = n.getAttribute('data-state');
+            if (key.startsWith('boat:') && was.state && state && was.state !== state && was.n !== n) {
+                const old = was.n, v = voyage(was.t, to, route), total = v.duration + TURN;
+                quit(old);
+                if (state === 'moored') {
+                    // Sails in as it was, then ties up.
+                    n.after(old);
+                    old.setAttribute('data-key', key);
+                    n.setAttribute('data-key', key + ':hidden');
+                    old.animate(v.frames, { duration: v.duration, easing: 'ease-in-out', fill: 'forwards' });
+                    old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: TURN, delay: v.duration, fill: 'forwards' })
+                        .finished.then(() => old.remove(), () => old.remove());
+                    const a = n.animate([{ opacity: 0 }, { opacity: 0, offset: v.duration / total }, { opacity: 1 }], { duration: total });
+                    a.finished.then(() => n.setAttribute('data-key', key), () => {});
+                } else {
+                    // Makes ready at the jetty, then sails out.
+                    n.before(old);
+                    old.animate([{ transform: was.t, opacity: 1 }, { transform: was.t, opacity: 0 }], { duration: TURN, fill: 'forwards' })
+                        .finished.then(() => old.remove(), () => old.remove());
+                    n.animate([{ opacity: 0 }, { opacity: 1 }], { duration: TURN, fill: 'backwards' });
+                    const trip = n.animate(v.frames, { duration: v.duration, delay: TURN, easing: 'ease-in-out', fill: 'backwards' });
+                    const id = key.slice(5);
+                    trip.finished.then(() => (waiting.get(id) || []).forEach((go) => go()), () => {});
+                    underway.add(id);
+                }
+                return;
+            }
+            if (to !== 'none' && was.t !== to) {
+                // Only a boat goes round things; a jetty simply slides to its new berth.
+                const v = voyage(was.t, to, key.startsWith('boat:') ? route : (p, q) => [p, q]);
+                const trip = n.animate(v.frames, { duration: v.duration, easing: 'ease-in-out' });
+                const id = key.startsWith('boat:') && key.slice(5);
+                if (id && casting.has(id)) {
+                    underway.add(id);
+                    trip.finished.then(() => (waiting.get(id) || []).forEach((go) => go()), () => {});
+                }
+            }
+        });
+        // Should no trip have started after all, nothing is left unseen.
+        waiting.forEach((goes, id) => { if (!underway.has(id)) goes.forEach((go) => go()); });
+        // What is gone leaves over the new picture, in its own layer; a lantern simply goes out.
+        before.forEach(({ n, unseen }, key) => {
+            if (unseen || key.startsWith('lamp:') || key.endsWith(':hidden')) return;
+            const layer = n.parentNode && n.parentNode.getAttribute && n.parentNode.getAttribute('data-layer');
+            const host = (layer && live.querySelector(`[data-layer="${layer}"]`)) || live;
+            quit(n);
+            host.appendChild(n);
+            const a = n.animate([{ opacity: n.getAttribute('opacity') || 1 }, { opacity: 0 }], { duration: FADE, easing: 'ease-in', fill: 'forwards' });
+            a.finished.then(() => n.remove(), () => n.remove());
+        });
+    }
+
     let drawing = 0;   // the latest repaint; an older one still decoding is dropped
-    let urls = [];   // the painted scenery of the last repaint, released on the next
+    let seaCells = new Map();   // each online boat's cell at the last repaint, so it keeps it at the next
+    let sceneNow = null;   // the scenery on screen, as text and as the picture made of it
+    let grainUrl = null;   // the film grain, the same for every repaint
 
     // Everything that moves keeps time by the wall clock, so a picture taken out of the page and put back (every
     // Explorer re-render does that) or redrawn carries on where it was instead of jumping to its start.
