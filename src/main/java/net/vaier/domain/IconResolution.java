@@ -2,8 +2,10 @@ package net.vaier.domain;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,6 +24,15 @@ public final class IconResolution {
         Pattern.compile("href=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
     private static final Pattern TYPE_ATTR =
         Pattern.compile("type=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern ASSET_HOST =
+        Pattern.compile("(?:src|href)=[\"'](?:https?:)?//([A-Za-z0-9.-]+)", Pattern.CASE_INSENSITIVE);
+    /** Hosts that serve anybody's assets, so they say nothing about which product a page is. */
+    private static final Set<String> GENERIC_VENDORS = Set.of(
+        "jsdelivr", "unpkg", "cloudflare", "cdnjs", "googleapis", "gstatic", "google", "googletagmanager",
+        "jquery", "bootstrapcdn", "fontawesome", "typekit", "polyfill", "cloudfront", "amazonaws", "azureedge",
+        "akamaihd", "akamaized", "fastly", "github", "githubusercontent", "gravatar", "w3", "schema");
+    private static final Set<String> SECOND_LEVEL = Set.of("co", "com", "org", "net", "ac", "gov", "edu");
 
     private IconResolution() {}
 
@@ -89,6 +100,35 @@ public final class IconResolution {
             }
         }
         return host.split("\\.")[0].toLowerCase();
+    }
+
+    /**
+     * The names to look up on the icon CDNs, in order: the service's own (see {@link #cdnLookupName}), then the
+     * vendor of any host the page loads its assets from — a device whose page only pulls its UI from
+     * {@code ui.opensprinkler.com} is an OpenSprinkler, whatever it was published as.
+     */
+    public static List<String> cdnLookupNames(String host, String pathPrefix, String html) {
+        Set<String> names = new LinkedHashSet<>();
+        names.add(cdnLookupName(host, pathPrefix));
+        if (html != null) {
+            String own = vendorOf(host.toLowerCase());
+            Matcher m = ASSET_HOST.matcher(html);
+            while (m.find()) {
+                String vendor = vendorOf(m.group(1).toLowerCase());
+                if (vendor != null && !vendor.equals(own) && !GENERIC_VENDORS.contains(vendor)) names.add(vendor);
+            }
+        }
+        return List.copyOf(names);
+    }
+
+    /** The registrable name of a host — {@code opensprinkler} for {@code ui.opensprinkler.com}. */
+    private static String vendorOf(String host) {
+        if (host.matches("[0-9.]+")) return null;
+        String[] labels = host.split("\\.");
+        if (labels.length < 2) return null;
+        int i = labels.length - 2;
+        if (labels.length >= 3 && SECOND_LEVEL.contains(labels[i])) i--;
+        return labels[i];
     }
 
     /** The external icon-CDN URLs to try, in fallback order, for a given service name. */

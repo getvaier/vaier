@@ -66,6 +66,31 @@ class IconResolutionTest {
         assertThat(url).isPresent();
     }
 
+    // --- cdnLookupNames ---
+
+    @Test
+    void cdnLookupNames_addTheVendorAPageLoadsItsUiFrom_butNeverAGenericCdnOrTheServiceItself() {
+        // OpenSprinkler's page declares no icon and loads everything from ui.opensprinkler.com, so a
+        // controller published as "irrigation" showed only a letter.
+        record Row(String description, String html, List<String> expected) {}
+        List<Row> rows = List.of(
+            new Row("vendor host", "<script src=\"https://ui.opensprinkler.com/js/home.js\"></script>",
+                List.of("irrigation", "opensprinkler")),
+            new Row("generic CDNs are skipped",
+                "<script src=\"https://cdn.jsdelivr.net/x.js\"></script><link href=\"https://fonts.googleapis.com/css\">",
+                List.of("irrigation")),
+            new Row("the service's own domain adds nothing",
+                "<script src=\"https://irrigation.example.com/app.js\"></script>", List.of("irrigation")),
+            new Row("a vendor named twice is tried once",
+                "<script src=\"https://ui.opensprinkler.com/a.js\"></script><script src=\"https://cdn.opensprinkler.com/b.js\"></script>",
+                List.of("irrigation", "opensprinkler")),
+            new Row("no page", null, List.of("irrigation")));
+        for (Row row : rows) {
+            assertThat(IconResolution.cdnLookupNames("irrigation.example.com", null, row.html()))
+                .as(row.description()).isEqualTo(row.expected());
+        }
+    }
+
     // --- cdnLookupName ---
 
     @Test

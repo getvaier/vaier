@@ -216,4 +216,16 @@ class IconServiceTest {
         assertThat(result).isPresent();
         assertThat(result.get().contentType()).isEqualTo("image/png");
     }
+
+    @Test
+    void getIcon_triesTheVendorThePageLoadsFrom_whenTheHostnameNamesNoIcon() {
+        when(forFetchingIcons.fetchHtml(anyString())).thenReturn(Optional.empty());
+        when(forFetchingIcons.fetchHtml("https://irrigation.example.com/"))
+            .thenReturn(Optional.of("<script src=\"https://ui.opensprinkler.com/js/home.js\"></script>"));
+        when(forFetchingIcons.fetchBytes(anyString())).thenReturn(Optional.empty());
+        when(forFetchingIcons.fetchBytes("https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/opensprinkler.png"))
+            .thenReturn(Optional.of(new FetchedBytes(png(), "image/png")));
+
+        assertThat(service.getIcon("irrigation.example.com", null)).isPresent();
+    }
 }

@@ -50,42 +50,32 @@ public class IconService implements GetIconUseCase {
         // The origin comes first: a social-gated service 401s every fetch of its public https://
         // address, because Vaier holds no oauth2 cookie — and only the origin has the app's own
         // <link rel="icon">. Never take the origin from the caller; that would be an open proxy.
-        Optional<Icon> result = fromOrigin(host, prefix);
-        if (result.isEmpty()) result = fromHtmlHint(prefixedUrl);
+        Optional<String> origin = ReverseProxyRoute.originUrlFor(
+            forPersistingReverseProxyRoutes.getReverseProxyRoutes(), host, prefix);
+        Optional<String> page = origin.flatMap(o -> forFetchingIcons.fetchHtml(o + prefix + "/"));
+        Optional<Icon> result = page.flatMap(html -> IconResolution.extractIconUrl(html, origin.get() + prefix))
+            .flatMap(this::fetchIcon);
+        // Root, not prefixed: the prefix is a Traefik matcher, and the backend usually serves at /.
+        if (result.isEmpty() && origin.isPresent()) result = fetchIcon(origin.get() + "/favicon.ico");
+        if (result.isEmpty()) {
+            Optional<String> publicPage = forFetchingIcons.fetchHtml(prefixedUrl + "/");
+            if (page.isEmpty()) page = publicPage;
+            result = publicPage.flatMap(html -> IconResolution.extractIconUrl(html, prefixedUrl)).flatMap(this::fetchIcon);
+        }
         if (result.isEmpty() && !prefix.isEmpty()) result = fetchIcon(prefixedUrl + "/favicon.ico");
         if (result.isEmpty()) result = fetchIcon(hostUrl + "/favicon.ico");
         if (result.isEmpty()) result = fetchIcon(hostUrl + "/apple-touch-icon.png");
         if (result.isEmpty()) result = fetchIcon(hostUrl + "/apple-touch-icon-precomposed.png");
-        if (result.isEmpty()) {
-            for (String iconUrl : IconResolution.internetIconUrls(
-                    IconResolution.cdnLookupName(host, prefix))) {
-                result = fetchIcon(iconUrl);
+        for (String name : IconResolution.cdnLookupNames(host, prefix, page.orElse(null))) {
+            for (String iconUrl : IconResolution.internetIconUrls(name)) {
                 if (result.isPresent()) break;
+                result = fetchIcon(iconUrl);
             }
         }
         cache.put(cacheKey, result);
         // Persist positives only — an absent result is not written so a once-dead host can recover.
         result.ifPresent(icon -> forStoringIcons.store(cacheKey, icon));
         return result;
-    }
-
-    /** The icon as served by the backend itself, when a route tells us where that backend is. */
-    private Optional<Icon> fromOrigin(String host, String prefix) {
-        Optional<String> origin = ReverseProxyRoute.originUrlFor(
-            forPersistingReverseProxyRoutes.getReverseProxyRoutes(), host, prefix);
-        if (origin.isEmpty()) return Optional.empty();
-
-        Optional<Icon> result = fromHtmlHint(origin.get() + prefix);
-        // Root, not prefixed: the prefix is a Traefik matcher, and the backend usually serves at /.
-        if (result.isEmpty()) result = fetchIcon(origin.get() + "/favicon.ico");
-        return result;
-    }
-
-    private Optional<Icon> fromHtmlHint(String prefixedUrl) {
-        Optional<String> html = forFetchingIcons.fetchHtml(prefixedUrl + "/");
-        if (html.isEmpty()) return Optional.empty();
-        return IconResolution.extractIconUrl(html.get(), prefixedUrl)
-            .flatMap(this::fetchIcon);
     }
 
     private Optional<Icon> fetchIcon(String url) {
