@@ -100,15 +100,18 @@
         },
     };
 
-    // What a blocked address was caught doing, in plain words. CrowdSec's scenario names are mechanism.
+    // What a pirate was caught doing, in words anyone in the family understands.
     const TRIED = {
-        'http-probing': 'probing', 'http-admin-interface-probing': 'probing admin interfaces',
-        'http-wordpress-scan': 'scanning for WordPress', 'http-backdoors-attempts': 'trying backdoors',
-        'http-crawl-non_statics': 'crawling', 'http-bad-user-agent': 'using a known attack tool',
-        'http-sensitive-files': 'looking for secret files', 'http-path-traversal-probing': 'trying to climb out of folders',
+        'http-probing': 'looking for weak spots', 'http-admin-interface-probing': 'looking for weak spots',
+        'http-wordpress-scan': 'looking for weak spots', 'http-backdoors-attempts': 'trying to break in',
+        'http-crawl-non_statics': 'snooping around', 'http-bad-user-agent': 'using a break-in tool',
+        'http-sensitive-files': 'looking for secret files', 'http-path-traversal-probing': 'trying to sneak into files',
         'ssh-bf': 'guessing passwords', 'ssh-slow-bf': 'guessing passwords', 'http-generic-bf': 'guessing passwords',
     };
-    const triedWords = (scenario) => TRIED[String(scenario || '').split('/').pop()] || 'trying to get in';
+    const triedWords = (scenario) => TRIED[String(scenario || '').split('/').pop()] || 'trying to break in';
+    // Who a pirate is: someone from somewhere.
+    const THE = /^(United |Netherlands|Philippines|Czech|Dominican|Bahamas|Maldives|Seychelles|Gambia|Central African)/;
+    const someone = (country) => (country ? 'Someone in ' + (THE.test(country) ? 'the ' : '') + country : 'Someone, location unknown');
     // North first: a site with no known latitude goes after every one that has one.
     const northFirst = (a, b) => ((b.latitude ?? -999) - (a.latitude ?? -999)) || byName(a, b);
 
@@ -536,14 +539,15 @@
             g.setAttribute('tabindex', '0');
             const words = () => {
                 const seen = info.seen ? ago(info.seen) : '';
-                const state = typeof info.state === 'function' ? info.state() : info.state;
-                return [info.role, info.address, state + (state && seen ? ', last seen ' + seen : '')]
+                const state = (typeof info.state === 'function' ? info.state() : info.state) || '';
+                return [info.role, state + (state && seen ? ', last seen ' + seen : '')]
                     .filter(Boolean).join(' \u00b7 ');
             };
             const line = words();
             g.setAttribute('aria-label', info.name + (line ? ', ' + line : ''));
             if (machineId) g.setAttribute('role', 'link');
             const show = (x, y) => {
+                pointer = { x, y };
                 tip.textContent = '';
                 const s = document.createElement('strong'); s.textContent = info.name;
                 const d = document.createElement('span'); d.textContent = words();
@@ -576,13 +580,13 @@
             return true;
         }
         // A small flag on a pole standing at (x, y): the country a place is in.
-        function flagpole(parent, x, y, country, role, place) {
+        function flagpole(parent, x, y, country, role) {
             if (!FLAGS[country]) return;
             const g = el('g', {}, parent);
             el('line', { x1: x, y1: y, x2: x, y2: y - 46, stroke: '#d9dce2', 'stroke-width': 1.4 }, g);
             el('circle', { cx: x, cy: y - 47, r: 1.6, fill: '#e8c46a' }, g);
             cloth(g, x + 1, y - 46, country);
-            hoverable(g, { name: country, role, address: place || '' }, null);
+            hoverable(g, { name: country, role }, null);
         }
 
         // --- wakes (tunnels), each from a village's own peer to the lighthouse -----------------------------
@@ -785,7 +789,7 @@
                         if (house.isPeer) peerX = vx + (hx + w / 2) * k;
                         const top = house.stabbur ? -60 : coast.band === 'med' ? -(houseHeight(house) + 4) : -houseHeight(house);
                         eaves.push({ l: hx, r: hx + w, y: top + 3, dark: house.dark });
-                        if (house.isPeer) flagpole(g, facesRight ? hx + w + 9 : hx - 9, 0, v.site.country, 'where ' + v.site.name + ' stands');
+                        if (house.isPeer) flagpole(g, facesRight ? hx + w + 9 : hx - 9, 0, v.site.country, 'where ' + v.site.name + ' is');
                         hx += w + 16;
                     });
                     // The village's LAN: one string of festoon lights along every eave. It is one shared network, so it
@@ -833,8 +837,11 @@
             cursor = side === 0 ? cursor - w : cursor + w;
             skerryPlaced.push({ house, x, w });
         });
+        // The flag stands past the houses on the seaward side, and the sign past the flag; the rock reaches to hold both.
+        const rightmost = Math.max(X + 62, ...skerryPlaced.filter((p) => p.x > X).map((p) => p.x + p.w + 10));
+        const signX = rightmost + 38;
         const skL = Math.min(X - 100, ...skerryPlaced.map((p) => p.x - 24));
-        const skR = Math.max(X + 140, ...skerryPlaced.map((p) => p.x + p.w + 24));
+        const skR = Math.max(X + 140, signX + 44, ...skerryPlaced.map((p) => p.x + p.w + 24));
 
         const lh = el('g', {});
         el('path', { d: `M ${skL} 640 C ${skL + 20} 600, ${X - 40} 600, ${X - 20} 590 C ${X + 20} 578, ${X + 60} 596, ${skR - 50} 612 C ${skR - 20} 628, ${skR} 640, ${skR - 30} 648 Z`, fill: lightLook === 'day' ? '#3a414c' : '#1b1f2a' }, lh);
@@ -858,22 +865,42 @@
         el('rect', { x: X - 30, y: 598, width: 60, height: 10, fill: '#e3e5ea' }, tower);
         if (lightLook !== 'day') el('rect', { x: X - 16, y: 612, width: 36, height: 55, fill: '#fff1c8', opacity: 0.12, filter: 'url(#tp-soft)' }, tower);
         const lightWords = published
-            ? published + (published === 1 ? ' service published' : ' services published') + ' to the internet'
-            : 'nothing published to the internet yet';
-        hoverable(tower, { name: fleet.server.name, role: 'the Vaier server', address: fleet.server.address, state: lightWords },
-            fleet.server.id);
+            ? 'shows the way to your ' + (published === 1 ? 'website' : published + ' websites')
+            : 'no websites to show the way to yet';
+        hoverable(tower, { name: 'Vaier', role: lightWords }, fleet.server.id);
 
         skerryPlaced.forEach((p) => {
             const g = el('g', { transform: `translate(${p.x.toFixed(1)} 604) scale(${sk.toFixed(3)})` }, lh);
             const b = p.house.stabbur ? stabbur(g, 6, p.house, null, lightLook) : rorbu(g, 6, 32, 26, p.house, false, null, lightLook);
             hoverable(b, p.house, p.house.id);
         });
-        const rightmost = Math.max(X + 62, ...skerryPlaced.filter((p) => p.x > X).map((p) => p.x + p.w + 10));
-        flagpole(lh, rightmost, 604, fleet.server.country, 'where the Vaier server stands', fleet.server.place);
+        flagpole(lh, rightmost, 604, fleet.server.country, 'where Vaier is' + (fleet.server.place ? ', in ' + fleet.server.place : ''));
+
+        // A sign on the rock: no pirates. A pictogram only, the picture carries no words.
+        const SIGN = { day: ['#8a6a4a', '#5e4630', '#f4f1ea', '#c8352b', '#1c1a1a'], twilight: ['#5d4836', '#3f3024', '#cfc6b6', '#9e3a30', '#2a2522'],
+                       night: ['#3a2f27', '#2a211b', '#8f8a82', '#7a3530', '#22201e'] }[lightLook];
+        const [wood, frame, face, red, ink] = SIGN;
+        const sign = el('g', { transform: `translate(${signX.toFixed(1)} 615)` }, lh);
+        el('rect', { x: -1.5, y: -30, width: 3, height: 31, fill: wood }, sign);
+        el('rect', { x: -12.5, y: -45, width: 25, height: 25, rx: 2.5, fill: frame, class: 'tp-ring' }, sign);
+        el('circle', { cx: 0, cy: -32.5, r: 10.2, fill: face }, sign);
+        // Skull and crossbones, struck through by the red ring's bar.
+        const bones = el('g', { stroke: ink, 'stroke-width': 1.4, 'stroke-linecap': 'round' }, sign);
+        el('path', { d: 'M -5.2 -26.6 L 5.2 -33.4 M 5.2 -26.6 L -5.2 -33.4' }, bones);
+        [[-5.2, -26.6], [5.2, -26.6], [-5.2, -33.4], [5.2, -33.4]].forEach(([x, y]) => el('circle', { cx: x, cy: y, r: 1.1, fill: ink, stroke: 'none' }, bones));
+        el('circle', { cx: 0, cy: -34.4, r: 3.6, fill: ink }, sign);
+        el('rect', { x: -2.1, y: -32.2, width: 4.2, height: 2.6, rx: 0.6, fill: ink }, sign);
+        el('circle', { cx: -1.35, cy: -34.4, r: 1, fill: face }, sign);
+        el('circle', { cx: 1.35, cy: -34.4, r: 1, fill: face }, sign);
+        el('circle', { cx: 0, cy: -32.5, r: 9, fill: 'none', stroke: red, 'stroke-width': 2.3 }, sign);
+        el('line', { x1: -6.4, y1: -38.9, x2: 6.4, y2: -26.1, stroke: red, 'stroke-width': 2 }, sign);
+        // After dark it catches a little of the lighthouse's light, never more than a lantern's.
+        if (lightLook !== 'day') el('circle', { cx: 0, cy: -32.5, r: 10.2, fill: '#ffd99a', opacity: lightLook === 'night' ? 0.1 : 0.07 }, sign);
+        hoverable(sign, { name: 'No pirates', role: 'anyone caught trying to break in is turned away here' }, null);
 
         const beamHit = el('path', { d: L.two ? `M ${X} 468 L ${X - 70} 280 L ${X + 70} 280 Z` : `M ${X + 20} 470 L 1600 400 L 1600 500 Z`,
             fill: 'transparent' });
-        hoverable(beamHit, { name: 'Published services', role: 'the beam', state: lightWords }, null);
+        hoverable(beamHit, { name: 'The light', role: lightWords }, null);
 
         // The public, steering for the light: a coastal ship on the horizon, there only when something shines.
         // It plies the horizon a few minutes each way, far out beyond the lighthouse (which hides it as it
@@ -897,13 +924,13 @@
             const shipLit = lightLook !== 'day';
             for (let i = 0; i < 8; i++) el('rect', { x: -22 + i * 5.2, y: -6, width: 2.4, height: 2.4, fill: shipLit ? '#ffd88f' : '#3a4250' }, hull);
             if (shipLit) el('path', { d: 'M -34 8 L 34 8', stroke: '#ffd88f', opacity: 0.25, 'stroke-width': 3, filter: 'url(#tp-tiny)' }, hull);
-            hoverable(ship, { name: 'The public', role: 'coastal ship', state: 'people on the internet, steering for the published services' }, null);
+            hoverable(ship, { name: 'Visitors', role: 'people on the internet, heading for your websites' }, null);
         }
 
         const seaHit = L.two
             ? el('rect', { x: s0, y: SHORE + 30, width: s1 - s0, height: H - SHORE - 30, fill: 'transparent' })
             : el('rect', { x: s0 + 40, y: SHORE + 40, width: s1 - s0 - 40, height: H - SHORE - 40, fill: 'transparent' });
-        hoverable(seaHit, { name: 'The internet', role: 'open sea', state: 'every tunnel crosses it to reach the lighthouse' }, null);
+        hoverable(seaHit, { name: 'The internet', role: 'everything crosses it to reach Vaier' }, null);
 
         // --- pirate ships: addresses the edge is keeping out ------------------------------------------------
         // A fresh ban sits close in, just turned away; as it runs down its ship drifts out toward the horizon.
@@ -946,11 +973,11 @@
                 el('line', { x1: -6 * away, y1: -64, x2: -6 * away, y2: -80, stroke: '#1b1a1a', 'stroke-width': 2 }, outer);
                 cloth(outer, -6 * away + 1, -80, ban.country, 1.3);
             }
-            const said = [ban.country, triedWords(ban.scenario)].filter(Boolean).join(', ');
-            hoverable(outer, { name: ban.ip, role: said, state: () => {
+            hoverable(outer, { name: someone(ban.country), role: triedWords(ban.scenario), state: () => {
                 const left = Math.max(1, Math.round((ban.until - Date.now()) / 60000));
-                const hrs = Math.floor(left / 60), mins = left % 60;
-                return 'kept out for ' + (hrs ? hrs + ' h ' : '') + mins + ' min more';
+                const hrs = Math.round(left / 60);
+                return 'kept away for ' + (left < 60 ? left + (left === 1 ? ' more minute' : ' more minutes')
+                    : hrs + (hrs === 1 ? ' more hour' : ' more hours'));
             } }, null);
             outer.classList.add('is-open');
             outer.setAttribute('role', 'link');
@@ -1279,7 +1306,9 @@
             const was = sceneNow;
             sceneNow = { text: sceneText, url: sceneUrl };
             const release = () => { if (was && was.url !== sceneUrl) URL.revokeObjectURL(was.url); };
-            if (before) glide(live, before, route);
+            // A first picture has nothing to change from.
+            if (before && before.size) glide(live, before, route);
+            reopenTip(live, tip);
             if (under) {
                 // The old scenery stays under the new while the new fades in, then goes.
                 under.removeAttribute('data-scene');
@@ -1290,6 +1319,15 @@
                 release();
             }
         });
+    }
+
+    // A repaint swaps the elements under the cursor; an open tooltip follows whatever is there now.
+    function reopenTip(live, tip) {
+        if (tip.hidden || !pointer) return;
+        const under = document.elementFromPoint(pointer.x, pointer.y);
+        const hit = under && live.contains(under) ? under.closest('.tp-hit') : null;
+        if (hit) hit.dispatchEvent(new MouseEvent('mousemove', { clientX: pointer.x, clientY: pointer.y, bubbles: true }));
+        else tip.hidden = true;
     }
 
     // Resolves once the browser holds the picture decoded, so the swap shows it at once.
@@ -1421,6 +1459,7 @@
         });
     }
 
+    let pointer = null;   // where the open tooltip was last placed, so a repaint can re-open it there
     let drawing = 0;   // the latest repaint; an older one still decoding is dropped
     let seaCells = new Map();   // each online boat's cell at the last repaint, so it keeps it at the next
     let sceneNow = null;   // the scenery on screen, as text and as the picture made of it

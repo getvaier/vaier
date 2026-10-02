@@ -1876,9 +1876,11 @@
             frame.appendChild(exit);
             _topo = { frame, svg: pic, tip, drawn: '', full: false };
         }
-        _topo.tip.hidden = true;
-        _topo.svg.setAttribute('aria-label', (domain ? domain + ': the fleet' : 'The fleet')
-            + ' drawn as a coast, with the internet as the open sea');
+        // Live updates re-render the pane every few seconds; only leaving and coming back clears the tooltip.
+        const here = S.path.join('/');
+        if (_topo.shownAt !== here) _topo.tip.hidden = true;
+        _topo.shownAt = here;
+        _topo.svg.setAttribute('aria-label', 'Your machines, drawn as a coast, with the internet as the open sea');
         // Full screen, the picture lives outside the pane (see setTopologyFull), so a re-render leaves it be.
         if (!_topo.full) body.appendChild(_topo.frame);
         paintTopology();
@@ -1920,7 +1922,6 @@
         const look = JSON.stringify(fleet, (k, v) => (k === 'seen' || k === 'until' ? undefined : v));
         if (look === _topo.drawn) return;
         _topo.drawn = look;
-        _topo.tip.hidden = true;
         window.VaierTopology.draw(_topo.svg, _topo.tip, fleet,
             { onOpen: (machineId) => go(['fleet', machineId]), onBan: () => go(['security']), ago: agoFromEpochSeconds });
     }
@@ -1937,23 +1938,29 @@
     // Every other peer is a boat, except a backup server with no LAN, which is a stabbur of its own.
     function topologyFleet() {
         const backupId = S.backupServer ? S.backupServer.machineId : null;
-        const WORD = { 'is-down': 'offline', 'is-away': 'offline', 'is-idle': 'not checked yet', 'is-degraded': 'up, not well' };
-        const house = (m, role, address) => {
+        // The picture speaks plainly: what a thing is and whether it is there, never how it is wired.
+        const WORD = { 'is-up': 'connected', 'is-present': 'connected', 'is-down': 'switched off or out of reach',
+            'is-away': 'not connected', 'is-idle': 'not checked yet', 'is-degraded': 'on, but something is wrong' };
+        const KIND = { PHONE: 'a phone', LAPTOP: 'a laptop', DESKTOP: 'a computer', SERVER: 'a computer that stays on',
+            NAS: 'a storage box', PRINTER: 'a printer', ROUTER: 'the internet box', GATEWAY: 'the internet box',
+            IOT: 'a smart home gadget', CAMERA: 'a camera', MEDIA: 'a TV or media player' };
+        const plainly = (m) => KIND[String(m.deviceCategory || '').toUpperCase()]
+            || (!reachesInside(m) ? (m.type === 'WINDOWS_CLIENT' ? 'a computer' : 'a phone')
+                : SERVER_TYPES.has(m.type) ? 'a computer that stays on' : 'a device');
+        const house = (m, role) => {
             const l = livenessOf(m.id);
             const stabbur = m.id === backupId;
             const dark = l === 'is-down' || l === 'is-away';
-            // A peer that is offline says when its tunnel last answered, as its machine pane does.
+            // One that is not connected says when it was last seen, as its machine pane does.
             const peer = S.peers.get(m.id);
-            return { id: m.id, name: m.name, role: stabbur ? role + ' \u00b7 backup server' : role,
-                     address: address || '', state: WORD[l] || '', dark, stabbur,
+            return { id: m.id, name: m.name, role: stabbur ? 'keeps the backups' : role, state: WORD[l] || '', dark, stabbur,
                      seen: dark && peer && Number(peer.latestHandshake) ? peer.latestHandshake : null };
         };
         const sites = new Map();
         const siteOf = (machineId, name) => {
             if (!sites.has(machineId)) {
-                sites.set(machineId, { name: name || 'a peer', lan: [],
-                    peer: { id: null, name: name || 'a peer', role: 'peer', address: '', state: 'not in the fleet',
-                            dark: true, stabbur: false } });
+                sites.set(machineId, { name: name || 'a home', lan: [],
+                    peer: { id: null, name: name || 'a home', role: '', state: 'not set up yet', dark: true, stabbur: false } });
             }
             return sites.get(machineId);
         };
@@ -1963,38 +1970,35 @@
             const s = S.lan.get(m.id);
             if (!s) return;
             if (!s.relayMachineId) {
-                skerry.push(house(m, 'LAN server on the Vaier server\u2019s own LAN', m.lanAddress || s.lanAddress));
+                skerry.push(house(m, plainly(m) + ' next to Vaier'));
                 return;
             }
-            siteOf(s.relayMachineId, s.relayPeerName).lan.push(house(m, 'LAN server behind ' + s.relayPeerName,
-                m.lanAddress || s.lanAddress));
+            siteOf(s.relayMachineId, s.relayPeerName).lan.push(house(m, plainly(m) + ' at ' + s.relayPeerName));
         });
         S.machines.filter((m) => !m.vaierServer && m.type !== 'LAN_SERVER').forEach((m) => {
             const peer = S.peers.get(m.id);
-            const address = peer ? peer.tunnelIp : '';
             if (sites.has(m.id) || (peer && peer.isRelay) || m.id === backupId) {
                 const site = siteOf(m.id, m.name);
                 site.name = m.name;
-                site.peer = house(m, peer && peer.isRelay ? 'peer \u00b7 reaches its LAN' : 'peer', address);
+                site.peer = house(m, peer && peer.isRelay ? 'connects this home' : plainly(m));
                 return;
             }
             const cat = String(m.deviceCategory || '').toLowerCase();
             const kind = SERVER_TYPES.has(m.type) ? 'sjark'
                 : m.type === 'WINDOWS_CLIENT' || cat === 'laptop' || cat === 'desktop' ? 'sail' : 'faering';
             // Where it was last seen: a boat that is offline moors at that coast.
-            boats.push(Object.assign(house(m, cat && cat !== 'generic' ? 'peer \u00b7 ' + cat : 'peer', address), { kind,
+            boats.push(Object.assign(house(m, plainly(m)), { kind,
                 latitude: peer && peer.latitude != null ? peer.latitude : null,
                 longitude: peer && peer.longitude != null ? peer.longitude : null,
                 country: (peer && peer.country) || '' }));
         });
         const vaier = S.machines.find((m) => m.vaierServer);
-        if (vaier && vaier.id === backupId) skerry.push(house(vaier, 'the Vaier server', ''));
+        if (vaier && vaier.id === backupId) skerry.push(house(vaier, 'Vaier'));
         // Where a village stands is where its peer is: the same estimate the Map draws a fixed-line peer at.
         const placed = Array.from(sites.entries()).map(([id, s]) => {
             const peer = S.peers.get(id);
-            if (s.lan.length) {
-                s.peer.role = s.peer.role.replace('reaches its LAN',
-                    s.lan.length + (s.lan.length === 1 ? ' machine on its LAN' : ' machines on its LAN'));
+            if (s.lan.length && s.peer.role === 'connects this home') {
+                s.peer.role += ' and its ' + (s.lan.length === 1 ? 'device' : s.lan.length + ' devices');
             }
             return { id, name: s.name, peer: s.peer, lan: s.lan,
                      latitude: peer && peer.latitude != null ? peer.latitude : null,
@@ -2002,8 +2006,7 @@
                      country: (peer && peer.country) || '' };
         });
         return {
-            server: { id: vaier ? vaier.id : null, name: vaier ? vaier.name : VAIER_SERVER,
-                      address: (S.serverLocation && S.serverLocation.publicHost) || '', published: S.services.length,
+            server: { id: vaier ? vaier.id : null, name: vaier ? vaier.name : VAIER_SERVER, published: S.services.length,
                       country: (S.serverLocation && S.serverLocation.country) || '',
                       place: (S.serverLocation && S.serverLocation.city) || '' },
             // Every address the edge is banning right now. Its ship drifts out in half-hour steps; the exact time
