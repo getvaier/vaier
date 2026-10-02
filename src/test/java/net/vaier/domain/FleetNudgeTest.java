@@ -296,4 +296,26 @@ class FleetNudgeTest {
             assertThat(n.value()).isEqualTo(nas.id().value());
         });
     }
+
+    @Test
+    void osSecurityUpdates_aRowOnlyWhenSecurityUpdatesWait_andNeverForAMachineSwitchedOff() {
+        Machine apalveien = peer("Apalveien 5", MachineType.UBUNTU_SERVER, String.valueOf(Instant.now().getEpochSecond()));
+        Machine routine = peer("Colina 27", MachineType.UBUNTU_SERVER, String.valueOf(Instant.now().getEpochSecond()));
+        Machine off = peer("Rack", MachineType.UBUNTU_SERVER, "1000").toBuilder().switchedOffSince(Instant.EPOCH).build();
+
+        List<FleetNudge> rows = FleetNudge.osSecurityUpdates(FleetSignals.builder()
+            .machines(List.of(apalveien, routine, off))
+            .pendingOsUpdates(List.of(new PendingOsUpdates(apalveien.id(), 5, 2),
+                new PendingOsUpdates(routine.id(), 4, 0), new PendingOsUpdates(off.id(), 3, 3)))
+            .build());
+
+        // Routine updates are not trouble: they wait on the machine's own page.
+        assertThat(rows).singleElement().satisfies(n -> {
+            assertThat(n.kind()).isEqualTo(FleetNudge.Kind.OS_SECURITY_UPDATES);
+            assertThat(n.kind().isTrouble()).isTrue();
+            assertThat(n.title()).isEqualTo("Apalveien 5 has 2 security updates");
+            assertThat(n.evidence()).isEqualTo("Waiting to be installed · 5 updates in all");
+            assertThat(n.value()).isEqualTo(apalveien.id().value());
+        });
+    }
 }

@@ -8,6 +8,7 @@ import net.vaier.adapter.driven.InMemoryDiskFillTrendAdapter;
 import net.vaier.adapter.driven.InMemoryDiskPressureStateAdapter;
 import net.vaier.adapter.driven.InMemoryClaudeSignInStandingCache;
 import net.vaier.adapter.driven.InMemoryMachineDiskStandingCache;
+import net.vaier.adapter.driven.InMemoryPendingOsUpdatesCache;
 import net.vaier.adapter.driven.InMemoryContainerStandingAdapter;
 import net.vaier.adapter.driven.InMemoryMissingDefaultRouteAdapter;
 import net.vaier.domain.MachineId;
@@ -45,6 +46,7 @@ import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.NoSshServerException;
 import net.vaier.domain.DockerCommandAccess;
+import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.ReverseProxyAudit;
 import net.vaier.domain.ReverseProxyAuditTracker;
@@ -117,6 +119,7 @@ class RemoteDiskWatcherTest {
     AuditReverseProxyConfigUseCase reverseProxyAudit;
     NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
     InMemoryClaudeSignInStandingCache claudeStandings;
+    InMemoryPendingOsUpdatesCache osUpdates;
     SteppableClock clock;
     RemoteDiskWatcher watcher;
 
@@ -153,6 +156,7 @@ class RemoteDiskWatcherTest {
         dockerAccessRecorder = mock(ForRecordingDockerCommandAccess.class);
         claudeSignIn = mock(GetClaudeSignInStatusUseCase.class);
         claudeStandings = new InMemoryClaudeSignInStandingCache();
+        osUpdates = new InMemoryPendingOsUpdatesCache();
         // Nothing said about Claude unless a test says it: an unstubbed answer would be a null standing,
         // which is exactly "the sweep learned nothing here".
         lenient().when(claudeSignIn.getClaudeSignInStatus(any())).thenReturn(null);
@@ -176,7 +180,7 @@ class RemoteDiskWatcherTest {
             diskWatches, configResolver, clock, sshPresenceRecorder, eventPublisher, pressureState,
             detectMachineNetworks, forgetMachineNetworks, standings, dockerAccessRecorder, fillTrends,
             claudeSignIn, claudeStandings, reverseProxyAudit, reverseProxyAuditNotifier,
-            missingRoutes, missingRouteNotifier, containerStandings);
+            missingRoutes, missingRouteNotifier, containerStandings, osUpdates);
     }
 
     /** 1024-blocks in a GiB, and a 100 GiB filesystem to spend them on. */
@@ -1516,6 +1520,27 @@ class RemoteDiskWatcherTest {
         assertThat(command.getValue()).contains("/proc/uptime").endsWith(RemoteDiskUsage.DF_COMMAND);
         // And the marker line is not mistaken for a filesystem: the disk alert is exactly as it was.
         verify(notifier).notifyAdminsOfRemoteDiskPressure(any(), eq(85));
+    }
+
+    @Test
+    void theOsUpdateReadRidesTheSameTrip_isKept_andIsForgottenWhenTheMachineLeaves() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("nas")));
+        hasCredential("nas");
+        CommandResult disk = df(90);
+        when(runner.run(eq(mid("nas")), any())).thenReturn(new CommandResult(0,
+            "VAIER-APT-RC=0\nVAIER-UPGRADABLE=openssl/jammy-security\n" + disk.stdout(), "", false, "SHA256:x"));
+
+        watcher.checkRemoteDiskUsage();
+
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(runner).run(eq(mid("nas")), command.capture());
+        assertThat(command.getValue()).contains("apt list --upgradable").endsWith(RemoteDiskUsage.DF_COMMAND);
+        assertThat(osUpdates.getAll()).containsExactly(new PendingOsUpdates(mid("nas"), 1, 1));
+        verify(notifier).notifyAdminsOfRemoteDiskPressure(any(), eq(85));   // the disk reading is unchanged
+
+        when(machines.getAllMachines()).thenReturn(List.of());
+        watcher.checkRemoteDiskUsage();
+        assertThat(osUpdates.getAll()).isEmpty();
     }
 
     @Test

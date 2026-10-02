@@ -22,6 +22,7 @@ import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.GetPendingOsUpdatesUseCase;
 import net.vaier.application.MarkBackOnUseCase;
 import net.vaier.application.MarkSwitchedOffUseCase;
 import net.vaier.application.UpgradeOsUseCase;
@@ -32,6 +33,7 @@ import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.Machine;
+import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.ClaudeAccount;
 import net.vaier.domain.ClaudeSignInState;
 import net.vaier.domain.ClaudeSignInStatus;
@@ -95,6 +97,7 @@ class MachineRestControllerTest {
     @Mock UpgradeOsUseCase upgradeOsUseCase;
     @Mock MarkSwitchedOffUseCase markSwitchedOffUseCase;
     @Mock MarkBackOnUseCase markBackOnUseCase;
+    @Mock GetPendingOsUpdatesUseCase getPendingOsUpdatesUseCase;
 
     @Mock Clock clock;
     @InjectMocks MachineRestController controller;
@@ -152,6 +155,23 @@ class MachineRestControllerTest {
         assertThat(controller.markBackOn(mid("Roon").value()).getStatusCode().value()).isEqualTo(204);
         verify(markSwitchedOffUseCase).markSwitchedOff(mid("Roon"));
         verify(markBackOnUseCase).markBackOn(mid("Roon"));
+    }
+
+    @Test
+    void list_carriesPendingOsUpdates_andSaysNothingForAMachineNeverRead() {
+        Machine read = new Machine(mid("a5"), "Apalveien 5", MachineType.UBUNTU_SERVER, null, null, null, null,
+            null, null, null, null, null, true, null, DeviceCategory.SERVER, null);
+        Machine unread = new Machine(mid("nas"), "NAS", MachineType.LAN_SERVER, null, null, null, null, null,
+            null, null, null, "192.168.3.3", true, 2375, DeviceCategory.NAS, null);
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(read, unread));
+        when(getPendingOsUpdatesUseCase.getPendingOsUpdates())
+            .thenReturn(List.of(new PendingOsUpdates(mid("a5"), 4, 0)));
+
+        var response = controller.list();
+
+        assertThat(response.get(0).osUpdates()).isEqualTo(
+            new MachineRestController.OsUpdatesResponse("ROUTINE", 4, 0, "4 updates waiting · none urgent", null));
+        assertThat(response.get(1).osUpdates()).as("unknown, never none").isNull();
     }
 
     @Test

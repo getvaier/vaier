@@ -13,6 +13,7 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetPendingOsUpdatesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetReverseProxyAuditUseCase;
@@ -78,6 +79,7 @@ public class FleetRestController {
     private final GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
     private final InspectConsoleCertificateUseCase inspectConsoleCertificateUseCase;
     private final GetVpnClientsUseCase getVpnClientsUseCase;
+    private final GetPendingOsUpdatesUseCase getPendingOsUpdatesUseCase;
     private final Clock clock;
 
     @GetMapping("/needs")
@@ -119,6 +121,7 @@ public class FleetRestController {
             .enrolmentRequests(listEnrolmentRequestsUseCase.pending())
             .preFlight(preFlight(settings, vaierServer, disks))
             .routeAudit(getReverseProxyAuditUseCase.getReverseProxyAudit())
+            .pendingOsUpdates(getPendingOsUpdatesUseCase.getPendingOsUpdates())
             .zone(clock.getZone())
             .build();
         return FleetNudges.forFleet(signals).stream().map(FleetNudgeResponse::from).toList();

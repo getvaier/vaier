@@ -12,6 +12,7 @@ import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
+import net.vaier.application.GetPendingOsUpdatesUseCase;
 import net.vaier.application.MarkBackOnUseCase;
 import net.vaier.application.MarkSwitchedOffUseCase;
 import net.vaier.application.NoticeMachinesBackOnUseCase;
@@ -34,12 +35,14 @@ import net.vaier.domain.ReadOnlyCommand;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.OsUpgrade;
+import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCachingMachineNetworks;
 import net.vaier.domain.port.ForCheckingLanReachability;
+import net.vaier.domain.port.ForHoldingPendingOsUpdates;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -80,7 +83,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     GetClaudeSignInStandingsUseCase, GetDiskWatchesUseCase, SetDiskWatchUseCase,
     DetectMachineNetworksUseCase, GetMachineNetworksUseCase, ForgetMachineNetworksUseCase,
     RunReadOnlyCommandUseCase, UpgradeOsUseCase, MarkSwitchedOffUseCase, MarkBackOnUseCase,
-    NoticeMachinesBackOnUseCase {
+    NoticeMachinesBackOnUseCase, GetPendingOsUpdatesUseCase {
 
     /** The stream the fleet page already listens on; peers-updated makes it re-read the machines. */
     private static final String PEERS_TOPIC = "vpn-peers";
@@ -106,6 +109,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     private final ForRunningInBackground forRunningInBackground;
     private final ForSendingAdminNotification forSendingAdminNotification;
     private final ForCheckingLanReachability forCheckingLanReachability;
+    private final ForHoldingPendingOsUpdates forHoldingPendingOsUpdates;
     private final ConfigResolver configResolver;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
@@ -128,6 +132,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                           ForRunningInBackground forRunningInBackground,
                           ForSendingAdminNotification forSendingAdminNotification,
                           ForCheckingLanReachability forCheckingLanReachability,
+                          ForHoldingPendingOsUpdates forHoldingPendingOsUpdates,
                           ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -149,6 +154,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         this.forRunningInBackground = forRunningInBackground;
         this.forSendingAdminNotification = forSendingAdminNotification;
         this.forCheckingLanReachability = forCheckingLanReachability;
+        this.forHoldingPendingOsUpdates = forHoldingPendingOsUpdates;
         this.configResolver = configResolver;
     }
 
@@ -363,6 +369,13 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         OsUpgrade.Settlement settlement = upgrade.carryOut(target, forRunningSshCommands);
         log.info("OS upgrade on machine {} settled: {}{}", upgrade.machineId().value(), settlement.sentence(),
             settlement.diagnostic() == null ? "" : " (" + settlement.diagnostic() + ")");
+        // Read the count again on the same login, so the page stops saying updates wait once they are in.
+        try {
+            PendingOsUpdates.reread(upgrade.machineId(), target, forRunningSshCommands, forHoldingPendingOsUpdates,
+                forPublishingEvents);
+        } catch (RuntimeException e) {
+            log.debug("Could not re-read the pending OS updates on {}: {}", upgrade.machineName(), e.getMessage());
+        }
         upgrade.announce(settlement, forPublishingEvents);
         upgrade.mailIfFailed(settlement, forSendingAdminNotification);
         return settlement;
@@ -448,6 +461,11 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
             return enabled;
         }
         throw new NotFoundException("Machine not found: " + machineId);
+    }
+
+    @Override
+    public List<PendingOsUpdates> getPendingOsUpdates() {
+        return forHoldingPendingOsUpdates.getAll();
     }
 
     // --- switched off on purpose ---------------------------------------------------------------------

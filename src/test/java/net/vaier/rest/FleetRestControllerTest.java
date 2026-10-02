@@ -12,6 +12,7 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetPendingOsUpdatesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetReverseProxyAuditUseCase;
@@ -29,6 +30,7 @@ import net.vaier.domain.FleetNudge;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyAudit;
 import net.vaier.domain.UpdateAvailability;
@@ -68,12 +70,13 @@ class FleetRestControllerTest {
     private final GetReverseProxyAuditUseCase audit = mock(GetReverseProxyAuditUseCase.class);
     private final InspectConsoleCertificateUseCase certificate = mock(InspectConsoleCertificateUseCase.class);
     private final GetVpnClientsUseCase vpnClients = mock(GetVpnClientsUseCase.class);
+    private final GetPendingOsUpdatesUseCase osUpdates = mock(GetPendingOsUpdatesUseCase.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-02T09:00:00Z"), ZoneOffset.UTC);
 
     private final FleetRestController controller = new FleetRestController(getMachines, getPublishable,
         getPublished, getBackupServers, getRepositories, listAccessEntries, getAppSettings, getVaierServer,
         reachability, getBackupJobs, getBackupRuns, getDiskStandings, peerContainers, serverContainers,
-        lanContainers, enrolments, audit, certificate, vpnClients, clock);
+        lanContainers, enrolments, audit, certificate, vpnClients, osUpdates, clock);
 
     @Test
     void needs_gathersEverySignal_andHandsTheDomainsVerdictThrough() {
@@ -94,6 +97,7 @@ class FleetRestControllerTest {
             Optional.of(new ConsoleCertificate("R11", clock.instant().plus(Duration.ofDays(60)), false)));
         when(vpnClients.getClients()).thenThrow(new RuntimeException("wg command failed"));
         when(audit.getReverseProxyAudit()).thenReturn(new ReverseProxyAudit(List.of()));
+        when(osUpdates.getPendingOsUpdates()).thenReturn(List.of(new PendingOsUpdates(server.id(), 3, 1)));
         // The Vaier server's own containers arrive with no machine on them; the edge files them under it.
         when(serverContainers.discover()).thenReturn(List.of(new DockerService("1", "traefik", "traefik", "3",
             List.of(), List.of(), "running", "sha256:a", UpdateAvailability.UPDATE_AVAILABLE)));
@@ -102,11 +106,12 @@ class FleetRestControllerTest {
 
         assertThat(body).extracting(FleetRestController.FleetNudgeResponse::kind).containsExactly(
             FleetNudge.Kind.VAIER_BASICS.name(), FleetNudge.Kind.MACHINE_DOWN.name(),
+            FleetNudge.Kind.OS_SECURITY_UPDATES.name(),
             FleetNudge.Kind.DESIGNATE_BACKUP_SERVER.name(), FleetNudge.Kind.IMAGE_UPDATES.name());
         assertThat(body.get(1).value()).isEqualTo(printer.id().value());
         assertThat(body.get(1).trouble()).isTrue();
         assertThat(body.get(1).tone()).isEqualTo(FleetNudge.Tone.VERDICT.name());
         assertThat(body.get(1).evidence()).endsWith("its last backup failed too");
-        assertThat(body.get(3).value()).isEqualTo(server.id().value());
+        assertThat(body.get(4).value()).isEqualTo(server.id().value());
     }
 }

@@ -25,6 +25,7 @@ public final class FleetNudges {
         trouble.addAll(FleetNudge.machinesDown(s));
         trouble.addAll(FleetNudge.backups(s));
         trouble.addAll(FleetNudge.disks(s));
+        trouble.addAll(FleetNudge.osSecurityUpdates(s));
         FleetNudge.routeAudit(s.routeAudit()).ifPresent(trouble::add);
         // Stable: within one kind the factories' own order (by machine name) stands.
         trouble.sort(Comparator.comparing(FleetNudge::kind));

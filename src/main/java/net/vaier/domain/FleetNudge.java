@@ -50,6 +50,8 @@ public record FleetNudge(Kind kind, String title, String evidence, String action
         DISK_FULL(true, Tone.VERDICT),
         /** A machine's disk is closing on its threshold. */
         DISK_FILLING(true, Tone.WATCH),
+        /** Security updates are waiting on a machine. Routine ones are not trouble and stay on its page. */
+        OS_SECURITY_UPDATES(true, Tone.WATCH),
         /** The reverse proxy audit found entries no route can reach. */
         ROUTE_AUDIT(false, Tone.WATCH),
         /** Someone signed in and is blocked, awaiting an admin's approval. */
@@ -300,6 +302,22 @@ public record FleetNudge(Kind kind, String title, String evidence, String action
             }
         }
         rows.sort(Comparator.comparing(FleetNudge::kind));
+        return rows;
+    }
+
+    /** OS_SECURITY_UPDATES — a machine with security updates waiting, unless it is switched off on purpose. */
+    public static List<FleetNudge> osSecurityUpdates(FleetSignals s) {
+        List<FleetNudge> rows = new ArrayList<>();
+        for (Machine m : byName(s.machines())) {
+            if (m.isSwitchedOffOnPurpose()) continue;
+            s.pendingOsUpdates().stream()
+                .filter(u -> m.id().isSameAs(u.machineId()) && u.verdict() == PendingOsUpdates.Verdict.SECURITY)
+                .findFirst()
+                .ifPresent(u -> rows.add(of(Kind.OS_SECURITY_UPDATES,
+                    m.name() + " has " + u.chip().orElseThrow(),
+                    "Waiting to be installed" + (u.total() > u.security() ? " · " + u.total() + " updates in all" : ""),
+                    "Install OS updates", m.id().value())));
+        }
         return rows;
     }
 

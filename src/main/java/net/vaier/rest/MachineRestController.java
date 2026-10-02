@@ -18,6 +18,7 @@ import net.vaier.application.GetSshServerPresenceUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.GetPendingOsUpdatesUseCase;
 import net.vaier.application.MarkBackOnUseCase;
 import net.vaier.application.MarkSwitchedOffUseCase;
 import net.vaier.application.UpgradeOsUseCase;
@@ -28,6 +29,7 @@ import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineNudge;
 import net.vaier.domain.MachineNudges;
@@ -50,6 +52,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/machines")
@@ -76,6 +79,7 @@ public class MachineRestController {
     private final UpgradeOsUseCase upgradeOsUseCase;
     private final MarkSwitchedOffUseCase markSwitchedOffUseCase;
     private final MarkBackOnUseCase markBackOnUseCase;
+    private final GetPendingOsUpdatesUseCase getPendingOsUpdatesUseCase;
     // Read for its zone alone: the one a machine's cards write their times in, so the domain never has to
     // ask the environment where the operator is.
     private final Clock clock;
@@ -111,6 +115,8 @@ public class MachineRestController {
         // container. This flag decorates the list; the list itself is the fleet. Losing the whole fleet
         // view because one machine could not be labelled is much the worse failure of the two.
         MachineId vaierServer = resolveVaierServerId();
+        Map<MachineId, PendingOsUpdates> osUpdates = getPendingOsUpdatesUseCase.getPendingOsUpdates().stream()
+            .collect(Collectors.toMap(PendingOsUpdates::machineId, u -> u, (a, b) -> b));
         return getMachinesUseCase.getAllMachines().stream()
             .map(m -> {
                 // One credential lookup per machine, answering both questions it can answer: whether a
@@ -121,7 +127,8 @@ public class MachineRestController {
                     hasStoredCredential(credential),
                     m.id().equals(vaierServer),
                     getSshServerPresenceUseCase.getSshServerPresence(m.id()),
-                    credential.map(HostCredentialView::username).map(EffectiveUser::of).orElse(null));
+                    credential.map(HostCredentialView::username).map(EffectiveUser::of).orElse(null))
+                    .withOsUpdates(OsUpdatesResponse.of(osUpdates.get(m.id())));
             })
             .toList();
     }
@@ -504,6 +511,15 @@ public class MachineRestController {
 
     record SshAccessResponse(boolean sshAccess) {}
 
+    /** The domain's verdict on a machine's pending OS updates, and its own words for it (null when none). */
+    public record OsUpdatesResponse(String verdict, int total, int security, String sentence, String chip) {
+        static OsUpdatesResponse of(PendingOsUpdates updates) {
+            if (updates == null) return null;
+            return new OsUpdatesResponse(updates.verdict().name(), updates.total(), updates.security(),
+                updates.sentence().orElse(null), updates.chip().orElse(null));
+        }
+    }
+
     public record MachineResponse(
         String id,
         String name,
@@ -528,8 +544,17 @@ public class MachineRestController {
         boolean effectiveUserPrivileged,
         boolean canRelayALan,
         boolean acceptsSetupScript,
-        String switchedOffSince
+        String switchedOffSince,
+        OsUpdatesResponse osUpdates
     ) {
+        /** This machine with its pending OS updates; null while the sweep has not read them — never "none". */
+        MachineResponse withOsUpdates(OsUpdatesResponse updates) {
+            return new MachineResponse(id, name, type, publicKey, allowedIps, endpointIp, endpointPort,
+                latestHandshake, transferRx, transferTx, lanCidr, lanAddress, runsDocker, dockerPort, deviceCategory,
+                sshAccess, hasCredential, vaierServer, sshServerPresence, effectiveUsername, effectiveUserPrivileged,
+                canRelayALan, acceptsSetupScript, switchedOffSince, updates);
+        }
+
         static MachineResponse from(Machine m, boolean hasCredential) {
             return from(m, hasCredential, false, SshServerPresence.UNKNOWN);
         }
@@ -574,7 +599,8 @@ public class MachineRestController {
                 m.canRelayALan(),
                 m.acceptsSetupScript(),
                 // When the operator said it is switched off on purpose; null while it is not.
-                m.switchedOffSince() == null ? null : m.switchedOffSince().toString()
+                m.switchedOffSince() == null ? null : m.switchedOffSince().toString(),
+                null
             );
         }
     }

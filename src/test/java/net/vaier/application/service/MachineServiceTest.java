@@ -21,6 +21,7 @@ import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.OsUpgrade;
+import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.VaierConfig;
@@ -28,6 +29,7 @@ import net.vaier.domain.VpnClient;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.port.ForCachingMachineNetworks;
 import net.vaier.domain.port.ForCheckingLanReachability;
+import net.vaier.domain.port.ForHoldingPendingOsUpdates;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -109,6 +111,7 @@ class MachineServiceTest {
     @Mock ForRunningInBackground forRunningInBackground;
     @Mock ForSendingAdminNotification forSendingAdminNotification;
     @Mock ForCheckingLanReachability forCheckingLanReachability;
+    @Mock ForHoldingPendingOsUpdates forHoldingPendingOsUpdates;
 
     MachineService service;
 
@@ -125,7 +128,8 @@ class MachineServiceTest {
             forTrackingHostKeys, forPersistingDiskWatches,
             forResolvingVaierServerIdentity, forReadingMachineNetworks, forCachingMachineNetworks,
             forHoldingMachineDiskStandings, forHoldingClaudeSignInStandings, forPublishingEvents,
-            forRunningInBackground, forSendingAdminNotification, forCheckingLanReachability, configResolver);
+            forRunningInBackground, forSendingAdminNotification, forCheckingLanReachability,
+            forHoldingPendingOsUpdates, configResolver);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -917,5 +921,26 @@ class MachineServiceTest {
         assertThat(settled.upgraded()).isFalse();
         verify(forPublishingEvents).publish(eq("vpn-peers"), eq("os-upgrade-settled"), anyString());
         verify(forSendingAdminNotification).sendToAdmins(anyString(), eq(settled.sentence()), anyString());
+    }
+
+    @Test
+    void upgradeOs_readsThePendingUpdatesAgain_onceItSettles() {
+        // So the line on the machine's page goes the moment the updates are in, not five minutes later.
+        MachineId id = MachineId.of("c0355605-e5a0-419a-8943-fdc5ec209958");
+        SshTarget target = mock(SshTarget.class);
+        when(forResolvingSshTargets.resolve(id)).thenReturn(target);
+        when(forRunningSshCommands.run(target, OsUpgrade.PROBE_COMMAND))
+            .thenReturn(new CommandResult(0, "user=root uid=0\npm=apt\n", "", false, "SHA256:x"));
+        when(forRunningSshCommands.run(eq(target), anyString(), eq(OsUpgrade.UPGRADE_TIMEOUT)))
+            .thenReturn(new CommandResult(0, "0 upgraded, 0 newly installed", "", false, "SHA256:x"));
+        when(forRunningSshCommands.run(target, PendingOsUpdates.READ))
+            .thenReturn(new CommandResult(0, "VAIER-APT-RC=0\n", "", false, "SHA256:x"));
+
+        service.upgradeOs(id);
+        ArgumentCaptor<Runnable> work = ArgumentCaptor.forClass(Runnable.class);
+        verify(forRunningInBackground).run(work.capture());
+        work.getValue().run();
+
+        verify(forHoldingPendingOsUpdates).record(new PendingOsUpdates(id, 0, 0));
     }
 }

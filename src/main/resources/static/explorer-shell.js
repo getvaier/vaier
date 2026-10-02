@@ -984,6 +984,14 @@
         const run = runMark(machineId);
         if (run) marks.appendChild(run);
 
+        // Security updates waiting, as the sweep last read them; routine ones never mark a card.
+        const os = (machineById(machineId) || {}).osUpdates;
+        if (!S.at && os && os.chip) {
+            const o = mark('is-degraded', 'shield', os.chip);
+            o.title = os.sentence;
+            marks.appendChild(o);
+        }
+
         // Disk pressure, from the sweep the backend already runs. Absence is not health: a machine the sweep
         // has not reached has no standing and draws nothing, exactly as a clear one does. A fact about now,
         // so it stands down in the past.
@@ -2157,6 +2165,19 @@
                 + 'Docker Vaier knows of, nothing published.', false));
         }
 
+        // Pending OS updates, said only when some wait, in the sweep's own words, with the one way to install
+        // them. Nothing waiting says nothing; not read yet keeps the quiet fold further down.
+        const pending = m.osUpdates;
+        const saidAbove = mine.some((n) => n.kind === 'OS_SECURITY_UPDATES');   // once per page
+        if (reachable && m.sshAccess && m.hasCredential && !noSshServer && !saidAbove
+                && ((pending && pending.sentence) || _upgradingOs.has(m.id))) {
+            const line = el('div', 'ex-off is-os');
+            const words = el('span', 'ex-off-words');
+            words.textContent = pending && pending.sentence ? pending.sentence : 'Installing OS updates';
+            line.append(words, osUpgradeVerb(m));
+            body.appendChild(line);
+        }
+
         // --- do: what is worth doing here right now ---------------------------------------------------
         //
         // What Vaier suggests doing next with this machine — progressive-adoption nudges (§6.15.1): publish its
@@ -2276,14 +2297,16 @@
         // Rides on SSH like the shell does, so it is offered only where a session could open at all. Whether
         // Vaier can get root there is the server's to judge on the click, and its refusal says why.
         if (reachable && m.sshAccess && m.hasCredential && !noSshServer) {
-            const upkeep = disclosure('Install OS updates');
-            if (_upgradingOs.has(m.id)) upkeep.open = true;
-            const row = el('div', 'ex-lactions is-static');
-            row.appendChild(osUpgradeVerb(m));
-            upkeep.appendChild(row);
-            upkeep.appendChild(hint('Installs the pending package updates as root. Nothing is removed, and '
-                + 'Vaier never reboots; it says when a reboot is due.'));
-            body.appendChild(upkeep);
+            if (!m.osUpdates && !_upgradingOs.has(m.id)) {
+                // Not read yet (or no apt): nothing to say, but the way to install stays within reach.
+                const upkeep = disclosure('Install OS updates');
+                const row = el('div', 'ex-lactions is-static');
+                row.appendChild(osUpgradeVerb(m));
+                upkeep.appendChild(row);
+                upkeep.appendChild(hint('Installs the pending package updates as root. Nothing is removed, and '
+                    + 'Vaier never reboots; it says when a reboot is due.'));
+                body.appendChild(upkeep);
+            }
         }
 
         // --- danger: rare, and able to undo work ------------------------------------------------------
@@ -2507,6 +2530,9 @@
         // Vaier never touches the file (#354), so the button only opens what the audit found.
         ROUTE_AUDIT:             (m, n) => ({ icon: 'route', label: 'See which', run: () => detailModal(n.title, n.evidence, n.detail) }),
         IMAGE_UPDATES:           (m, n) => ({ icon: 'arrowup', label: 'See them', run: () => go(['fleet', n.value, 'containers']) }),
+        // The same confirm-then-install the machine's own page offers; nothing new happens here.
+        OS_SECURITY_UPDATES:     (m, n) => ({ icon: 'shield', label: _upgradingOs.has(n.value) ? 'Installing…' : 'Install OS updates',
+            disabled: _upgradingOs.has(n.value), run: () => upgradeOs(m || machineById(n.value)) }),
     };
 
     // A device that gave up has nothing left to add, so its row keeps its sentence and loses the button.
@@ -10636,6 +10662,8 @@
         // empty body, so this re-reads the one memory-backed endpoint and repaints the marks. A machine that
         // stopped being readable is not corrected here by guesswork: the sweep says so, or it says nothing.
         events.addEventListener('disk-standing-changed', () => { loadNeeds(); loadDiskStandings().then(render); });
+        // Pending OS updates moved on the same sweep (or right after an install): they ride on /machines.
+        events.addEventListener('os-updates-changed', () => { loadNeeds(); loadFleet().then(render); });
         // And where a machine stands on Claude, learned on that same trip and published the same way: only on
         // a change, empty body, one re-read of the one memory-backed endpoint.
         events.addEventListener('claude-standing-changed', () => loadClaudeStandings().then(render));

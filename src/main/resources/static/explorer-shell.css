@@ -794,6 +794,7 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
     color: var(--text-muted); font-size: 14px; line-height: 1.5;
 }
 .ex-off-words { flex: 1 1 280px; min-width: 0; }
+.ex-grid + .ex-off.is-os { margin-top: 22px; }
 
 /* Progressive-adoption nudges — quiet, evidence-backed invitations on a machine (the domain decides which
    apply; the shell only renders them). A thin accent left-edge and accent glyph mark an opportunity — never

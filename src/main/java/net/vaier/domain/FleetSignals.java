@@ -24,7 +24,7 @@ public record FleetSignals(List<Machine> machines, List<PublishableService> publ
                            Map<String, Long> lanLastSeen, List<BackupJob> backupJobs, List<BackupRun> latestRuns,
                            List<MachineDiskStanding> diskStandings, Map<String, List<DockerService>> containers,
                            List<EnrolmentRequest> enrolmentRequests, PreFlight preFlight,
-                           ReverseProxyAudit routeAudit, ZoneId zone) {
+                           ReverseProxyAudit routeAudit, List<PendingOsUpdates> pendingOsUpdates, ZoneId zone) {
 
     public FleetSignals {
         machines = machines == null ? List.of() : List.copyOf(machines);
@@ -40,6 +40,7 @@ public record FleetSignals(List<Machine> machines, List<PublishableService> publ
         enrolmentRequests = enrolmentRequests == null ? List.of() : List.copyOf(enrolmentRequests);
         preFlight = preFlight == null ? new PreFlight(List.of()) : preFlight;
         routeAudit = routeAudit == null ? new ReverseProxyAudit(List.of()) : routeAudit;
+        pendingOsUpdates = pendingOsUpdates == null ? List.of() : List.copyOf(pendingOsUpdates);
         zone = zone == null ? ZoneOffset.UTC : zone;
     }
 }

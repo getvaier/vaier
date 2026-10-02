@@ -4517,3 +4517,14 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Auto-clear:** every 30 s, after judging its tick's transitions, `PeerConnectivityWatcher` asks `NoticeMachinesBackOnUseCase`, which clears the mark on every machine where `Machine.isBackOn` holds (switched off and reachable again — the LAN probe answers or the tunnel handshakes). Nothing is mailed: the domain's `PeerConnectivityTracker` and `BackupServerHealthTracker` keep a switched-off machine's comings and goings to themselves.
 
 **Backlog.** Container trouble and a missing default route never fire for an unreachable machine (the scrape and the network read only judge answers), so they needed no change; if they ever do, the mark should silence them too.
+
+### 6.71 Pending OS updates, said only when some wait ✅ (part 2c of [#376](https://github.com/getvaier/vaier/issues/376))
+
+**Why.** Every reachable machine offered an "Install OS updates" fold whether or not anything was waiting, and Vaier never said what was.
+
+**What.**
+- The five-minute sweep's `df` sign-in also runs `apt list --upgradable` ahead of it (no `apt update`, no root, `timeout 15`), printed as marker lines a `df` row can never be. `domain.PendingOsUpdates` parses it (packages from a `-security` suite count as security), owns the verdict (none / routine / security) and the words, and keeps the reading in memory (`ForHoldingPendingOsUpdates`), announcing `os-updates-changed` on the fleet stream only when it moved. A machine without apt, or whose apt failed or timed out, has no reading — unknown, never none. Read again right after an OS upgrade settles.
+- Machine page: one line plus **Install OS updates** only when something waits; nothing when nothing does; the old quiet fold only while unknown.
+- Fleet card: an amber mark only for security updates. **Needs you**: a row only for security updates, whose button is the existing confirm-then-install.
+
+**Backlog.** dnf hosts (`dnf check-update`) are unknown for now; Synology DSM has no apt and stays unknown.
