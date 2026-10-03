@@ -2771,6 +2771,17 @@ class ExplorerShellTest {
     }
 
     @Test
+    void theBlockedListRepaintsTheMomentItLands_neverWaitingOnTheAccessSources() throws IOException {
+        // The access sources can take fifteen seconds to read. Repainting both once both were in left the
+        // Topology without its pirates all that while.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function loadSecurity(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains(".then(repaintThreats)").contains(".then(repaintAccessSources)");
+        assertThat(js).doesNotContain("loadSecurity().then(");
+    }
+
+    @Test
     void aFailedAccessSourcesReadIsVisibleRatherThanReadingAsQuiet() throws IOException {
         // The threatsError precedent: an outage must not be indistinguishable from "nobody accessed
         // anything". A failed fetch sets an error the Map surfaces as a note, never a silently empty list.

@@ -6971,38 +6971,45 @@
     // is not ceremony: CrowdSec writes 0/0 for a source it could not place, 0 is falsy in JavaScript, and
     // a plain truthiness check on the two coordinates would quietly drop every genuine location sitting on
     // the equator or the prime meridian.
-    async function loadSecurity() {
-        try {
-            const res = await fetch('/security/decisions', { cache: 'no-store' });
-            if (!res.ok) {
-                // A failed read is a 502 carrying CrowdSec's own reason, never an empty list — which is
-                // why the empty state below can honestly say "nobody is blocked". Saying that when Vaier
-                // could not even ask is the one mistake this screen must never make.
-                const err = await res.json().catch(() => ({}));
-                S.threatsError = err.message || 'Vaier could not ask CrowdSec who is blocked.';
-            } else {
-                S.threats = await res.json();
-                S.threatsError = '';
+    // Each read repaints as it lands: the access sources can take many seconds, and the blocked list waiting
+    // on them left the Topology without its pirates.
+    function loadSecurity() {
+        const blocked = (async () => {
+            try {
+                const res = await fetch('/security/decisions', { cache: 'no-store' });
+                if (!res.ok) {
+                    // A failed read is a 502 carrying CrowdSec's own reason, never an empty list — which is
+                    // why the empty state below can honestly say "nobody is blocked". Saying that when Vaier
+                    // could not even ask is the one mistake this screen must never make.
+                    const err = await res.json().catch(() => ({}));
+                    S.threatsError = err.message || 'Vaier could not ask CrowdSec who is blocked.';
+                } else {
+                    S.threats = await res.json();
+                    S.threatsError = '';
+                }
+            } catch (e) {
+                S.threatsError = 'Vaier could not ask CrowdSec who is blocked.';
             }
-        } catch (e) {
-            S.threatsError = 'Vaier could not ask CrowdSec who is blocked.';
-        }
-        S.threatsRead = true;
+            S.threatsRead = true;
+        })().then(repaintThreats);
 
         // Same shape, same reason: a fetch failure here must not read as "nobody accessed anything" — an
         // empty green Map during an outage is as falsely reassuring as an empty red one.
-        try {
-            const res = await fetch('/security/access-sources', { cache: 'no-store' });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                S.accessSourcesError = err.message || 'Vaier could not read where allowed accesses came from.';
-            } else {
-                S.accessSources = await res.json();
-                S.accessSourcesError = '';
+        const accesses = (async () => {
+            try {
+                const res = await fetch('/security/access-sources', { cache: 'no-store' });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    S.accessSourcesError = err.message || 'Vaier could not read where allowed accesses came from.';
+                } else {
+                    S.accessSources = await res.json();
+                    S.accessSourcesError = '';
+                }
+            } catch (e) {
+                S.accessSourcesError = 'Vaier could not read where allowed accesses came from.';
             }
-        } catch (e) {
-            S.accessSourcesError = 'Vaier could not read where allowed accesses came from.';
-        }
+        })().then(repaintAccessSources);
+        return Promise.all([blocked, accesses]);
     }
 
     // Read at boot beside the blocked list, so render() stays a pure function of state — a view that fetched
@@ -7038,7 +7045,7 @@
     function watchSecurity() {
         // SSE replays nothing missed while the stream was down, so re-read on every reconnect.
         const events = liveStream('/security/events', { onReopen: () => {
-            loadSecurity().then(() => { repaintThreats(); repaintAccessSources(); });
+            loadSecurity();
             loadTrusted().then(repaintTrusted);
         } });
         events.addEventListener('block-decisions', (e) => {
@@ -10909,7 +10916,7 @@
         loadTransfers();
         // Not awaited, and read at boot rather than on view, because the Map draws threats too — an
         // operator who opens the Map first would otherwise see an honest-looking map with nobody on it.
-        loadSecurity().then(() => { repaintThreats(); repaintAccessSources(); });
+        loadSecurity();
         // The Map has no use for this one, but render() must never fetch, so it is read here too.
         loadTrusted().then(repaintTrusted);
         loadUser();
