@@ -345,6 +345,7 @@ public class ContainerService implements
 
     @Override
     public void refresh() {
+        boolean firstScrape = !snapshotStore.peerContainersStored();
         try {
             snapshotStore.storePeerContainers(scrapePeerContainers());
         } catch (Exception e) {
@@ -354,6 +355,10 @@ public class ContainerService implements
             snapshotStore.storeVaierServerContainers(scrapeVaierServerContainers());
         } catch (Exception e) {
             log.warn("Vaier-server container scrape failed, keeping previous snapshot: {}", e.getMessage());
+        }
+        // The browser never polls: a page opened before the first scrape learns of it here.
+        if (firstScrape && snapshotStore.peerContainersStored()) {
+            forPublishingEvents.publish(SSE_TOPIC, SSE_EVENT, "containers-scraped");
         }
     }
 

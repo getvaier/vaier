@@ -46,6 +46,9 @@ public interface ForStoringContainerSnapshots {
      */
     void forgetImageUpdateVerdict(ScopedImage image);
 
+    /** Whether any peer scrape has been stored yet — an empty cache before the first is not "no containers". */
+    boolean peerContainersStored();
+
     /** The raw cached server-peer scrape (undecorated), for feeding a sweep. */
     List<PeerContainers> peerContainers();
 

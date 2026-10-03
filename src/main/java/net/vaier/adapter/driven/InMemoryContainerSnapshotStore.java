@@ -43,6 +43,7 @@ public class InMemoryContainerSnapshotStore implements
     ForStoringContainerSnapshots {
 
     private volatile List<PeerContainers> peerContainersSnapshot = List.of();
+    private volatile boolean peerContainersStored;
     private volatile List<DockerService> vaierServerContainersSnapshot = List.of();
     private volatile Map<ScopedImage, UpdateAvailability> imageUpdateVerdicts = Map.of();
     /** Image strings the last sweep judged to be moving tags — a nightly channel rather than a release. */
@@ -151,6 +152,12 @@ public class InMemoryContainerSnapshotStore implements
     @Override
     public void storePeerContainers(List<PeerContainers> peers) {
         this.peerContainersSnapshot = peers;
+        this.peerContainersStored = true;
+    }
+
+    @Override
+    public boolean peerContainersStored() {
+        return peerContainersStored;
     }
 
     @Override

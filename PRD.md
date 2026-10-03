@@ -4528,3 +4528,15 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - Fleet card: an amber mark only for security updates. **Needs you**: a row only for security updates, whose button is the existing confirm-then-install.
 
 **Backlog.** dnf hosts (`dnf check-update`) are unknown for now; Synology DSM has no apt and stays unknown.
+
+### 6.72 Plain words: Add a machine and a machine's page ✅ (part 3a of [#377](https://github.com/getvaier/vaier/issues/377), slice 3 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** Mechanism leaked into the UI's words: "A peer or a LAN server?", "Browse over SFTP", "Reissue config", "Last handshake", raw tunnel addresses beside a machine's name.
+
+**What.** Words and arrangement only; no endpoint changed and every capability stays reachable.
+- **Add a machine asks what it is**: *A phone or computer I carry* (the Vaier app and its join code, offered first), *A server or PC that should join* (name, then one line to run), *Something already on one of my networks* (pick the place, Vaier looks, adopt). The old second "A server / A personal device" screen is gone.
+- **Machine doors**: Shell, Files, Apps, Websites, Storage, Backups — Shell first — each with one live fact from data the page already holds ("8 apps · 1 update", "7 websites · 1 ready to publish", "60% full", "Backed up last night"); the last backup run is read once per machine on view, as the job pane already did. The address bar and the door pages use the same names.
+- **Machine kind** on cards and page heads ("Storage box · Synology", "Computer that stays on", "Phone", "Where Vaier runs") — one table shared with the Topology.
+- **Plain renames**: Send its setup again (Reissue), Give it new keys (Regenerate), Keys and removal, Sign-in for the shell, "Vaier signs in as geir and can only do what geir can", Last seen; Connection details keep the addresses under plain labels.
+
+**Still to come in #377.** 3b: the service page. 3c: Security as sentences and a ~15-term Concepts page.

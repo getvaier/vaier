@@ -122,12 +122,27 @@
         { name: 'concepts', label: 'Concepts', icon: 'book',   page: 'concepts.html', group: 'Vaier' },
     ];
 
-    const MACHINE_TYPE = {
-        MOBILE_CLIENT:  'Mobile client',
-        WINDOWS_CLIENT: 'Windows client',
-        UBUNTU_SERVER:  'Ubuntu server',
-        LAN_SERVER:     'LAN server',
-    };
+    // What a machine is, in everyday words: one table, so a card, a machine's page and the topology agree.
+    const KIND = { PHONE: 'a phone', LAPTOP: 'a laptop', DESKTOP: 'a computer', SERVER: 'a computer that stays on',
+        NAS: 'a storage box', PRINTER: 'a printer', ROUTER: 'the internet box', GATEWAY: 'the internet box',
+        IOT: 'a smart home gadget', CAMERA: 'a camera', MEDIA: 'a TV or media player' };
+    function plainly(m) {
+        const cat = String(m.deviceCategory || '').toUpperCase();
+        // A server that also links its home is still a computer; only a box that does nothing else is the internet box.
+        if (cat === 'GATEWAY' && m.type === 'UBUNTU_SERVER') return 'a computer that stays on';
+        return KIND[cat]
+            || (!reachesInside(m) ? (m.type === 'WINDOWS_CLIENT' ? 'a computer' : 'a phone')
+                : SERVER_TYPES.has(m.type) ? 'a computer that stays on' : 'a device');
+    }
+    // A machine's doors, named for what is behind them. The path keeps its segment; only the reading changes.
+    const DOOR = { files: 'Files', containers: 'Apps', services: 'Websites', disk: 'Storage', backup: 'Backups' };
+
+    // The same words as a label: "Storage box", and Vaier's own machine says what it is for.
+    function kindLabel(m) {
+        if (m.vaierServer) return 'Where Vaier runs';
+        const k = plainly(m).replace(/^(a|an|the) /, '');
+        return k.charAt(0).toUpperCase() + k.slice(1);
+    }
 
     // The device shapes an operator can pin a machine to — the same set the Infrastructure page offered, and the
     // same keys the entry icons are drawn from (see ICON). The empty value is "let Vaier choose from what it
@@ -1016,7 +1031,7 @@
             const c = mark(claudeTone, 'claude', claudeWords(claude.state).chip || 'Claude');
             c.title = 'Claude — ' + claudeWords(claude.state).label
                 + (claude.accountEmail ? ' as ' + claude.accountEmail : '')
-                + (claude.effectiveUsername ? ' (Vaier acts as ' + claude.effectiveUsername + ' here)' : '');
+                + (claude.effectiveUsername ? ' (Vaier signs in as ' + claude.effectiveUsername + ' here)' : '');
             marks.appendChild(c);
         }
 
@@ -1034,13 +1049,74 @@
         return runTone ? mark(runTone, 'archive', RUN_CHIP[job.lastRunStatus], RUN_WORD[job.lastRunStatus]) : null;
     }
 
+    // --- the live fact each machine door carries ------------------------------------------------------------
+
+    const counted = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+
+    // "8 apps · 1 update". Updates are about now, so the past says only the count.
+    function appsFact(machineId) {
+        // The scrape is not awaited at boot; it repaints this when it lands.
+        if (!S.containersRead && !S.at) return 'Reading its apps…';
+        const found = containersOn(machineId);
+        if (!found.length) return 'What it runs';
+        const updates = updatesOn(machineId);
+        return counted(found.length, 'app', 'apps') + (updates ? ' · ' + counted(updates, 'update', 'updates') : '');
+    }
+
+    // "7 websites · 1 ready to publish".
+    function websitesFact(machineId) {
+        const live = servicesOn(machineId).length;
+        const ready = candidatesOn(machineId).filter((c) => !c.ignored).length;
+        const parts = [];
+        if (live) parts.push(counted(live, 'website', 'websites'));
+        if (ready) parts.push(ready + ' ready to publish');
+        return parts.length ? parts.join(' · ') : 'Nothing published yet';
+    }
+
+    // From the five-minute sweep's standing — no disk read here. No standing yet says what is behind the door.
+    function storageFact(machineId) {
+        const standing = S.diskStandings.get(machineId);
+        return standing && !S.at ? standing.usedPercent + '% full' : 'How full its disks are';
+    }
+
+    // When it was last backed up, in the words a person uses: "last night", "yesterday", "3 days ago".
+    function backedUpWhen(iso) {
+        const then = new Date(iso);
+        if (isNaN(then)) return '';
+        const now = new Date();
+        const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const days = Math.round((day(now) - day(then)) / 86400000);
+        const h = then.getHours();
+        if ((days === 0 && h < 6) || (days === 1 && h >= 18)) return 'last night';
+        if (days === 0) return h < 12 ? 'this morning' : 'today';
+        if (days === 1) return 'yesterday';
+        return timeAgo(iso);
+    }
+
+    // The last run, read once per machine on view (the same read the job pane makes) and kept fresh by the
+    // backups stream. A failed run is said by the door's mark, so the words here stay a plain when.
+    function backupsFact(m) {
+        if (m.switchedOffSince) return 'Paused — switched off';
+        const job = jobsOn(m.id)[0];
+        if (job && job.enabled === false) return 'Paused';
+        if (!S.at && !S.jobRuns.has(m.id)) loadJobRun(m.id);
+        const held = S.jobRuns.get(m.id);
+        if (!held || held.state === 'none') return held ? 'Not backed up yet' : 'Its backups';
+        const run = held.run;
+        if (!run) return 'Its backups';
+        if (run.status === 'RUNNING') return 'Backing up now';
+        const when = backedUpWhen(run.finishedAt || run.startedAt);
+        return run.status === 'FAILED' ? 'Last tried ' + when : 'Backed up ' + when;
+    }
+
     // How many of a machine's containers want a newer image, as one pill — on the fleet card and again on the
     // machine's own containers card, which is the door to those containers and used to say nothing. One
     // helper so the two can never count differently. The registry verdict is about now, and an archive is
     // about then — the same reason updateMark and the liveness dots stand down in the past.
+    const updatesOn = (machineId) => (S.at ? 0
+        : containersOn(machineId).filter((c) => c.updateAvailable === 'UPDATE_AVAILABLE').length);
     function updateCountMark(machineId) {
-        const stale = S.at ? 0
-            : containersOn(machineId).filter((c) => c.updateAvailable === 'UPDATE_AVAILABLE').length;
+        const stale = updatesOn(machineId);
         if (!stale) return null;
         const u = mark('is-update', 'arrowup', stale === 1 ? 'One update' : stale + ' updates');
         u.title = stale === 1
@@ -1070,6 +1146,8 @@
                 text = (GLOBALS.find((g) => g.name === seg) || {}).label || seg;
             } else if (i === 1 && S.path[0] === 'fleet' && seg !== 'map' && seg !== 'topology') {
                 text = nameOf(seg);
+            } else if (i === 2 && S.path[0] === 'fleet') {
+                text = DOOR[seg] || seg;
             }
             if (i === S.path.length - 1) {
                 const here = document.createElement('span');
@@ -1348,7 +1426,7 @@
                 // details, so this is a move, not a removal. A machine nobody has described says just its type.
                 const purpose = machineDescription(m);
                 const c = card(svg(machineIcon(m.id), 'ex-ico'), m.name,
-                    MACHINE_TYPE[m.type] + (purpose ? ' · ' + purpose : ''),
+                    kindLabel(m) + (purpose ? ' · ' + purpose : ''),
                     () => go(['fleet', m.id]), m.id);
                 // What it is rides beside the name, wordless; how it is doing is said only when it is trouble,
                 // so a healthy card ends at its description.
@@ -1923,12 +2001,6 @@
         // The picture speaks plainly: what a thing is and whether it is there, never how it is wired.
         const WORD = { 'is-up': 'connected', 'is-present': 'connected', 'is-down': 'switched off or out of reach',
             'is-away': 'not connected', 'is-off': 'switched off on purpose', 'is-idle': 'not checked yet', 'is-degraded': 'on, but something is wrong' };
-        const KIND = { PHONE: 'a phone', LAPTOP: 'a laptop', DESKTOP: 'a computer', SERVER: 'a computer that stays on',
-            NAS: 'a storage box', PRINTER: 'a printer', ROUTER: 'the internet box', GATEWAY: 'the internet box',
-            IOT: 'a smart home gadget', CAMERA: 'a camera', MEDIA: 'a TV or media player' };
-        const plainly = (m) => KIND[String(m.deviceCategory || '').toUpperCase()]
-            || (!reachesInside(m) ? (m.type === 'WINDOWS_CLIENT' ? 'a computer' : 'a phone')
-                : SERVER_TYPES.has(m.type) ? 'a computer that stays on' : 'a device');
         const house = (m, role) => {
             const l = livenessOf(m.id);
             const stabbur = m.id === backupId;
@@ -2041,7 +2113,7 @@
         const purpose = machineDescription(m);
         // Vaier's own machine answers differently in three places below, so the question is asked once here.
         const isVaierServer = !!m.vaierServer;
-        const head = paneHead(m.name, false, MACHINE_TYPE[m.type] + (purpose ? ' · ' + purpose : ''));
+        const head = paneHead(m.name, false, kindLabel(m) + (purpose ? ' · ' + purpose : ''));
         head.querySelector('.ex-pane-title').appendChild(dot(m.id));
         // The machine's open verbs live where every other pane keeps the verbs that apply right now: the
         // head's one action group, hugging the right. Editing details is common, and a LAN server's setup
@@ -2090,10 +2162,10 @@
             // listening.
             if (!m.sshAccess && noSshServer) {
                 box.disabled = true;
-                box.title = 'No SSH server detected on last check';
+                box.title = 'Vaier found no way to sign in here on the last check';
             }
             box.onchange = () => toggleSshAccess(m.id, box.checked, box);
-            const atxt = el('span'); atxt.textContent = 'Let Vaier open an SSH session to this machine';
+            const atxt = el('span'); atxt.textContent = 'Let Vaier open a shell on this machine';
             access.append(box, atxt);
             return access;
         }
@@ -2109,28 +2181,38 @@
         // The backup entry reads both ways, exactly as childrenOf grows it: this machine is the one backup
         // server, or a job backs it up. Colina once introduced itself as where the fleet backs up.
         const isBackupServer = !!S.backupServer && S.backupServer.machineId === m.id;
+        // Each door carries one live fact, read off what the page already holds.
         const NOTE = {
-            files:      'Browse over SFTP',
-            containers: containersOn(m.id).length + ' seen by Vaier',
-            services:   servicesOn(m.id).length + ' published from here',
-            disk:       'Its filesystems, and how full they are',
-            backup:     isBackupServer ? 'The fleet backs up here'
-                : 'Backs up to ' + (S.backupServer ? S.backupServer.name : 'the backup server'),
+            files:      () => 'Browse its files',
+            containers: () => appsFact(m.id),
+            services:   () => websitesFact(m.id),
+            disk:       () => storageFact(m.id),
+            backup:     () => (isBackupServer ? 'Keeps the fleet’s backups' : backupsFact(m)),
         };
-        // Files and disk both ride on SSH — a credential alone grew the entries, but a machine whose
-        // last check found no SSH server would just relocate the same dead end one click deeper. Grey them
-        // out rather than remove them: the entry still names what is there, and the next sweep (or an SSH
-        // server put back) lifts the greying on its own.
+        // Files and storage both need a way in — greyed rather than removed when the last check found none,
+        // so the door still names what is there; the next sweep lifts the greying on its own.
         const SSH_ENTRY_KINDS = new Set(['files', 'disk']);
+        const NO_WAY_IN = 'Vaier found no way to sign in here on the last check';
+        // The shell first: it is the door an operator most often comes for. It opens a window, not a pane.
+        if (reachable && m.sshAccess) {
+            let shellStop = null;
+            if (!m.hasCredential) shellStop = 'Give Vaier a sign-in for the shell first';
+            else if (noSshServer) shellStop = NO_WAY_IN;
+            const shellCard = card(svg('shell', 'ex-ico'), 'Shell', shellStop || 'Opens where you left off',
+                () => openShellWindow(m.id), null, shellStop);
+            // It outlives its window, so say how it is ended.
+            if (!shellStop) {
+                shellCard.title = 'Keeps running on ' + m.name + ' when you close the window; '
+                    + 'Exit shell, inside it, is what ends it.';
+            }
+            grid.appendChild(shellCard);
+        }
         inside.forEach((kid) => {
-            const disabledTitle = (noSshServer && SSH_ENTRY_KINDS.has(kid.kind))
-                ? 'No SSH server detected on last check' : null;
-            const door = card(entryIco(kid.kind, kid.name), kid.name,
-                NOTE[kid.name], () => go(['fleet', m.id, kid.name]), null, disabledTitle);
-            // The containers and backup doors wear the fleet card's own marks: the operator who came here for
-            // that mark should not have to open the door to find it again.
-            const stale = kid.kind === 'containers' ? updateCountMark(m.id)
-                : kid.kind === 'backup' && !S.at && !m.switchedOffSince ? runMark(m.id) : null;
+            const disabledTitle = (noSshServer && SSH_ENTRY_KINDS.has(kid.kind)) ? NO_WAY_IN : null;
+            const door = card(entryIco(kid.kind, kid.name), DOOR[kid.name] || kid.name,
+                NOTE[kid.name](), () => go(['fleet', m.id, kid.name]), null, disabledTitle);
+            // The backup door wears the fleet card's trouble mark, so a red card never leads to a calm door.
+            const stale = kid.kind === 'backup' && !S.at && !m.switchedOffSince ? runMark(m.id) : null;
             if (stale) {
                 const marks = el('span', 'ex-card-marks');
                 marks.appendChild(stale);
@@ -2138,31 +2220,10 @@
             }
             grid.appendChild(door);
         });
-        // A shell is a way into this machine exactly as its files and its containers are. It was filed under
-        // a heading called "SSH access" because SSH is how it travels — which is the machine's plumbing, not
-        // the operator's reason for wanting it, and grouping by plumbing is how that heading came to hold a
-        // toggle, a credential, a privilege warning and the whole Claude sign-in. It is a door, so it is with
-        // the doors, greyed for the same two reasons the others are. It opens a window rather than a pane,
-        // and its own line is where that is said.
-        if (reachable && m.sshAccess) {
-            let shellStop = null;
-            if (!m.hasCredential) shellStop = 'Give this machine an SSH credential first';
-            else if (noSshServer) shellStop = 'No SSH server answered on the last check';
-            const shellCard = card(svg('shell', 'ex-ico'), 'shell',
-                shellStop || 'Runs on ' + m.name + ' itself — reopening reattaches where you left off',
-                () => openShellWindow(m.id), null, shellStop);
-            // A session that outlives its window needs to say how it is ended, or the operator has started
-            // something they cannot stop. The card's note has room for what it IS; the rest goes here.
-            if (!shellStop) {
-                shellCard.title = 'Runs on ' + m.name + ' itself and outlives the window — reopening '
-                    + 'reattaches where you left off; Exit shell, inside it, is what stops it.';
-            }
-            grid.appendChild(shellCard);
-        }
         if (grid.childNodes.length) body.appendChild(grid);
         else if (reachable) {
-            body.appendChild(note('Nothing to open here yet — no files, shell or disk without SSH access, no '
-                + 'Docker Vaier knows of, nothing published.', false));
+            body.appendChild(note('Nothing to open here yet. Let Vaier open a shell on it to see its files '
+                + 'and storage too.', false));
         }
 
         // Pending OS updates, said only when some wait, in the sweep's own words, with the one way to install
@@ -2195,8 +2256,8 @@
             body.appendChild(section('What to do next'));
             if (offerAccess) {
                 body.appendChild(sshAccessRow());
-                body.appendChild(hint('Without it Vaier has no shell, no files and no disk reading here. '
-                    + 'Turn it on to give this machine an SSH credential.'));
+                body.appendChild(hint('Without it Vaier cannot open its shell, its files or its storage. '
+                    + 'Turning it on asks for the sign-in Vaier will use.'));
             }
             if (hasNudges) nudges.list.forEach((n) => body.appendChild(nudgeCard(m, n)));
         }
@@ -2218,7 +2279,7 @@
                 claimRow.appendChild(selVerb('locate', 'This browser is ' + m.name, 'ex-btn', () => claimDevice(m)));
                 body.appendChild(claimRow);
                 body.appendChild(hint('Claim ' + m.name + ' from the browser running on it, and it can report '
-                    + 'where it actually is — with the tunnel down too.'));
+                    + 'where it actually is — even while it is not connected.'));
             }
         }
 
@@ -2228,22 +2289,20 @@
         const isLan = m.type === 'LAN_SERVER';
         const rows = [];
         if (isVaierServer) {
-            rows.push(['Role', 'The fleet’s hub — WireGuard server and reverse proxy']);
+            rows.push(['What it does', 'Every machine connects through it, and your websites are served from here']);
         } else if (isLan) {
             const lan = S.lan.get(m.id);
             rows.push(['Last seen', lan ? agoFromEpochSeconds(lan.lastSeen) : '']);
         } else {
-            rows.push(['Last handshake', peer ? agoFromEpochSeconds(peer.latestHandshake) : '']);
+            rows.push(['Last seen', peer ? agoFromEpochSeconds(peer.latestHandshake) : '']);
         }
-        rows.push(['Device category', categoryLabel(m.deviceCategory)]);
         // Only an access that came over the tunnel identifies a device rather than a person, so this is the
         // last published service Vaier SAW this machine reach — which is why the row says so, and why no
         // record draws no row: never having seen one is not the same as the machine having reached none.
         const reached = peer && peer.lastServiceReached;
         if (reached) {
             const age = timeAgo(reached.at);
-            rows.push(['Last service', (reached.displayName || reached.host)
-                + (age ? ' · ' + age : '') + ', over the tunnel']);
+            rows.push(['Last website it opened', (reached.displayName || reached.host) + (age ? ' · ' + age : '')]);
         }
         body.appendChild(kv(rows));
 
@@ -2252,7 +2311,7 @@
         if (reachable && m.sshAccess) {
             body.appendChild(sshAccessRow());
             const cred = el('div', 'ex-lactions is-static');
-            cred.appendChild(selVerb('gear', 'SSH credential', 'ex-btn', () => credentialDialog(m.id)));
+            cred.appendChild(selVerb('gear', 'Sign-in for the shell', 'ex-btn', () => credentialDialog(m.id)));
             body.appendChild(cred);
             // Who Vaier actually is on this machine. The credential's username IS the effective user, so
             // saying it costs nothing — and it is the whole difference between a delete that removes a file
@@ -2260,18 +2319,18 @@
             // the DietPi boxes; it arrived with the image. Naming it is the first step to deciding whether
             // it stays.
             if (m.effectiveUsername) {
-                const said = 'Vaier acts as ' + m.effectiveUsername + ' on ' + m.name;
+                const said = 'Vaier signs in as ' + m.effectiveUsername;
                 // Privilege is the one fact here that earns a bordered box. A warning only reads as a warning
                 // while the paragraphs beside it are not wearing the same edge.
                 if (m.effectiveUserPrivileged) {
-                    const warn = note(said + ' — a privileged user, so everything it does here, reading, '
-                        + 'writing and deleting alike, runs unrestricted.', false);
+                    const warn = note(said + ', who can do anything on ' + m.name + ' — reading, changing and '
+                        + 'deleting alike.', false);
                     warn.classList.add('is-warn');
                     body.appendChild(warn);
                 } else {
                     // is-who: not an aside. This is the machine's blast radius and the line the Claude card
                     // hangs off, so it reads a shade above the hints around it.
-                    const who = hint(said + ' — it reaches exactly what that user can reach, and nothing else.');
+                    const who = hint(said + ' and can only do what ' + m.effectiveUsername + ' can.');
                     who.classList.add('is-who');
                     body.appendChild(who);
                 }
@@ -2281,14 +2340,14 @@
         const wires = disclosure('Connection details');
         const wireRows = [];
         if (!isVaierServer && !isLan) {
-            wireRows.push(['Tunnel address', coord(tunnelAddress(m))]);
-            wireRows.push(['Endpoint', coord(m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : '')]);
-            wireRows.push(['Transfer', m.transferRx || m.transferTx
-                ? humanBytes(m.transferTx) + ' up / ' + humanBytes(m.transferRx) + ' down' : '']);
+            wireRows.push(['Address inside Vaier', coord(tunnelAddress(m))]);
+            wireRows.push(['Connects from', coord(m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : '')]);
+            wireRows.push(['Sent and received', m.transferRx || m.transferTx
+                ? humanBytes(m.transferTx) + ' sent · ' + humanBytes(m.transferRx) + ' received' : '']);
         }
-        if (isLan) wireRows.push(['LAN address', coord(m.lanAddress || m.lanCidr)]);
-        else if (m.lanCidr || m.lanAddress) wireRows.push(['LAN', coord(m.lanCidr || m.lanAddress)]);
-        wireRows.push(['Docker', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No']);
+        if (isLan) wireRows.push(['Its address', coord(m.lanAddress || m.lanCidr)]);
+        else if (m.lanCidr || m.lanAddress) wireRows.push(['Its home network', coord(m.lanCidr || m.lanAddress)]);
+        wireRows.push(['Runs apps (Docker)', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No']);
         wires.appendChild(kv(wireRows));
         body.appendChild(wires);
 
@@ -2315,28 +2374,27 @@
         // want it — never that opening it put a working machine at risk.
         if (!isVaierServer) {
             // A personal device joins through the Vaier app, so Vaier mints it no config: neither Reissue nor
-            // Regenerate is offered, and the server refuses both anyway.
+            // Regenerate is offered, and the server refuses both anyway. Said as "send its setup again" and
+            // "give it new keys".
             const peerRec = S.peers.get(m.id) || {};
             const deviceHeld = !!peerRec.deviceHeldKey;
             const viaApp = !!peerRec.joinsThroughVaierApp;
             const canReissue = S.peers.has(m.id) && !deviceHeld && !viaApp;
-            const adv = dangerFold(canReissue ? 'Reissue, regenerate or remove this machine'
-                                              : 'Remove this machine');
+            const adv = dangerFold(canReissue ? 'Keys and removal' : 'Remove this machine');
             if (canReissue) {
                 const cfg = el('div', 'ex-lactions is-static');
-                cfg.appendChild(selVerb('refresh', 'Reissue config', 'ex-btn', () => reissuePeer(m)));
-                cfg.appendChild(selVerb('refresh', 'Regenerate config', 'ex-btn', () => regenerateMachine(m)));
+                cfg.appendChild(selVerb('refresh', 'Send its setup again', 'ex-btn', () => reissuePeer(m)));
+                cfg.appendChild(selVerb('refresh', 'Give it new keys', 'ex-btn', () => regenerateMachine(m)));
                 adv.appendChild(cfg);
-                adv.appendChild(hint('Reissue re-hands the same identity’s config. Regenerate replaces the '
-                    + 'keypair — a new identity on the VPN — and the old config stops working at once.'));
+                adv.appendChild(hint('Sending its setup again keeps its keys, for when the setup was lost. New '
+                    + 'keys make the old setup stop working at once — for when it may have leaked.'));
             } else if (deviceHeld) {
-                adv.appendChild(hint('This machine made its own key when it enrolled, so there is no config '
-                    + 'here to reissue or regenerate — the private half only ever existed on the device. '
-                    + 'To replace the key, leave Vaier in its Vaier app and join again (removing it here '
-                    + 'from another device works too).'));
+                adv.appendChild(hint('This machine made its own keys when it joined, and they never left it — '
+                    + 'so there is no setup here to send again. For new keys, '
+                    + 'leave Vaier in its Vaier app and join again (removing it here from another device works too).'));
             } else if (viaApp) {
-                adv.appendChild(hint('This machine joins through the Vaier app, so Vaier makes no config for it. '
-                    + 'To give it a new key, remove it here and join again from its Vaier app.'));
+                adv.appendChild(hint('This machine joins through the Vaier app, so Vaier keeps no setup for it. '
+                    + 'For new keys, remove it here and join again from its Vaier app.'));
             }
             // Removing the device this browser comes through would cut the tunnel carrying the answer.
             if (S.tunnelMachineId === m.id && !S.tunnelMachineRemovable) {
@@ -2849,31 +2907,30 @@
     async function regenerateMachine(m) {
         const peer = S.peers.get(m.id);
         if (!peer) return;
-        const ok = await confirmModal('Regenerate ' + m.name + '’s config?',
-            'Vaier deletes ' + m.name + '’s WireGuard peer and recreates it with a fresh keypair — a brand-new '
-            + 'identity on the VPN. The current config stops working the moment the peer is deleted, and ' + m.name
-            + ' can only reconnect once the new one is installed. Reissue keeps the same keys; regenerate '
-            + 'replaces them. Only regenerate when the keypair itself must change.', 'Regenerate');
+        const ok = await confirmModal('Give ' + m.name + ' new keys?',
+            'Vaier replaces ' + m.name + '’s keys. Its current setup stops working at once, and ' + m.name
+            + ' connects again only once the new setup is installed on it. Do this only when the old keys may '
+            + 'have leaked — sending its setup again keeps them.', 'Give new keys');
         if (!ok) return;
         const rec = S.peers.get(m.id) || {};
         const recreate = { name: m.name, peerType: m.type, lanCidr: m.lanCidr || null,
             lanAddress: m.lanAddress || null, description: rec.description || null };
         try {
             const del = await fetch('/vpn/peers/' + encodeURIComponent(peer.id), { method: 'DELETE' });
-            if (!del.ok && del.status !== 204) { toast('Vaier could not regenerate ' + m.name + '.'); return; }
+            if (!del.ok && del.status !== 204) { toast('Vaier could not give ' + m.name + ' new keys.'); return; }
             const res = await fetch('/vpn/peers', { method: 'POST',
                 headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(recreate) });
             if (!res.ok) {
                 const e = await res.json().catch(() => ({}));
-                toast(e.message || 'Vaier deleted the old peer but could not recreate it.');
+                toast(e.message || 'Vaier removed the old keys but could not make new ones.');
                 await loadFleet(); render(); return;
             }
             const created = await res.json();
             await loadFleet();
-            toast(m.name + '’s config regenerated — save the new config now.');
+            toast(m.name + ' has new keys — save its new setup now.');
             createResult(created);   // the same one-shot config view a new machine gets
         } catch (e) {
-            toast('Vaier could not regenerate ' + m.name + '.');
+            toast('Vaier could not give ' + m.name + ' new keys.');
         }
     }
 
@@ -3017,7 +3074,7 @@
         const drow = (k, v, accent) => {
             const r = el('div', 'ex-drow');
             const kk = el('span', 'ex-drow-k'); kk.textContent = k;
-            const vv = el('span', 'ex-drow-v' + (accent ? ' is-accent' : '')); vv.textContent = v;
+            const vv = el('span', 'ex-drow-v' + (accent ? ' is-accent' : '') + (/^[0-9a-f.:\/]+$/i.test(v) ? ' is-coord' : '')); vv.textContent = v;
             r.append(kk, vv); return r;
         };
         // The "Vaier will generate" panel, shared by the peer form and an enrolment.
@@ -3025,7 +3082,7 @@
             const det = el('div', 'ex-detected');
             const head = el('div', 'ex-detected-head');
             head.appendChild(el('span', 'ex-detected-check')).textContent = '✓';
-            const ht = el('span'); ht.textContent = 'Vaier will generate'; head.appendChild(ht);
+            const ht = el('span'); ht.textContent = 'Vaier takes care of'; head.appendChild(ht);
             det.appendChild(head);
             rows.forEach((r) => det.appendChild(r));
             return det;
@@ -3043,7 +3100,6 @@
             else if (id === 'adopt') paintAdopt();
             else if (id === 'lanHandoff') paintLanHandoff();
             else if (id === 'byaddress') paintByAddress();
-            else if (id === 'peerWhat') paintPeerWhat();
             else if (id === 'peerApp') paintPeerApp();
             else if (id === 'peerName') paintPeerName();
             else if (id === 'peerHandoff') paintPeerHandoff();
@@ -3059,25 +3115,28 @@
                 || { anchor: anchor, name: relayName(anchor) || anchor, cidr: null };
         }
 
-        // ---- fork: the one question Vaier can't infer ---------------------------------------------------
+        // ---- fork: what is it? -------------------------------------------------------------------------
+        // Three everyday answers, each onto a flow that already exists: the Vaier app for what is carried
+        // (offered first — it is the commonest), a name and one command for what should join, and a look
+        // around for what already sits on one of the operator's networks.
         function paintFork() {
             titleEl.textContent = 'Add a machine';
             content.innerHTML = '';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'Vaier fills in everything it can. Answer the one thing it can’t infer: a new peer '
-                + 'that connects through the VPN, or a server already on one of your networks?';
-            const grid = el('div', 'ex-choice-grid');
-            const peer = choiceCard('relay', 'A peer',
-                'A new server or personal device that connects through Vaier’s VPN and gets its own tunnel '
-                + 'address.');
-            peer.onclick = () => screen('peerWhat');
-            const lan = choiceCard('server', 'A LAN server',
-                'A machine already running on one of your networks. Vaier scans, finds it, and adopts it.');
-            lan.onclick = () => { screen('pickLan'); };
-            grid.append(peer, lan);
-            content.append(sub, section('What are you adding?'), grid);
-            // Read the snapshot now so the cached candidates are ready the moment they pick the LAN-server
-            // branch — never a wait on the next screen.
+            sub.textContent = 'What are you adding? Vaier works out the rest.';
+            const grid = el('div', 'ex-choice-grid is-rows');
+            const carry = choiceCard('phone', 'A phone or computer I carry',
+                'It joins with the Vaier app, and you approve it here with a four-digit code.');
+            carry.onclick = () => { peerIntent = 'PERSONAL_DEVICE'; screen('peerApp'); };
+            const join = choiceCard('server', 'A server or PC that should join',
+                'It stays on and can run your apps. Give it a name, then run one line on it.');
+            join.onclick = () => { peerIntent = 'SERVER'; screen('peerName'); };
+            const there = choiceCard('nas', 'Something already on one of my networks',
+                'A storage box, a printer, a smart home hub. Vaier looks for it and adds it.');
+            there.onclick = () => { screen('pickLan'); };
+            grid.append(carry, join, there);
+            content.append(sub, grid);
+            // Read the snapshot now so the third answer opens on what is already known — never a wait.
             if (S.lanScan === null) loadLanScan();
         }
 
@@ -3086,11 +3145,10 @@
         // at once and no scan fans out over the whole fleet. Each row is one "via <name>" network with its
         // CIDR and, from the cached snapshot, how many candidates it holds and when it was last scanned.
         function paintPickLan() {
-            titleEl.textContent = 'Add a LAN server';
+            titleEl.textContent = 'Add something on your networks';
             content.innerHTML = '';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'Pick the network to look on. Vaier scans that one LAN — quicker than sweeping them '
-                + 'all — and shows what it finds.';
+            sub.textContent = 'Where is it? Vaier looks around that one place and shows what it finds.';
             content.appendChild(sub);
 
             if (S.lanScanLans === null) {
@@ -3112,9 +3170,8 @@
             } else {
                 // A zero state, so it has to name the thing to go and do — and the by-address path is not it:
                 // an address Vaier cannot route to is refused, and with no networks here there is none.
-                content.appendChild(note('No networks to scan yet. Add a peer on the network you want to '
-                    + 'reach and tell Vaier the network behind it — Vaier can only look where a machine of '
-                    + 'yours already is.', false));
+                content.appendChild(note('Nowhere to look yet. Vaier can only look where one of your machines '
+                    + 'already is — add a server or PC at that place first.', false));
             }
             content.appendChild(pickFoot());
         }
@@ -3125,13 +3182,12 @@
             const ic = el('span', 'ex-disc-icon'); ic.innerHTML = svg('route', 'ex-disc-svg');
             const info = el('div', 'ex-disc-info');
             const line = el('div', 'ex-disc-line');
-            const nm = el('span', 'ex-disc-name'); nm.textContent = 'via ' + lan.name;
+            const nm = el('span', 'ex-disc-name'); nm.textContent = 'At ' + lan.name;
             line.appendChild(nm);
             const meta = el('span', 'ex-disc-meta');
             const bits = [];
-            if (lan.cidr) bits.push(lan.cidr);
             bits.push(count === 1 ? '1 found' : count + ' found');
-            bits.push(snap && snap.lastScanCompleted ? 'scanned ' + timeAgo(snap.lastScanCompleted) : 'not scanned yet');
+            bits.push(snap && snap.lastScanCompleted ? 'looked ' + timeAgo(snap.lastScanCompleted) : 'not looked yet');
             meta.textContent = bits.join(' · ');
             info.append(line, meta);
             const go = el('span', 'ex-lanpick-go'); go.innerHTML = svg('chev', 'ex-disc-svg');
@@ -3160,7 +3216,7 @@
         // stream — never a timer, never a poll.
         function paintDiscover() {
             if (!pickedLan) { screen('pickLan'); return; }
-            titleEl.textContent = 'Add a LAN server — via ' + pickedLan.name;
+            titleEl.textContent = 'Add something at ' + pickedLan.name;
             content.innerHTML = '';
             const snap = S.lanScan;
             if (snap === null) {
@@ -3178,19 +3234,14 @@
             const ago = el('span', 'ex-scanmeta-ago');
             ago.appendChild(el('span', 'ex-scanmeta-dot' + (scanning ? ' is-live' : '')));
             const agoTxt = el('span');
-            agoTxt.textContent = scanning ? 'Scanning ' + pickedLan.name + '…'
-                : (snap.lastScanCompleted ? 'Last scan ' + timeAgo(snap.lastScanCompleted) : 'Not scanned yet');
+            agoTxt.textContent = scanning ? 'Looking around ' + pickedLan.name + '…'
+                : (snap.lastScanCompleted ? 'Looked ' + timeAgo(snap.lastScanCompleted) : 'Not looked yet');
             ago.appendChild(agoTxt);
-            const rescan = selVerb('refresh', scanning ? 'Scanning…' : 'Rescan this LAN', 'ex-btn',
+            const rescan = selVerb('refresh', scanning ? 'Looking…' : 'Look again', 'ex-btn',
                 () => { scanLan(pickedLan.anchor); paintDiscover(); });
             if (scanning) rescan.disabled = true;
             meta.append(ago, rescan);
             content.appendChild(meta);
-
-            if (pickedLan.cidr) {
-                const where = el('div', 'ex-hint'); where.textContent = 'via ' + pickedLan.name + ' · ' + pickedLan.cidr;
-                content.appendChild(where);
-            }
 
             if (found.length) {
                 const list = el('div', 'ex-disc');
@@ -3204,7 +3255,7 @@
             } else {
                 content.appendChild(note(scanning
                     ? 'Looking across ' + pickedLan.name + ' — this can take a minute.'
-                    : 'No unregistered machines found on this LAN. Rescan to look again.', false));
+                    : 'Nothing new found at ' + pickedLan.name + '. Look again to try once more.', false));
             }
             // Ignoring has to be undoable from the same screen that does it. This list hides ignored finds, so
             // without a way back a dismissed host would be invisible forever with no UI left to restore it —
@@ -3262,22 +3313,20 @@
             const det = el('div', 'ex-detected');
             const head = el('div', 'ex-detected-head');
             head.appendChild(el('span', 'ex-detected-check')).textContent = '✓';
-            const ht = el('span'); ht.textContent = 'Detected by Vaier — no need to enter'; head.appendChild(ht);
+            const ht = el('span'); ht.textContent = 'Vaier found these — nothing to fill in'; head.appendChild(ht);
             det.appendChild(head);
             const drow = (k, v, accent) => {
                 const r = el('div', 'ex-drow');
                 const kk = el('span', 'ex-drow-k'); kk.textContent = k;
-                const vv = el('span', 'ex-drow-v' + (accent ? ' is-accent' : '')); vv.textContent = v;
+                const vv = el('span', 'ex-drow-v' + (accent ? ' is-accent' : '') + (/^[0-9a-f.:\/]+$/i.test(v) ? ' is-coord' : '')); vv.textContent = v;
                 r.append(kk, vv); return r;
             };
-            det.appendChild(drow('Kind', discoveredLabel(d)));
-            det.appendChild(drow('LAN address', d.ipAddress));
+            det.appendChild(drow('What it is', discoveredLabel(d)));
             const via = relayName(d.relayAnchor);
-            if (via) det.appendChild(drow('Reached via', via));
+            if (via) det.appendChild(drow('Where', 'At ' + via));
+            det.appendChild(drow('Its address', d.ipAddress));
             const dockerPort = (d.openPorts || []).find((p) => p === 2375 || p === 2376);
-            if (dockerPort) det.appendChild(drow('Docker API', ':' + dockerPort + ' open', true));
-            const relay = relayMachine(d.relayAnchor);
-            if (relay && relay.lanCidr) det.appendChild(drow('Cross-site route', relay.lanCidr));
+            if (dockerPort) det.appendChild(drow('Its apps', 'Vaier can see them', true));
             content.appendChild(det);
 
             // Optional SSH access — the same login the web terminal, disk watch and backups ride on. Offered
@@ -3287,7 +3336,7 @@
             let draft = () => null;
             let credentialFilled = () => false;
             if (d.sshAvailable) {
-                const disc = disclosure('Add SSH access — for the web terminal, disk watch & backups');
+                const disc = disclosure('Let Vaier sign in — for its shell, files, storage and backups');
                 const username = el('input', 'ex-input'); username.type = 'text'; username.autocomplete = 'off';
                 username.spellcheck = false; username.placeholder = 'e.g. admin';
                 const method = el('select', 'ex-input');
@@ -3309,10 +3358,10 @@
                 };
                 method.onchange = syncMethod;
                 const testRow = el('div', 'ex-testrow');
-                const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Test connection';
-                const testOk = el('span', 'ex-testok'); testOk.textContent = '✓ Reached & authenticated';
+                const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Try signing in';
+                const testOk = el('span', 'ex-testok'); testOk.textContent = '✓ Signed in';
                 testRow.append(testBtn, testOk);
-                disc.append(field('User', null, username), field('Auth', null, method), pwF, keyF, passF, testRow);
+                disc.append(field('User name', null, username), field('Sign in with', null, method), pwF, keyF, passF, testRow);
                 syncMethod();
                 content.appendChild(disc);
 
@@ -3332,7 +3381,7 @@
                         const v = await r.json();
                         if (v.authenticated) { testOk.classList.add('is-on'); }
                         else if (v.reachable) { toast('Reached ' + d.ipAddress + ', but that login was refused.'); }
-                        else { toast('Vaier could not reach ' + d.ipAddress + ' over SSH.'); }
+                        else { toast('Vaier could not reach ' + d.ipAddress + ' to sign in.'); }
                     } catch (e) { toast('Vaier could not test that login.'); }
                     finally { testBtn.disabled = false; testBtn.textContent = was; }
                 };
@@ -3365,7 +3414,7 @@
                 const resp = await res.json();
                 await loadFleet(); await loadLanScan();
                 const credNote = resp.credentialProvided && !resp.credentialStored
-                    ? ' Its SSH login couldn’t be saved — set one from the machine.' : '';
+                    ? ' Its sign-in couldn’t be saved — set one from its page.' : '';
                 adopted = { machineId: resp.machineId, name: resp.name, credNote: credNote };
                 screen('lanHandoff');
             } catch (e) { toast('Vaier could not add that machine.'); restore(); }
@@ -3384,8 +3433,8 @@
             const mint = await mintLanSetupToken(a.machineId);
             const sub = el('div', 'ex-dialog-body');
             if (mint && mint.needed) {
-                sub.textContent = a.name + ' is registered.' + (a.credNote || '') + ' To let Vaier manage its '
-                    + 'containers, run this on ' + a.name + ' — it needs sudo:';
+                sub.textContent = a.name + ' is added.' + (a.credNote || '') + ' To let Vaier see its apps, '
+                    + 'run this on ' + a.name + ' — it needs admin rights:';
                 content.appendChild(sub);
 
                 const curl = "curl -fsSL '" + window.location.origin + '/lan-servers/'
@@ -3403,15 +3452,15 @@
                 fb.appendChild(dl);
                 content.appendChild(fb);
             } else if (mint && !mint.needed) {
-                sub.textContent = a.name + ' is registered.' + (a.credNote || '')
-                    + ' Vaier can manage it as-is — nothing to install on the host.';
+                sub.textContent = a.name + ' is added.' + (a.credNote || '')
+                    + ' There is nothing to install on it.';
                 content.appendChild(sub);
             } else {
-                sub.textContent = a.name + ' is registered.' + (a.credNote || '');
+                sub.textContent = a.name + ' is added.' + (a.credNote || '');
                 content.appendChild(sub);
                 const warn = el('div', 'ex-hint');
                 warn.textContent = 'Vaier could not prepare the setup command. Open ' + a.name
-                    + ' and use its Setup script button.';
+                    + ' and use its Setup command button.';
                 content.appendChild(warn);
             }
 
@@ -3432,11 +3481,10 @@
         // detected readout + SSH credential test the adopt flow does. Detection never blocks Add: an
         // unreachable host just leaves the plain fields to fill in by hand.
         function paintByAddress() {
-            titleEl.textContent = 'Add a LAN server';
+            titleEl.textContent = 'Add by address';
             content.innerHTML = '';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A LAN server is reached through the machine whose network it sits on, so Vaier only '
-                + 'needs where it answers. Give its LAN address and Vaier will try to detect the rest.';
+            sub.textContent = 'Give the address it has on its home network, and Vaier works out the rest.';
             content.appendChild(sub);
 
             const name = el('input', 'ex-input'); name.type = 'text'; name.placeholder = 'e.g. Roon server';
@@ -3445,10 +3493,10 @@
             lanAddr.autocomplete = 'off'; lanAddr.spellcheck = false;
             const dockerBox = el('input'); dockerBox.type = 'checkbox';
             const dockerRow = el('label', 'ex-check-row');
-            const dtxt = el('span'); dtxt.textContent = 'It runs Docker Vaier can read'; dockerRow.append(dockerBox, dtxt);
+            const dtxt = el('span'); dtxt.textContent = 'It runs apps Vaier can see (Docker)'; dockerRow.append(dockerBox, dtxt);
             const dockerPort = el('input', 'ex-input'); dockerPort.type = 'number'; dockerPort.min = '1';
             dockerPort.max = '65535'; dockerPort.value = '2375';
-            const dockerPortField = field('Docker API port', 'The port its Docker engine API listens on.', dockerPort);
+            const dockerPortField = field('Docker port', 'Leave it as it is unless you changed it.', dockerPort);
             const cat = catSelect('');
             const desc = el('input', 'ex-input'); desc.type = 'text'; desc.autocomplete = 'off';
             const syncDocker = () => { dockerPortField.style.display = dockerBox.checked ? '' : 'none'; };
@@ -3459,15 +3507,15 @@
 
             const form = el('div', 'ex-form');
             form.append(field('Name', null, name),
-                field('LAN address', 'Where this machine answers on its network.', lanAddr),
+                field('Its address', 'On its home network.', lanAddr),
                 detectMsg, dockerRow, dockerPortField,
-                field('Device category', 'Its shape in the fleet and on the map. Optional.', cat),
+                field('What it is', 'Its picture in the fleet and on the map. Optional.', cat),
                 field('Description', 'Optional.', desc));
             content.appendChild(form);
 
             // The SSH block — the same login the web terminal, disk watch and backups ride on. Built once and
             // hidden; revealed only when the probe says the host answered on port 22, exactly as adopt does.
-            const disc = disclosure('Add SSH access — for the web terminal, disk watch & backups');
+            const disc = disclosure('Let Vaier sign in — for its shell, files, storage and backups');
             disc.style.display = 'none';
             const username = el('input', 'ex-input'); username.type = 'text'; username.autocomplete = 'off';
             username.spellcheck = false; username.placeholder = 'e.g. admin';
@@ -3490,10 +3538,10 @@
             };
             method.onchange = syncMethod;
             const testRow = el('div', 'ex-testrow');
-            const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Test connection';
-            const testOk = el('span', 'ex-testok'); testOk.textContent = '✓ Reached & authenticated';
+            const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Try signing in';
+            const testOk = el('span', 'ex-testok'); testOk.textContent = '✓ Signed in';
             testRow.append(testBtn, testOk);
-            disc.append(field('User', null, username), field('Auth', null, method), pwF, keyF, passF, testRow);
+            disc.append(field('User name', null, username), field('Sign in with', null, method), pwF, keyF, passF, testRow);
             syncMethod();
             content.appendChild(disc);
 
@@ -3505,7 +3553,7 @@
 
             testBtn.onclick = async () => {
                 const addr = lanAddr.value.trim();
-                if (!addr) { toast('Enter the LAN address first.'); return; }
+                if (!addr) { toast('Enter its address first.'); return; }
                 if (!username.value.trim() || !draft().secret.trim()) { toast('Enter a username and the secret to test.'); return; }
                 testOk.classList.remove('is-on');
                 testBtn.disabled = true; const was = testBtn.textContent; testBtn.textContent = 'Testing…';
@@ -3516,7 +3564,7 @@
                     const v = await r.json();
                     if (v.authenticated) { testOk.classList.add('is-on'); }
                     else if (v.reachable) { toast('Reached ' + addr + ', but that login was refused.'); }
-                    else { toast('Vaier could not reach ' + addr + ' over SSH.'); }
+                    else { toast('Vaier could not reach ' + addr + ' to sign in.'); }
                 } catch (e) { toast('Vaier could not test that login.'); }
                 finally { testBtn.disabled = false; testBtn.textContent = was; }
             };
@@ -3528,7 +3576,7 @@
                 const addr = lanAddr.value.trim();
                 if (!addr || addr === lastProbed) return;
                 lastProbed = addr;
-                detectMsg.style.display = ''; detectMsg.textContent = 'Detecting…';
+                detectMsg.style.display = ''; detectMsg.textContent = 'Looking…';
                 disc.style.display = 'none';
                 try {
                     const r = await fetch('/lan-servers/probe', {
@@ -3541,12 +3589,12 @@
                             if (p.dockerPort) dockerPort.value = String(p.dockerPort); }
                         if (p.guessedCategory && p.guessedCategory !== 'GENERIC') cat.value = p.guessedCategory;
                         if (p.sshAvailable) disc.style.display = '';
-                        detectMsg.textContent = p.routedVia ? 'Detected — reached via ' + p.routedVia : 'Detected.';
+                        detectMsg.textContent = p.routedVia ? 'Found it, at ' + p.routedVia + '.' : 'Found it.';
                     } else {
-                        detectMsg.textContent = 'Couldn’t reach it to detect — fill these in and add anyway.';
+                        detectMsg.textContent = 'Vaier couldn’t reach it to look. Fill these in and add it anyway.';
                     }
                 } catch (e) {
-                    if (lanAddr.value.trim() === addr) detectMsg.textContent = 'Couldn’t reach it to detect — fill these in and add anyway.';
+                    if (lanAddr.value.trim() === addr) detectMsg.textContent = 'Vaier couldn’t reach it to look. Fill these in and add it anyway.';
                 }
             };
             lanAddr.onblur = detect;
@@ -3591,47 +3639,25 @@
             return foot;
         }
 
-        // ---- peer · what is this? the intent fork ------------------------------------------------------
-        function paintPeerWhat() {
-            titleEl.textContent = 'Add a peer';
-            content.innerHTML = '';
-            const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A peer connects through Vaier’s VPN — Vaier assigns its tunnel address and keys. '
-                + 'Answer what it is for, and it generates the rest.';
-            const grid = el('div', 'ex-choice-grid');
-            // The two cards carry the whole of the difference between the intents, so they say what each one
-            // gets — how it is reachable, and where its traffic goes — rather than naming the two tunnel
-            // shapes that decide it.
-            const server = choiceCard('server', 'A server',
-                'Runs around the clock and can host services. Stays reachable from the fleet, and can open '
-                + 'up the network it sits on.');
-            server.onclick = () => { peerIntent = 'SERVER'; screen('peerName'); };
-            const device = choiceCard('laptop', 'A personal device',
-                'An Android phone or a Windows PC that needs to reach the fleet. It joins with the Vaier app.');
-            device.onclick = () => { peerIntent = 'PERSONAL_DEVICE'; screen('peerApp'); };
-            grid.append(server, device);
-            content.append(sub, section('What is this?'), grid, peerFoot(() => screen('fork')));
-        }
-
         // ---- peer · a personal device joins through the Vaier app ------------------------------------
         // Vaier makes no config for a phone or a PC: the app makes its own key and asks to join with a join
         // code, which lands under Needs you. Said as the address to open on the device itself — a link
         // would open here, on the wrong machine.
         function paintPeerApp() {
-            titleEl.textContent = 'Add a personal device';
+            titleEl.textContent = 'Add a phone or computer';
             content.innerHTML = '';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A phone or Windows PC joins with the Vaier app. It makes its own key, so nothing '
-                + 'is copied by hand.';
+            sub.textContent = 'An Android phone or a Windows PC joins with the Vaier app, which sets itself up — '
+                + 'nothing to copy by hand.';
             const list = el('ol', 'ex-instr');
-            ['On the device, open ' + location.host + ' and tap Install on the card at the top — Download '
-                 + 'on Windows.',
-             'Open the Vaier app and join. It shows a four-digit join code.',
-             'Back here, the device appears under Needs you on the fleet. Add it when the codes match.']
+            ['On the phone or PC, open ' + location.host + ' and tap Install on the card at the top — '
+                 + 'Download on Windows.',
+             'Open the Vaier app and join. It shows a four-digit code.',
+             'Back here, it appears under Needs you on the fleet. Add it when the two codes match.']
                 .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
             const actions = actionsRow();
             const back = el('button', 'ex-btn'); back.textContent = 'Back';
-            back.onclick = () => screen('peerWhat');
+            back.onclick = () => screen('fork');
             const done = el('button', 'ex-btn is-accent'); done.textContent = 'Done';
             done.onclick = () => { close(); go(['fleet']); };
             actions.append(back, done);
@@ -3641,23 +3667,23 @@
 
         // ---- peer · name — the one thing Vaier can't generate ------------------------------------------
         function paintPeerName() {
-            if (!peerIntent) { screen('peerWhat'); return; }
-            titleEl.textContent = 'Add a peer';
+            if (!peerIntent) { screen('fork'); return; }
+            titleEl.textContent = 'Add a server or PC';
             content.innerHTML = '';
 
             const name = el('input', 'ex-input'); name.type = 'text';
             name.placeholder = 'e.g. Roon server';
             name.autocomplete = 'off'; name.spellcheck = false;
-            content.appendChild(field('Name', 'The only thing Vaier can’t generate — what to call it.', name));
+            content.appendChild(field('Name', 'What to call it — the one thing Vaier can’t work out.', name));
 
             content.appendChild(generatedBlock([
-                drow('Tunnel IP', 'the next free address', true),
-                drow('Keys + preshared key', 'on save')]));
+                drow('Its address inside Vaier', 'the next free one', true),
+                drow('Its keys', 'made when you continue')]));
 
             const actions = actionsRow();
             const back = el('button', 'ex-btn'); back.textContent = 'Back';
-            back.onclick = () => screen('peerWhat');
-            const add = el('button', 'ex-btn is-accent'); add.textContent = 'Generate config';
+            back.onclick = () => screen('fork');
+            const add = el('button', 'ex-btn is-accent'); add.textContent = 'Get the line to run';
             add.onclick = () => submitPeer(name.value.trim(), add);
             const sync = () => { add.disabled = name.value.trim() === ''; };
             name.oninput = sync; sync();
@@ -3672,7 +3698,7 @@
         // empty — a server's routed LAN is set later from its machine page, so the operator types only a name.
         async function submitPeer(name, addBtn) {
             if (!name) return;
-            addBtn.disabled = true; const was = addBtn.textContent; addBtn.textContent = 'Generating…';
+            addBtn.disabled = true; const was = addBtn.textContent; addBtn.textContent = 'Making its setup…';
             try {
                 const res = await fetch('/vpn/peers', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3714,8 +3740,8 @@
             content.appendChild(code);
 
             content.appendChild(generatedBlock([
-                drow('Tunnel IP', 'the next free address', true),
-                drow('Preshared key', 'on save')]));
+                drow('Its address inside Vaier', 'the next free one', true),
+                drow('A shared secret', 'made when you add it')]));
 
             const actions = actionsRow();
             const refuse = el('button', 'ex-btn'); refuse.textContent = 'Refuse';
@@ -3786,7 +3812,7 @@
             const wait = el('div', 'ex-waiting');
             wait.appendChild(el('span', 'ex-scanmeta-dot is-live'));
             const wt = el('span');
-            wt.textContent = 'Waiting for ' + p.name + '’s first handshake — it turns green here on its own.';
+            wt.textContent = 'Waiting for ' + p.name + ' to connect — it turns green here on its own.';
             wait.appendChild(wt);
             content.appendChild(wait);
 
@@ -3801,20 +3827,19 @@
         // Off the one-shot create response (#202): the Ubuntu server's no-sudo recipe. No new endpoint is involved.
         function paintPeerHandoff() {
             const p = peerCreated;
-            if (!p) { screen('peerWhat'); return; }
-            titleEl.textContent = p.name + ' — get it on the air';
+            if (!p) { screen('fork'); return; }
+            titleEl.textContent = p.name + ' — connect it';
             content.innerHTML = '';
 
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'Save this now: for security the config is shown once. Install it on ' + p.name
-                + ' to bring it onto the VPN.';
+            sub.textContent = 'Do this now: for safety, Vaier shows ' + p.name + '’s setup only once.';
             content.appendChild(sub);
             content.appendChild(peerHandoffUbuntu(p));
 
             const wait = el('div', 'ex-waiting');
             wait.appendChild(el('span', 'ex-scanmeta-dot is-live'));
             const wt = el('span');
-            wt.textContent = 'Waiting for ' + p.name + '’s first handshake — it turns green here on its own.';
+            wt.textContent = 'Waiting for ' + p.name + ' to connect — it turns green here on its own.';
             wait.appendChild(wt);
             content.appendChild(wait);
 
@@ -3875,8 +3900,8 @@
         // script by hand stays as a fallback. Without a token (older responses) we keep the save-the-file flow.
         function peerHandoffUbuntu(p) {
             const wrap = el('div');
-            const sect = section('Get ' + p.name + ' on the air');
-            const badge = el('span', 'ex-nosudo'); badge.textContent = '✓ no sudo';
+            const sect = section('Connect ' + p.name);
+            const badge = el('span', 'ex-nosudo'); badge.textContent = '✓ no admin rights needed';
             sect.appendChild(badge);
             wrap.appendChild(sect);
 
@@ -3885,15 +3910,15 @@
                     + encodeURIComponent(p.id) + '/setup?t=' + encodeURIComponent(p.setupToken) + "' | bash";
 
                 const ol = el('ol', 'ex-recipe');
-                ol.appendChild(recipeStep([strong('Log in'), ' to the box as yourself — no sudo.'],
+                ol.appendChild(recipeStep([strong('Log in'), ' to ' + p.name + ' as yourself.'],
                     'ssh you@' + p.id));
-                ol.appendChild(recipeStep([strong('Paste this line'), ' and run it. It pulls the config and '
-                    + 'starts WireGuard in a container. The link works once.']));
+                ol.appendChild(recipeStep([strong('Paste this line'), ' and run it. It connects ' + p.name
+                    + ' to Vaier and keeps it connected. The line works once.']));
                 wrap.appendChild(ol);
                 wrap.appendChild(copyableCommand(curl));
                 const last = el('ol', 'ex-recipe');
                 last.appendChild(recipeStep([strong('That’s it.'), ' ' + p.name
-                    + ' turns green here on its first handshake.']));
+                    + ' turns green here when it connects.']));
                 wrap.appendChild(last);
 
                 const fb = el('details', 'ex-fallback');
@@ -3909,13 +3934,13 @@
             }
 
             const ol = el('ol', 'ex-recipe');
-            ol.appendChild(recipeStep([strong('Log in'), ' to the box as yourself.'], 'ssh you@' + p.id));
-            ol.appendChild(recipeStep([strong('Save the setup script'), ' below onto the box as ',
+            ol.appendChild(recipeStep([strong('Log in'), ' to ' + p.name + ' as yourself.'], 'ssh you@' + p.id));
+            ol.appendChild(recipeStep([strong('Save the setup script'), ' below onto it as ',
                 strong('vaier-up.sh'), '.']));
-            ol.appendChild(recipeStep([strong('Run it.'), ' Writes the config and starts WireGuard in a '
-                + 'container — Docker only, no root.'], 'sh vaier-up.sh'));
+            ol.appendChild(recipeStep([strong('Run it.'), ' It connects ' + p.name + ' to Vaier — no admin '
+                + 'rights needed.'], 'sh vaier-up.sh'));
             ol.appendChild(recipeStep([strong('That’s it.'), ' ' + p.name
-                + ' turns green here on its first handshake.']));
+                + ' turns green here when it connects.']));
             wrap.appendChild(ol);
 
             if (p.setupScript) {
@@ -3969,7 +3994,7 @@
             // With a credential the body reports whether it stuck; the machine is registered either way.
             const resp = await res.json().catch(() => null);
             const credNote = resp && resp.credentialProvided && !resp.credentialStored
-                ? ' Its SSH login couldn’t be saved — set one from the machine.' : '';
+                ? ' Its sign-in couldn’t be saved — set one from its page.' : '';
             await loadFleet();
             toast(body.name + ' added.' + credNote);
             const added = resp.machineId;
@@ -3987,10 +4012,10 @@
         // A hairpinned request hides which device it came through; warn on every app device instead.
         const maybeThisDevice = !viaThisTunnel && S.behindFullTunnel && !!(S.peers.get(m.id) || {}).deviceHeldKey;
         const ok = await confirmTyped('Remove ' + m.name + '?',
-            'This deletes ' + m.name + ' from the fleet — its ' + (isPeer ? 'WireGuard peer' : 'registration')
-            + ' is removed and it can no longer reach the VPN. This cannot be undone. '
-            + (viaThisTunnel ? 'This browser reaches Vaier through ' + m.name + '’s tunnel, so it loses Vaier '
-                + 'the moment it is removed — stop its tunnel on ' + m.name + ' afterwards. ' : '')
+            'This removes ' + m.name + ' from the fleet' + (isPeer ? ' — its keys stop working and it can no '
+                + 'longer connect to Vaier' : '') + '. This cannot be undone. '
+            + (viaThisTunnel ? 'This browser reaches Vaier through ' + m.name + ', so it loses Vaier '
+                + 'the moment it is removed — disconnect ' + m.name + ' from Vaier afterwards. ' : '')
             + (maybeThisDevice ? 'If you are using ' + m.name + ' right now, use Leave Vaier in its Vaier app '
                 + 'instead — removing it from here cuts this browser off. ' : '')
             + 'Type the machine name to confirm.', m.name, 'Remove');
@@ -4026,21 +4051,21 @@
     async function reissuePeer(m) {
         const peer = S.peers.get(m.id);
         if (!peer) return;
-        const ok = await confirmModal('Reissue ' + m.name + '’s config?',
-            'Vaier generates a fresh WireGuard config for ' + m.name + '. The current one stops working the '
-            + 'moment the new one is installed — reissue only when you are ready to replace it.', 'Reissue');
+        const ok = await confirmModal('Send ' + m.name + ' its setup again?',
+            'Vaier makes ' + m.name + '’s setup afresh, with the same keys, and shows it once. Install it on '
+            + m.name + ' to bring it up to date.', 'Send again');
         if (!ok) return;
         try {
             const res = await fetch('/vpn/peers/' + encodeURIComponent(peer.id) + '/reissue', { method: 'POST' });
             if (!res.ok) {
                 const e = await res.json().catch(() => ({}));
-                toast(e.message || 'Vaier could not reissue the config.');
+                toast(e.message || 'Vaier could not make its setup again.');
                 return;
             }
-            toast(m.name + '’s config reissued.');
+            toast(m.name + '’s setup is ready to send again.');
             createResult(await res.json());   // same one-shot config view a new machine gets
         } catch (e) {
-            toast('Vaier could not reissue the config.');
+            toast('Vaier could not make its setup again.');
         }
     }
 
@@ -4106,7 +4131,7 @@
         const machineName = nameOf(machineId);
         const scrim = el('div', 'ex-scrim is-on');
         const dialog = el('div', 'ex-dialog');
-        const h = el('div', 'ex-dialog-title'); h.textContent = 'SSH credential — ' + machineName;
+        const h = el('div', 'ex-dialog-title'); h.textContent = 'Sign-in for the shell — ' + machineName;
         const status = el('div', 'ex-dialog-body'); status.textContent = 'Checking…';
         const form = el('div', 'ex-form');
         const field = (label, hint, control) => {
@@ -4142,7 +4167,7 @@
                 .catch(() => toast('Could not copy. Select the key and copy it by hand.'));
         };
 
-        form.append(field('Username', null, username), field('Auth method', null, method), pwF, keyF, passF, pubF);
+        form.append(field('User name', null, username), field('Sign in with', null, method), pwF, keyF, passF, pubF);
 
         // What Vaier currently holds, as far as this dialog knows. `managed` is the whole reason the dialog
         // has two shapes: a keypair Vaier generated has no private half the operator could edit, so offering
@@ -4183,8 +4208,8 @@
         username.focus();
 
         fetch('/machines/' + encodeURIComponent(machineId) + '/ssh-credential').then(async (r) => {
-            if (r.status === 404) { status.textContent = 'No credential stored yet.'; return; }
-            if (!r.ok) { status.textContent = 'Could not read the credential status.'; return; }
+            if (r.status === 404) { status.textContent = 'No sign-in saved yet.'; return; }
+            if (!r.ok) { status.textContent = 'Could not read whether a sign-in is saved.'; return; }
             const v = await r.json();
             username.value = v.username || '';
             method.value = v.authMethod || 'PASSWORD';
@@ -4260,23 +4285,23 @@
                     body: JSON.stringify({ username: username.value.trim(), authMethod: method.value,
                         secret: secret, passphrase: passphrase.value || null }),
                 });
-                if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.message || 'Could not save the credential.'); ok.disabled = false; return; }
-                toast('SSH credential saved for ' + machineName + '.');
+                if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.message || 'Could not save the sign-in.'); ok.disabled = false; return; }
+                toast('Sign-in saved for ' + machineName + '.');
                 close(); await loadFleet(); render();
-            } catch (e) { toast('Could not save the credential.'); ok.disabled = false; }
+            } catch (e) { toast('Could not save the sign-in.'); ok.disabled = false; }
         };
 
         del.onclick = async () => {
-            const sure = await confirmModal('Delete the SSH credential for ' + machineName + '?',
-                'Vaier forgets the login it holds for ' + machineName + '. Its files, shell, disk and backups go dark '
+            const sure = await confirmModal('Delete the sign-in for ' + machineName + '?',
+                'Vaier forgets the login it holds for ' + machineName + '. Its files, shell, storage and backups go dark '
                 + 'until you set one again.', 'Delete');
             if (!sure) return;
             try {
                 const r = await fetch('/machines/' + encodeURIComponent(machineId) + '/ssh-credential', { method: 'DELETE' });
-                if (!r.ok && r.status !== 204) { toast('Could not delete the credential.'); return; }
-                toast('SSH credential deleted.');
+                if (!r.ok && r.status !== 204) { toast('Could not delete the sign-in.'); return; }
+                toast('Sign-in deleted.');
                 close(); await loadFleet(); render();
-            } catch (e) { toast('Could not delete the credential.'); }
+            } catch (e) { toast('Could not delete the sign-in.'); }
         };
     }
 
@@ -4302,8 +4327,8 @@
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
         const found = containersOn(machineId);
-        const head = paneHead('Containers', false,
-            found.length + (found.length === 1 ? ' container' : ' containers'));
+        const head = paneHead(DOOR.containers, false,
+            found.length + (found.length === 1 ? ' app' : ' apps'));
         // The registry check is a single fleet-wide act, fronted here because this is where the operator lands
         // after pulling a stack. Hidden in the past: there is no "now" back there to re-check.
         if (!S.at && S.containersRead && found.length) {
@@ -4430,8 +4455,8 @@
         const found = servicesOn(machineId);
         const open = candidatesOn(machineId).filter((c) => !c.ignored);
         const hidden = candidatesOn(machineId).filter((c) => c.ignored);
-        const head = paneHead('Services', false,
-            found.length + (found.length === 1 ? ' published service' : ' published services'));
+        const head = paneHead(DOOR.services, false,
+            found.length + (found.length === 1 ? ' website' : ' websites'));
         // A service Vaier did not discover — a LAN app, a device's own page — is published by hand.
         headActions(head, [selVerb('route', 'Publish a service by hand', 'ex-btn', () => lanPublish(machineId))]);
         pane.appendChild(head);
@@ -5151,7 +5176,7 @@
     function renderDisk(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
-        pane.appendChild(paneHead('Disk', false, 'Filesystems'));
+        pane.appendChild(paneHead(DOOR.disk, false, 'How full its disks are'));
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -5729,7 +5754,7 @@
             return pane.appendChild(note('This machine has no part in fleet backup — it is not the backup '
                 + 'server, and no job backs it up.', true));
         }
-        const head = paneHead('Backup', false,
+        const head = paneHead(DOOR.backup, false,
             isServer ? 'The fleet’s backup server' : 'How this machine is backed up');
         pane.appendChild(head);
         const body = el('div', 'ex-pane-body');
@@ -10529,7 +10554,7 @@
     // ("Docker host", "Web service"), otherwise the device category Vaier inferred. Never the raw hostname.
     function discoveredLabel(d) {
         switch (d.role) {
-            case 'DOCKER_HOST': return 'Docker host';
+            case 'DOCKER_HOST': return 'Computer running apps';
             case 'WEB_UI': return 'Web service';
             case 'PRINTER': return 'Printer';
             case 'SSH_HOST': return 'Server';

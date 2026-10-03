@@ -38,7 +38,20 @@ You rarely need that button: the first time Vaier reaches the machine again — 
 
 ## The address space
 
-Every machine is an **entry** you can open, and it grows only the entries Vaier can actually reach on it: **files** when Vaier has SSH to it, **containers** when it runs Docker, **services** when something is published from it, its **disk** when Vaier has SSH, and a **backup** entry on the one machine that is the fleet's backup server — so a machine with no SSH doesn't sprout files it can't read, and a machine running no Docker doesn't sprout an empty container list. A machine's **shell** is not an entry either — it is a card on the machine's own page, beside those same ways in, and it opens the terminal in its own window (see [Web terminal](#web-terminal) below).
+Every machine is an **entry** you can open, and it grows only the entries Vaier can actually reach on it: **files** when Vaier has SSH to it, **containers** when it runs Docker, **services** when something is published from it, its **disk** when Vaier has SSH, and a **backup** entry on the one machine that is the fleet's backup server or that a job backs up — so a machine with no SSH doesn't sprout files it can't read, and a machine running no Docker doesn't sprout an empty container list. A machine's **shell** is not an entry either — it is a card on the machine's own page, beside those same ways in, and it opens the terminal in its own window (see [Web terminal](#web-terminal) below).
+
+On a machine's page these are its **doors**, named for what is behind them and each carrying one live fact, read from what the page already holds (nothing new is fetched but the last backup run, once):
+
+| Door | Entry | Its fact |
+|------|-------|----------|
+| **Shell** (first) | — | "Opens where you left off" |
+| **Files** | `files` | "Browse its files" |
+| **Apps** | `containers` | "8 apps · 1 update" |
+| **Websites** | `services` | "7 websites · 1 ready to publish", or "Nothing published yet" |
+| **Storage** | `disk` | "60% full", from the five-minute sweep; "How full its disks are" before it has read |
+| **Backups** | `backup` | "Backed up last night", "Paused — switched off", "Not backed up yet"; on the backup server, "Keeps the fleet's backups" |
+
+Right after Vaier starts, its container cache is empty until the first scrape (about a minute), so Apps reads "What it runs" until then; Vaier pushes when that scrape lands and the door fills in by itself. The address bar and each door's own page use the same names; the path keeps its segment (`#/fleet/<machine>/containers`). Below the doors, **About this machine** says when it was last seen and, where Vaier may open a shell, **Sign-in for the shell** and which user Vaier signs in as ("Vaier signs in as geir and can only do what geir can"). Its addresses — **Address inside Vaier**, **Connects from**, **Its home network**, data sent and received — stay folded under **Connection details**, and a server's **Send its setup again** (Reissue), **Give it new keys** (Regenerate) and **Remove machine** under **Keys and removal**.
 
 ![The Explorer's fleet view](vaier-explorer.png)
 
@@ -54,7 +67,7 @@ Nothing about a machine goes quiet without it, because what it alone used to car
 
 Each machine's card also says what it **last opened** — the service and when — known only when it reached it over the tunnel, since only there does the address belong to a device rather than a person.
 
-Under the name, a card says **what the machine is** and **what it's for**: its type, then your own description of it ("Ubuntu server · Runs the family photo archive"), falling back to the type alone when you haven't described it. That line used to carry the machine's tunnel address, which is Vaier's plumbing rather than anything you can act on from the fleet — the address is still there under the machine itself, where an address belongs. A long description is clamped to two lines so no card outgrows its row, with the whole of it on hover.
+Under the name, a card says **what the machine is** and **what it's for**: what kind of thing it is in everyday words — the same words the [Topology](#topology) uses ("Storage box", "Computer that stays on", "Phone", "Where Vaier runs") — then your own description of it ("Storage box · Synology"), falling back to the kind alone when you haven't described it. The kind comes from the machine's device category, or from what it is when no category is set. That line used to carry the machine's tunnel address, which is Vaier's plumbing rather than anything you can act on from the fleet — the address is still there under the machine itself, where an address belongs. A long description is clamped to two lines so no card outgrows its row, with the whole of it on hover.
 
 The disk mark costs nothing and promises nothing it doesn't know. It's the reading Vaier's five-minute sweep already takes for the disk alerts, kept instead of thrown away, so drawing the fleet wakes no machine and asks no host for a `df`; when a machine's standing actually moves, the card repaints on its own. **Every** fresh reading is kept, not just the sweep's — so opening a machine's **disk** entry refreshes its mark too, and muting a filesystem (or un-muting one, or moving its threshold) shows on the card at once rather than up to five minutes later, when the card would still be naming a disk nobody is judging any more. Still no extra connection: that's the `df` the disk pane was taking anyway. A machine Vaier hasn't read yet — a cold start, no SSH access, no stored credential — shows no disk mark, exactly as a clear one does; that silence is not a claim that the disk has room, which is why the disk pane always reads it fresh.
 
@@ -216,7 +229,7 @@ Plain mouse-wheel scroll goes to whichever program is in front: a normal shell p
 
 Store the one SSH login Vaier holds for each machine — a username plus a password or private key (with optional passphrase) — from the machine's pane in the Explorer. Every machine — including the **Vaier server** host itself — has an **SSH access** toggle that decides whether Vaier offers SSH for that machine; it defaults sensibly from the device type (servers and NAS on, printers/phones/appliances off), and it moves with its own answer — offered under **What to do next** while access is ungranted, since granting it is what gives the page anything to show, and stated quietly under **About this machine** once it is granted. The credential appears there beside it. Turning SSH access off hides that machine's files and disk entries and its **shell** card. Secrets are encrypted at rest in a **credential vault**; the UI only ever reports whether a credential exists, never the secret itself.
 
-Each machine states which **user** Vaier acts as on it. Machines where that user is `root` are tagged in the fleet, and a delete there says so before it runs. Have no key for a machine? Vaier generates an ed25519 keypair for it — the private half never leaves the server — and shows you the one line to add to that machine's `authorized_keys`. Paste your own key instead (ed25519, ECDSA or RSA) and Vaier tells you at the form if it isn't private-key material, rather than saving a `.pub` or a PuTTY `.ppk` that then fails at every connect.
+Each machine states which **user** Vaier signs in as on it. Machines where that user is `root` are tagged in the fleet, and a delete there says so before it runs. Have no key for a machine? Vaier generates an ed25519 keypair for it — the private half never leaves the server — and shows you the one line to add to that machine's `authorized_keys`. Paste your own key instead (ed25519, ECDSA or RSA) and Vaier tells you at the form if it isn't private-key material, rather than saving a `.pub` or a PuTTY `.ppk` that then fails at every connect.
 
 ### OS updates
 

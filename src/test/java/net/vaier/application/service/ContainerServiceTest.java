@@ -392,7 +392,7 @@ class ContainerServiceTest {
 
         service.checkForImageUpdates();
 
-        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), any());
+        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), eq("image-updates-checked"));
     }
 
     @Test
@@ -407,7 +407,7 @@ class ContainerServiceTest {
 
         service.sweepImageUpdates();
 
-        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), any());
+        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), eq("image-updates-checked"));
     }
 
     @Test
@@ -968,6 +968,20 @@ class ContainerServiceTest {
         List<PeerContainers> result = service.discoverAll();
         assertThat(result).hasSize(1);
         assertThat(result.get(0).peerId()).isEqualTo("alice");
+    }
+
+    @Test
+    void theFirstScrapeAfterBoot_isPushed_andLaterOnesAreNot() {
+        // Until the first scrape lands the cache is empty, and a page opened then reads "no containers" with
+        // nothing to tell it otherwise. The browser never polls, so the first fill is announced.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+
+        service.refresh();
+        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), any());
+
+        clearInvocations(forPublishingEvents);
+        service.refresh();
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
     }
 
     @Test

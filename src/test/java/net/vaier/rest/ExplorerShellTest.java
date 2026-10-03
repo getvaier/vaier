@@ -102,7 +102,7 @@ class ExplorerShellTest {
         assertThat(js).contains("terminal.html?machine=");
         assertThat(js).doesNotContain("TerminalDock.open(");
         // A door among the doors, in the same grid and greyed by the same two rules as files and disk.
-        assertThat(js).contains("card(svg('shell', 'ex-ico'), 'shell',");
+        assertThat(js).contains("card(svg('shell', 'ex-ico'), 'Shell',");
         // The shell is not a navigable kind any more: no 'shell' child, no renderShell pane.
         assertThat(js).doesNotContain("kind: 'shell'");
         assertThat(js).doesNotContain("function renderShell(");
@@ -1144,7 +1144,7 @@ class ExplorerShellTest {
         int from = js.indexOf("function renderMachine(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    function", from));
-        assertThat(body).contains("'Tunnel address'").contains("tunnelAddress(m)");
+        assertThat(body).contains("'Address inside Vaier'").contains("tunnelAddress(m)");
     }
 
     @Test
@@ -1306,11 +1306,15 @@ class ExplorerShellTest {
         int from = js.indexOf("function renderMachine(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    function", from));
-        assertThat(body).as("the containers door carries the count").contains("updateCountMark(");
-        assertThat(body).contains("ex-card-marks");
+        // #377: the Apps door says the count in its live fact ("8 apps · 1 update") rather than as a pill.
+        assertThat(body).as("the Apps door carries the count").contains("appsFact(m.id)");
+        int apps = js.indexOf("function appsFact(");
+        assertThat(js.substring(apps, js.indexOf("\n    }", apps))).contains("updatesOn(");
+        int pill = js.indexOf("function updateCountMark(");
+        assertThat(js.substring(pill, js.indexOf("\n    }", pill))).contains("updatesOn(");
         int fleet = js.indexOf("function machineMarks(");
         assertThat(js.substring(fleet, js.indexOf("\n    }", fleet)))
-            .as("the fleet card draws the pill through the same helper").contains("updateCountMark(");
+            .as("the fleet card draws the pill through the same count").contains("updateCountMark(");
     }
 
     @Test
@@ -1322,8 +1326,8 @@ class ExplorerShellTest {
         int from = js.indexOf("function renderMachine(");
         String body = js.substring(from, js.indexOf("\n    function", from));
         assertThat(body).contains("S.backupServer.machineId === m.id");
-        assertThat(body).as("the backed-up machine says where it goes").contains("'Backs up to '");
-        assertThat(body).contains("'The fleet backs up here'");
+        assertThat(body).as("the backed-up machine says when it was last backed up").contains("backupsFact(m)");
+        assertThat(body).contains("'Keeps the fleet’s backups'");
     }
 
     @Test
@@ -2001,9 +2005,10 @@ class ExplorerShellTest {
         int fold = body.indexOf("disclosure('Connection details')");
         assertThat(fold).as("the addresses fold away behind the shell's own disclosure, not a new component")
             .isPositive();
-        assertThat(body.indexOf("'Device category'"))
+        assertThat(body.indexOf("kindLabel(m)"))
             .as("what the machine is stays in the open").isPositive().isLessThan(fold);
-        for (String mechanism : List.of("'Tunnel address'", "'Endpoint'", "'Transfer'", "'Docker'")) {
+        for (String mechanism : List.of("'Address inside Vaier'", "'Connects from'", "'Sent and received'",
+                                        "'Runs apps (Docker)'")) {
             assertThat(body.indexOf(mechanism)).as("%s is folded away", mechanism)
                 .isPositive().isGreaterThan(fold);
         }
@@ -2974,10 +2979,10 @@ class ExplorerShellTest {
         // badge on nearly every card marks nothing out and becomes wallpaper. The fact is a click away in
         // the inspector, where it is read at the moment it matters. Do not re-add the badge from #346 alone.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("'Vaier acts as ' + m.effectiveUsername");
+        assertThat(js).contains("'Vaier signs in as ' + m.effectiveUsername");
         // The copy names the user the backend sent; it never asserts the word "root" on its own account,
         // because EffectiveUser reserves the right to widen what counts as privileged.
-        assertThat(js).doesNotContain("Vaier acts as root");
+        assertThat(js).doesNotContain("Vaier signs in as root");
     }
 
     @Test
@@ -3381,7 +3386,7 @@ class ExplorerShellTest {
         assertThat(js).contains("const reachable = reachesInside(m);");
         assertThat(js).contains("const offerAccess = reachable && !m.sshAccess;");
 
-        int instruction = js.indexOf("Turn it on to give this machine an SSH credential");
+        int instruction = js.indexOf("Turning it on asks for the sign-in Vaier will use");
         assertThat(instruction)
             .as("the instruction still exists for machines that DO have the toggle")
             .isGreaterThan(0);
@@ -4207,7 +4212,7 @@ class ExplorerShellTest {
 
         assertThat(handoff).contains("ex-waiting");
         assertThat(handoff).contains("ex-scanmeta-dot is-live");
-        assertThat(handoff).contains("first handshake");
+        assertThat(handoff).contains("to connect — it turns green here on its own");
     }
 
     @Test

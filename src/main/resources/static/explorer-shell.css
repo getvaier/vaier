@@ -1319,6 +1319,13 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
 .ex-choice h4 { margin: 0; font-family: var(--display); font-size: 14px; font-weight: 600; color: var(--text); }
 .ex-choice p { margin: 0; font-size: 14px; color: var(--text-muted); line-height: 1.55; }
 @media (max-width: 560px) { .ex-choice-grid { grid-template-columns: 1fr; } }
+/* The add flow's first question: three answers, one under the other, the glyph beside the words. */
+.ex-choice-grid.is-rows { grid-template-columns: 1fr; gap: 8px; }
+.ex-choice-grid.is-rows .ex-choice {
+    display: grid; grid-template-columns: 38px minmax(0, 1fr); column-gap: 14px; row-gap: 2px;
+    align-items: start; padding: 14px 16px;
+}
+.ex-choice-grid.is-rows .ex-choice-glyph { grid-row: span 2; }
 
 /* Discover: the last-scan line and the rescan control; then the site filters, said as "via <name>". */
 .ex-scanmeta {
@@ -1360,7 +1367,8 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
 }
 .ex-drow { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 13px; }
 .ex-drow-k { color: var(--text-muted); }
-.ex-drow-v { font-family: var(--mono); color: var(--text); text-align: right; }
+.ex-drow-v { color: var(--text); text-align: right; }
+.ex-drow-v.is-coord { font-family: var(--mono); }
 .ex-drow-v.is-accent { color: var(--accent); }
 
 /* Adopt: the SSH test row inside the disclosure — the green check lands on an authenticated reply. */
