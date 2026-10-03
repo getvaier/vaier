@@ -2628,6 +2628,28 @@ class ExplorerShellTest {
     }
 
     @Test
+    void aBlockedRowSpeaksTheDomainsWords_neverCrowdSecsSlugOrClock() throws IOException {
+        // #377: what a scenario means and how long a ban has left are the domain's calls (Knock, timeLeft).
+        // The raw slug may sit in a tooltip for the curious; it is never the row's text.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function threatRow(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("d.knock").contains("d.timeLeft");
+        assertThat(body).doesNotContain("d.duration").doesNotContain("textContent = d.scenario");
+    }
+
+    @Test
+    void aCountryThatTakesTheReadsAsOneInTheRowsSentence() throws IOException {
+        // "Tried a known weakness from United States" read as broken English.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function threatRow(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("' from ' + inSentence(d.country)");
+        assertThat(js).contains("'United States'").contains("'Netherlands'");
+    }
+
+    @Test
     void theSecurityViewIsPushedNotPolled() throws IOException {
         // The same rule the rest of the shell lives by: the backend sweeps and publishes, the browser
         // listens. A timer here would be the first one in the file.

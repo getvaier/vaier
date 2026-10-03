@@ -51,6 +51,7 @@
         // verb's glyph reads as a control — which is the one thing this must never do, since Vaier cannot
         // pull an image. Enclosing the arrow makes it a badge rather than a button.
         arrowup: '<circle cx="8" cy="8" r="6"/><path d="M8 11.2V5.2"/><path d="M5.6 7.6L8 5.2l2.4 2.4"/>',
+        more:    '<circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/>',
         trash:   '<path d="M3 4.5h10M6.5 4.5V3a.8.8 0 0 1 .8-.8h1.4a.8.8 0 0 1 .8.8v1.5"/><path d="M4.2 4.5l.6 8a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8"/><path d="M6.7 7v4M9.3 7v4"/>',
         shield:  '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M5.7 8l1.6 1.7L10.4 6"/>',
         // A fleet credential: bow, shaft and two teeth. Deliberately not `shield` (that is Security, which is
@@ -232,6 +233,7 @@
                                          //   because this is the list the untrust verb hangs off (#348)
         trustedRead: false,              // whether that read has landed once
         trustedError: '',                // why it failed, when it did — never shown as "nothing trusted"
+        threatsAll: false,               // a phone shows the first few blocks until asked for all
         blockDraft: '',                  // the address typed into "Block an address" (#349), kept across a
                                           //   repaint so a push mid-typing (the sweep fires every 5 minutes
                                           //   whether or not anything changed) cannot silently clear it
@@ -2892,11 +2894,11 @@
     async function toggleSshAccess(machineId, enabled, checkbox) {
         checkbox.disabled = true;
         const ok = await patchJson('/machines/' + encodeURIComponent(machineId) + '/ssh-access', { enabled },
-            'Could not update SSH access.');
+            'Could not change whether Vaier opens a shell here.');
         if (!ok) { checkbox.checked = !enabled; checkbox.disabled = false; return; }
         await loadFleet();
-        toast(enabled ? 'Vaier can now open SSH sessions to ' + nameOf(machineId) + '.'
-                      : 'SSH sessions to ' + nameOf(machineId) + ' turned off.');
+        toast(enabled ? 'Vaier can now open a shell on ' + nameOf(machineId) + '.'
+                      : 'Vaier no longer opens a shell on ' + nameOf(machineId) + '.');
         render();
     }
 
@@ -5215,7 +5217,7 @@
 
         held.filesystems.forEach(fs => body.appendChild(filesystemBlock(fs, machineId)));
 
-        body.appendChild(note('Vaier reads these with df over SSH, on a schedule, and emails the admins when '
+        body.appendChild(note('Vaier checks these on a schedule, and emails the admins when '
             + 'a watched filesystem crosses its threshold. A filesystem with no threshold of its own is '
             + 'judged against the fleet-wide one, set on Settings. Mute the ones that are full by design — '
             + 'a DSM system partition sits near-full forever — but mute them deliberately: everything Vaier '
@@ -5589,8 +5591,8 @@
     // Why an update was refused before it started. The backend distinguishes these deliberately; collapsing
     // them into "something went wrong" would throw away the one part the operator can act on.
     async function refusalSays(res, containerName) {
-        if (res.status === 424) return 'Vaier holds no SSH login for that machine, so it cannot update '
-            + containerName + '. Store one under the machine first.';
+        if (res.status === 424) return 'Vaier has no sign-in for the shell on that machine, so it cannot update '
+            + containerName + '. Add one on the machine’s page first.';
         if (res.status === 404) return 'Vaier no longer sees a container named ' + containerName
             + ' on that machine.';
         try {
@@ -5645,8 +5647,8 @@
 
     // A refusal names why — no root, no apt or dnf, no login — so its own words are the toast.
     async function osUpgradeRefusal(res, m) {
-        if (res.status === 424) return 'Vaier holds no SSH login for ' + m.name + ', so it cannot install its '
-            + 'OS updates. Store one under the machine first.';
+        if (res.status === 424) return 'Vaier has no sign-in for the shell on ' + m.name + ', so it cannot install its '
+            + 'OS updates. Add one on the machine’s page first.';
         try {
             const body = await res.json();
             if (body && body.message) return body.message;
@@ -6506,7 +6508,7 @@
         const machineName = nameOf(machineId);
         if (S.preparing.has(machineId)) {
             const prep = el('div', 'ex-runline');
-            prep.textContent = 'Getting this machine ready to back up — installing borg and trusting its key…';
+            prep.textContent = 'Getting this machine ready to back up — installing the backup program and trusting its key…';
             body.appendChild(prep);
         }
         // One job's verbs ride on the pane head; several jobs each keep theirs under their own name.
@@ -6576,7 +6578,7 @@
         // shell never reads the error text to work it out — and the fix is offered on the spot rather than
         // named and left to be hunted for. The command appears only where Vaier could not gain root itself.
         if (needsReady && !S.preparing.has(machineId)) {
-            body.appendChild(note('This machine has no borg client yet — nothing else is wrong. Vaier can '
+            body.appendChild(note('This machine is missing the backup program — nothing else is wrong. Vaier can '
                 + 'install it, and tonight’s backup will run.', true));
         }
         if (staged) {
@@ -7164,14 +7166,10 @@
     // section with its own heading, never a button beside a row's "Trust this address": the two verbs point
     // opposite ways, and that is precisely the misclick #349 exists to make impossible.
     function renderSecurity(pane) {
-        const blocked = S.threats.length;
-        pane.appendChild(paneHead('Security', false,
-            blocked ? blocked + (blocked === 1 ? ' address blocked' : ' addresses blocked') : 'Nothing blocked'));
+        // The body's first sentence says the count, so the head does not say it a second time.
+        pane.appendChild(paneHead('Security', false, ''));
 
         const body = el('div', 'ex-pane-body');
-        // Who is being kept out is what the page is for, so it leads and wears no heading — the head already
-        // counts it, and "Blocked right now" above the list said the subtitle a second time. The heading below
-        // is what marks where that list stops and the operator's own decisions begin.
         renderBlocked(body);
         body.appendChild(section('Trusted addresses'));
         renderTrusted(body);
@@ -7180,9 +7178,21 @@
         pane.appendChild(body);
     }
 
+    // CrowdSec says how long each block has left, never when it began, so the sentence claims no window.
+    function blockedSummary() {
+        const n = S.threats.length;
+        const byHand = S.threats.filter((d) => d.handBlocked).length;
+        let text = 'Vaier is keeping ' + (n === 1 ? 'one address' : n + ' addresses') + ' out right now.';
+        if (byHand === n) text += n === 1 ? ' You blocked it yourself.' : ' You blocked them all yourself.';
+        else if (byHand) text += ' You blocked ' + (byHand === 1 ? 'one' : byHand) + ' of them yourself.';
+        return text;
+    }
+
+    const THREATS_FOLDED = 5;
+
     function renderBlocked(body) {
         if (!S.threatsRead) {
-            body.appendChild(note('Reading who CrowdSec is keeping out…', false));
+            body.appendChild(note('Reading who is being kept out…', false));
             return;
         }
         if (S.threatsError) {
@@ -7190,15 +7200,24 @@
             return;
         }
         if (!S.threats.length) {
-            body.appendChild(note('Nobody is blocked right now. CrowdSec is watching the edge, and Vaier '
-                + 'emails you the moment it starts turning someone away.', false));
+            body.appendChild(note('Nobody is kept out right now. Vaier watches the door and turns away anyone who '
+                + 'misbehaves, and mails you when someone tries passwords.', false));
             return;
         }
 
-        const rows = el('div', 'ex-listing is-threats');
-        rows.appendChild(listHead(['Source', 'Scenario', 'Expires in', '']));
+        const lead = el('p', 'ex-sec-lead');
+        lead.textContent = blockedSummary();
+        body.appendChild(lead);
+        const rows = el('div', 'ex-listing is-threats' + (S.threatsAll ? ' is-all' : ''));
         S.threats.forEach((d) => rows.appendChild(threatRow(d)));
         body.appendChild(rows);
+        // Folding is a phone's concern only; the CSS hides this control wherever every row fits.
+        if (S.threats.length > THREATS_FOLDED) {
+            const more = el('button', 'ex-btn ex-sec-more');
+            more.textContent = S.threatsAll ? 'Show fewer' : 'Show all ' + S.threats.length;
+            more.onclick = () => { S.threatsAll = !S.threatsAll; render(); };
+            body.appendChild(more);
+        }
     }
 
     // Only the addresses a person chose, because this is where the untrust verb lives. Vaier trusts more
@@ -7217,7 +7236,7 @@
         }
         if (!S.trusted.length) {
             body.appendChild(note('You have not trusted any address by hand. Trusting a blocked address '
-                + 'above tells CrowdSec never to block it again.', false));
+                + 'above means it is never blocked again.', false));
         } else {
             const rows = el('div', 'ex-listing is-trusted');
             rows.appendChild(listHead(['Address', '']));
@@ -7226,7 +7245,7 @@
         }
         body.appendChild(note('Your VPN, this server’s own container network, and every network Vaier '
             + 'reaches through one of your machines are trusted too. Those are not listed here and '
-            + 'cannot be untrusted — they are what stops CrowdSec turning away your own traffic.', false));
+            + 'cannot be untrusted — they are what keeps Vaier from turning away your own traffic.', false));
     }
 
     // #349: a source CrowdSec's own scenarios have not caught, put out by hand. Its own section, its own
@@ -7250,7 +7269,7 @@
             if (v === '4h') o.selected = true;
             dur.appendChild(o);
         });
-        form.appendChild(formField('For how long', 'No permanent option: CrowdSec forgets the block on its '
+        form.appendChild(formField('For how long', 'No permanent option: the block lifts on its '
             + 'own once this elapses.', dur));
 
         const go = el('button', 'ex-btn is-danger');
@@ -7275,61 +7294,83 @@
         const acts = el('div', 'ex-lactions');
         const untrust = el('button', 'ex-btn is-danger');
         untrust.textContent = 'Untrust';
-        untrust.title = 'Stop trusting ' + a.sourceIp + '. CrowdSec judges it on its behaviour again.';
+        untrust.title = 'Stop trusting ' + a.sourceIp + '. It is judged on its behaviour again.';
         untrust.onclick = () => untrustAddress(a);
         acts.appendChild(untrust);
         row.appendChild(acts);
         return row;
     }
 
-    // No navigation target — a block decision has no Inspector of its own — so the source is plain text,
-    // not a button that would promise somewhere to go.
+    // One sentence per block, in the domain's words: what it tried and from where, then the address and how
+    // long it stays out. The scenario and the network owner are only tooltips; the verbs wait behind "…".
+    // Country names that read with "the" mid-sentence: "from the United States", never "from United States".
+    const WITH_THE = new Set(['United States', 'United Kingdom', 'Netherlands', 'Philippines', 'United Arab Emirates',
+        'Czech Republic', 'Czechia', 'Dominican Republic', 'Central African Republic', 'Bahamas', 'Gambia', 'Maldives',
+        'Seychelles', 'Comoros', 'Marshall Islands', 'Solomon Islands', 'Cayman Islands', 'British Virgin Islands',
+        'Republic of the Congo', 'Democratic Republic of the Congo', 'Vatican City']);
+    function inSentence(country) {
+        if (/^The /.test(country)) return 'the ' + country.slice(4);   // the geo database writes "The Netherlands"
+        return WITH_THE.has(country) ? 'the ' + country : country;
+    }
+
     function threatRow(d) {
         const row = el('div', 'ex-lrow');
 
-        const src = el('span', 'ex-tsource');
+        const src = el('div', 'ex-tsource');
+        const say = el('span', 'ex-tsay');
+        const tried = d.handBlocked ? 'blocked by hand' : (d.knock || 'tried something suspicious');
+        say.textContent = tried.charAt(0).toUpperCase() + tried.slice(1) + (d.country ? ' from ' + inSentence(d.country) : '');
+        say.title = d.handBlocked ? 'Blocked by ' + (d.blockedByAdmin || 'an admin') : (d.scenario || '');
+        src.appendChild(say);
+
+        const quiet = el('span', 'ex-torigin');
         const ip = el('span', 'ex-tip');
         ip.textContent = d.sourceIp;
-        src.appendChild(ip);
-        // Both the verdict and the rendering come from the domain: `enriched` decides whether CrowdSec
-        // placed this source at all, `origin` is how that reads. Joining country and network here instead
-        // would be a second copy of a rule the breach mail already owns, and copies drift.
-        if (d.enriched) {
-            const from = el('span', 'ex-torigin');
-            from.textContent = d.origin;
-            src.appendChild(from);
-        }
+        quiet.appendChild(ip);
+        if (d.timeLeft) quiet.appendChild(document.createTextNode(' · kept out for ' + d.timeLeft + ' more'));
+        if (d.enriched) quiet.title = d.origin;
+        src.appendChild(quiet);
         row.appendChild(src);
 
-        [d.scenario, d.duration].forEach((value) => {
-            const cell = el('span', 'ex-lmeta');
-            const text = el('span');
-            text.textContent = value || '—';
-            cell.appendChild(text);
-            row.appendChild(cell);
-        });
-
-        // The phone's line under the address: the origin is already there, so only the scenario and expiry.
-        const sub = el('span', 'ex-lsub');
-        const subText = el('span');
-        subText.textContent = [d.scenario, d.duration].filter(Boolean).join(' · ');
-        sub.appendChild(subText);
-        row.appendChild(sub);
-
         const acts = el('div', 'ex-lactions');
-        const lift = el('button', 'ex-btn');
-        lift.textContent = 'Lift the block';
-        lift.title = 'Let ' + d.sourceIp + ' back in now. CrowdSec may block it again the next time it '
-            + 'trips a scenario.';
-        lift.onclick = () => liftBlock(d);
-        acts.appendChild(lift);
-        const trust = el('button', 'ex-btn');
-        trust.textContent = 'Trust this address';
-        trust.title = 'Never block ' + d.sourceIp + ' again.';
-        trust.onclick = () => trustAddress(d);
-        acts.appendChild(trust);
+        acts.appendChild(threatMenu(d));
         row.appendChild(acts);
         return row;
+    }
+
+    // Both verbs let the address in, so they share one quiet menu; blocking points the other way and keeps
+    // its own section below (#349).
+    function threatMenu(d) {
+        const wrap = el('div', 'ex-vmenu-wrap ex-tmenu');
+        const btn = el('button', 'ex-iconbtn');
+        btn.innerHTML = svg('more', 'ex-ico');
+        btn.title = 'What to do about ' + d.sourceIp;
+        btn.setAttribute('aria-label', btn.title);
+        btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
+        const menu = el('div', 'ex-vmenu'); menu.setAttribute('role', 'menu');
+        const close = () => { menu.classList.remove('is-open'); btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('click', close); };
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            if (menu.classList.contains('is-open')) { close(); return; }
+            document.dispatchEvent(new Event('click'));   // one row menu open at a time
+            menu.classList.add('is-open'); btn.setAttribute('aria-expanded', 'true');
+            document.addEventListener('click', close);
+        };
+        menu.onclick = (e) => e.stopPropagation();
+        const item = (label, desc, run) => {
+            const b = el('button', 'ex-vmenu-item has-desc'); b.setAttribute('role', 'menuitem');
+            const text = el('span', 'ex-vmenu-text');
+            const l = el('span'); l.textContent = label;
+            const ds = el('span', 'ex-vmenu-desc'); ds.textContent = desc;
+            text.append(l, ds); b.appendChild(text);
+            b.onclick = () => { close(); run(); };
+            return b;
+        };
+        menu.append(
+            item('Lift the block', 'Let it back in now. It is blocked again if it misbehaves again.', () => liftBlock(d)),
+            item('Trust this address', 'Never block it again — for when it was you.', () => trustAddress(d)));
+        wrap.append(btn, menu);
+        return wrap;
     }
 
     // One-off and self-healing — the address is let back in, and the next scenario it trips blocks it
@@ -8507,7 +8548,7 @@
             copy.onclick = () => navigator.clipboard.writeText(si.redirectUri)
                 .then(() => toast('Redirect URI copied.')).catch(() => toast('Could not copy the redirect URI.'));
             uriRow.appendChild(copy);
-            const uriField = field('Redirect URI', 'Register this exact address with the provider — both hand back to Dex here.', uri);
+            const uriField = field('Redirect URI', 'Register this exact address with the provider — both hand back to Vaier here.', uri);
             uriField.appendChild(uriRow);
             form.appendChild(uriField);
 
@@ -8543,7 +8584,7 @@
                     }
                     save.disabled = true;
                     n.className = 'ex-set-note';
-                    n.textContent = 'Applying — Dex and the sign-in page restart, which takes a few seconds…';
+                    n.textContent = 'Applying — the sign-in page restarts, which takes a few seconds…';
                     try {
                         const res = await fetch('/settings/sign-in/' + p.id, { method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
@@ -10603,7 +10644,7 @@
         if (p.has(2375) || p.has(2376)) return 'runs Docker';
         if (p.has(80) || p.has(443) || p.has(8080) || p.has(8443) || p.has(5000)) return 'serves a web page';
         if (p.has(9100) || p.has(631) || p.has(515)) return 'accepts print jobs';
-        if (p.has(22)) return 'accepts SSH';
+        if (p.has(22)) return 'takes shell logins';
         return null;
     }
 

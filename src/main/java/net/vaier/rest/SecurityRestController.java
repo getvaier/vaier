@@ -14,6 +14,7 @@ import net.vaier.application.UntrustAddressUseCase;
 import net.vaier.domain.AccessSource;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.CallerIp;
+import net.vaier.domain.Knock;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
@@ -263,18 +264,23 @@ public class SecurityRestController {
      * of these rows is the operator's own hand block rather than one of CrowdSec's scenarios, and who
      * placed it. Both are the domain's classification of {@link BlockDecision#scenario} — see
      * {@link BlockDecision#handBlocked()} — never a marker text the browser would have to recognise itself.
+     *
+     * <p>{@code knock} and {@code timeLeft} are how the row reads to a person (#377), decided in the domain
+     * for the same reason: a slug-to-words table in the browser would be a second copy of {@link Knock}.
      */
     record BlockDecisionResponse(Long id, String scenario, String sourceIp, String type, String duration,
                                  String country, String asnOrg, Double latitude, Double longitude,
                                  boolean enriched, boolean locatable, String origin, String label,
-                                 boolean handBlocked, String blockedByAdmin) {
+                                 boolean handBlocked, String blockedByAdmin, String knock, String timeLeft) {
 
         static BlockDecisionResponse from(BlockDecision decision) {
+            Knock knock = decision.knock();
             return new BlockDecisionResponse(decision.id(), decision.scenario(), decision.sourceIp(),
                 decision.type(), decision.duration(), decision.country(), decision.asnOrg(),
                 decision.latitude(), decision.longitude(),
                 decision.enriched(), decision.locatable(), decision.origin(), decision.label(),
-                decision.handBlocked(), decision.blockedByAdmin());
+                decision.handBlocked(), decision.blockedByAdmin(),
+                knock == null ? null : knock.words(), decision.timeLeft());
         }
     }
 

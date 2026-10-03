@@ -189,6 +189,36 @@ class BlockDecisionTest {
         assertThat(decision.blockedByAdmin()).isNull();
     }
 
+    // --- how a row reads to the operator --------------------------------------------------------------
+
+    @Test
+    void knock_isWhatTheScenarioCaught_andAHandBlockHasNone() {
+        assertThat(banOn("1.2.3.4").scenario("crowdsecurity/ssh-bf").build().knock()).isEqualTo(Knock.PASSWORDS);
+        assertThat(banOn("1.2.3.4").scenario(BlockDecision.handBlockReason("admin@example.com")).build().knock())
+            .isNull();
+    }
+
+    @Test
+    void timeLeft_readsCrowdSecsDurationInHumanUnits() {
+        record Row(String duration, String words) {}
+        for (Row row : new Row[] {
+            new Row("3h54m43.13179286s", "about 4 hours"),
+            new Row("1h16m58s", "about an hour"),
+            new Row("56m8s", "about 56 minutes"),
+            new Row("1m10s", "about a minute"),
+            new Row("42.5s", "less than a minute"),
+            new Row("500ms", "less than a minute"),
+            new Row("167h59m30s", "about 7 days"),
+            new Row("47h10m", "about 47 hours"),
+            // CrowdSec's own string is the only source; anything it did not write reads as nothing.
+            new Row("forever", null),
+            new Row(null, null),
+        }) {
+            assertThat(banOn("1.2.3.4").duration(row.duration()).build().timeLeft()).as(row.duration())
+                .isEqualTo(row.words());
+        }
+    }
+
     /** Whoever placed a hand block, an admin with no email on record still reads as one, not as nobody. */
     @Test
     void handBlockReason_fallsBackToAnAdminWhenNoEmailIsKnown() {

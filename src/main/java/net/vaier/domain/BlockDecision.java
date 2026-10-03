@@ -3,7 +3,10 @@ package net.vaier.domain;
 import lombok.Builder;
 import net.vaier.domain.port.ForGeolocatingIps;
 
+import java.util.Map;
 import java.util.StringJoiner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * One active CrowdSec ban. CrowdSec's own field for the banned address is named {@code value};
@@ -60,6 +63,36 @@ public record BlockDecision(Long id, String scenario, String sourceIp, String ty
     public boolean locksOut(TrustedNetworks trustedNetworks) {
         return trustedNetworks != null && trustedNetworks.contains(sourceIp);
     }
+
+    /** What the source tried, in plain words. A hand block caught nobody trying anything, so it has none. */
+    public Knock knock() {
+        return handBlocked() ? null : Knock.of(scenario);
+    }
+
+    /**
+     * How long the ban has left, in the units a person would say — {@code "about 4 hours"} for CrowdSec's
+     * {@code "3h54m43.13s"}. Null when {@code duration} is not a Go duration CrowdSec would write.
+     */
+    public String timeLeft() {
+        if (duration == null || !GO_DURATION.matcher(duration).matches()) return null;
+        double seconds = 0;
+        Matcher part = GO_DURATION_PART.matcher(duration);
+        while (part.find()) {
+            seconds += Double.parseDouble(part.group(1)) * SECONDS_PER_UNIT.get(part.group(2));
+        }
+        if (seconds < 60) return "less than a minute";
+        long minutes = Math.round(seconds / 60);
+        if (minutes < 60) return minutes == 1 ? "about a minute" : "about " + minutes + " minutes";
+        long hours = Math.round(seconds / 3600);
+        if (hours < 48) return hours == 1 ? "about an hour" : "about " + hours + " hours";
+        return "about " + Math.round(seconds / 86400) + " days";
+    }
+
+    private static final String GO_DURATION_UNIT = "(\\d+(?:\\.\\d+)?)(h|ms|m|s|us|µs|ns)";
+    private static final Pattern GO_DURATION = Pattern.compile("(?:" + GO_DURATION_UNIT + ")+");
+    private static final Pattern GO_DURATION_PART = Pattern.compile(GO_DURATION_UNIT);
+    private static final Map<String, Double> SECONDS_PER_UNIT = Map.of(
+        "h", 3600.0, "m", 60.0, "s", 1.0, "ms", 1e-3, "us", 1e-6, "µs", 1e-6, "ns", 1e-9);
 
     /** Whether CrowdSec could say anything about where this source sits. Either half is enough. */
     public boolean enriched() {

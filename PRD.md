@@ -4539,7 +4539,7 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Machine kind** on cards and page heads ("Storage box · Synology", "Computer that stays on", "Phone", "Where Vaier runs") — one table shared with the Topology.
 - **Plain renames**: Send its setup again (Reissue), Give it new keys (Regenerate), Keys and removal, Sign-in for the shell, "Vaier signs in as geir and can only do what geir can", Last seen; Connection details keep the addresses under plain labels.
 
-**Still to come in #377.** 3c: Security as sentences and a ~15-term Concepts page (3b shipped, §6.73).
+**Still to come in #377.** Nothing: 3b shipped (§6.73) and 3c (§6.74) closes it.
 
 ### 6.73 Plain words: a published service's page ✅ (part 3b of [#377](https://github.com/getvaier/vaier/issues/377), slice 3 of [#380](https://github.com/getvaier/vaier/issues/380))
 
@@ -4551,4 +4551,17 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Websites list**: one name per row. No backend column and no header; a healthy route paints nothing, and only a route in trouble reads "Not answering" or "Not checked yet".
 - Marvin's refusal when a service has no login for him now points at **Sign people in for it**.
 
-**Backlog.** The Launchpad icon is whatever the service shows for itself; choosing one would need a new setting. 3c remains: Security as sentences and a ~15-term Concepts page.
+**Backlog.** The Launchpad icon is whatever the service shows for itself; choosing one would need a new setting. 3c shipped (§6.74).
+
+### 6.74 Plain words: Security as sentences, a 15-word Concepts page ✅ (part 3c of [#377](https://github.com/getvaier/vaier/issues/377), slice 3 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** The Security view printed CrowdSec's scenario slugs (`crowdsecurity/http-crawl-non_statics`), network-owner names and durations like `3h54m43s`, with two buttons on every row (audit finding F13). The Concepts page held ~72 terms, most of them developer vocabulary the UI no longer says.
+
+**What.** No endpoint removed; every capability stays reachable.
+- **Security**: one leading sentence ("Vaier is keeping 9 addresses out right now."), claiming no time window, since CrowdSec reports time left and not start time. Each row is a sentence: its **knock** (what it tried, e.g. "Looked for admin pages") and country, then the address and its **time left** ("kept out for about 4 hours more"). Knock and time left are decided in the domain (`Knock`, `BlockDecision.timeLeft`) and ride on `/security/decisions` and its SSE push. Unknown scenarios read "Tried something suspicious". The slug and the network owner are tooltips only. Lift and trust sit behind one "…" menu per row; a phone shows five rows until asked for all. The empty, trusted and block-form copy no longer names CrowdSec; the confirmation dialogs keep their CrowdSec-restart caveat.
+- **Concepts**: 15 terms in the UI's own words: Machine, Vaier server, VPN, Vaier app, Switched off on purpose, Apps, Websites, Launchpad, Sign in, Trusted address, Backup server, Incomplete backup, Back up as root, Needs you, Marvin. `UBIQUITOUS_LANGUAGE.md` keeps every developer term the code still uses.
+- **Jargon sweep**: shell toggles and refusals say "a shell" and "sign-in for the shell" instead of SSH, the Storage note drops "df over SSH", a machine's backup readying says "the backup program" instead of borg, a LAN find with port 22 "takes shell logins", and Settings' sign-in providers no longer name Dex.
+
+**Left deliberately.** Mechanism stays where the operator configures mechanism: the backup server's setup form (borg, SSH, paths), Settings' `.env` precedence note, the "Copy" firewall text, and error toasts that name the failing component. The breach mail still uses `BlockDecision.label()` with the raw scenario.
+
+**Backlog.** Say the breach mail in the same plain words (knock, country, time left).

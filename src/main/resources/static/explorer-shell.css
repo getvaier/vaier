@@ -848,16 +848,16 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 /* The Websites list: a name, and a word only on a route in trouble. */
 .ex-listing.is-wide.is-routes .ex-lrow { grid-template-columns: minmax(0, 1fr) auto; }
 
-/* The blocked list (#329). Its verbs get a column of their own instead of riding over the last one the way
-   the file listing's do: those are icon-sized and reveal on hover, these are two worded buttons, and at
-   that width they would sit permanently on top of the data they act on. */
-.ex-listing.is-threats .ex-lhead,
-.ex-listing.is-threats .ex-lrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) 96px 210px; }
-.ex-listing.is-threats .ex-lmeta { display: flex; align-items: center; min-width: 0; }
-.ex-listing.is-threats .ex-lmeta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The blocked list (#329, #377): a sentence and a quiet line per row, its two verbs behind one "…" menu. */
+.ex-sec-lead { margin: 0 0 14px; font-size: 15px; line-height: 1.5; color: var(--text); max-width: 680px; }
+.ex-listing.is-threats { max-width: 760px; }
+.ex-listing.is-threats .ex-lrow { grid-template-columns: minmax(0, 1fr) auto; padding: 9px 4px 9px 12px; }
 .ex-listing.is-threats .ex-lactions {
     position: static; opacity: 1; padding-left: 0; background: none; justify-content: flex-end;
 }
+.ex-tsay { overflow-wrap: anywhere; }
+.ex-tmenu .ex-vmenu { min-width: 270px; }
+.ex-sec-more { display: none; }
 /* The trusted list (#348). One address, one verb: a trusted address has no scenario and no expiry, so
    inheriting the blocked list's four columns would leave two of them empty on every row. The verb column is
    narrower for the same reason — there is only ever one button in it. */
@@ -1910,23 +1910,20 @@ select.ex-input { cursor: pointer; }
        select-then-act model every touch file browser uses, instead of three icon buttons per row. */
     .ex-lrow .ex-lactions { display: none; }
 
-    /* …except the blocked list's, which have nowhere else to go. The file listing can hide its row verbs
-       because ticking a file raises the selection bar that carries them; there is no such bar here, so
-       hiding these would leave the Security view read-only on a phone — the one screen you are most
-       likely to be holding when an alert arrives. The row becomes three stacked bands instead. */
+    /* …except the blocked list's "…" menu, which has nowhere else to go: there is no selection bar here, and
+       hiding it would leave the Security view read-only on the screen you hold when an alert arrives. */
     .ex-listing.is-threats .ex-lrow {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-areas: "src" "sub" "acts";
-        padding: 10px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "src acts";
+        padding: 10px 0 10px 10px;
     }
     .ex-listing.is-threats .ex-tsource { grid-area: src; }
-    .ex-listing.is-threats .ex-lsub { grid-area: sub; display: flex; }
-    .ex-listing.is-threats .ex-lsub span { white-space: normal; overflow-wrap: anywhere; }
-    /* The columns' cells say what the line above already said, so on a phone they go. */
-    .ex-listing.is-threats .ex-lmeta { display: none; }
-    .ex-listing.is-threats .ex-lactions {
-        grid-area: acts; display: flex; justify-content: flex-start; gap: 6px; margin-top: 6px;
-    }
+    .ex-listing.is-threats .ex-torigin { white-space: normal; }
+    .ex-listing.is-threats .ex-lactions { grid-area: acts; display: flex; }
+    .ex-tmenu .ex-vmenu { min-width: 0; width: max-content; max-width: calc(100vw - 28px); }
+    /* A long list folds to its first five rows until asked. */
+    .ex-listing.is-threats:not(.is-all) .ex-lrow:nth-child(n+6) { display: none; }
+    .ex-sec-more { display: inline-flex; margin-top: 8px; }
 
     /* Same reason, same shape, for the trusted list: no selection bar carries its verb either, so hiding
        row actions here would leave an operator able to see what they trusted and not to take it back. */

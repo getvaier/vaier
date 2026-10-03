@@ -88,7 +88,9 @@ class SecurityRestControllerTest {
             .andExpect(jsonPath("$[0].type").value("ban"))
             .andExpect(jsonPath("$[0].duration").value("3h0m40s"))
             .andExpect(jsonPath("$[0].country").value("BG"))
-            .andExpect(jsonPath("$[0].asnOrg").value("Techoff Srv Limited"));
+            .andExpect(jsonPath("$[0].asnOrg").value("Techoff Srv Limited"))
+            .andExpect(jsonPath("$[0].knock").value(PLACED.knock().words()))
+            .andExpect(jsonPath("$[0].timeLeft").value(PLACED.timeLeft()));
     }
 
     /**
