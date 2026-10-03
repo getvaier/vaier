@@ -4400,7 +4400,7 @@ class ExplorerShellTest {
         assertThat(js).contains("'/settings/anthropic-api-key'");
         assertThat(js).contains("c.hasAnthropicApiKey");
         assertThat(js).doesNotContain("c.anthropicApiKey");
-        int from = js.indexOf("const ask = sectionForm('Chat');");
+        int from = js.indexOf("setupItem(body, 'chat'");
         assertThat(from).isPositive();
         String body = js.substring(from, from + 1200);
         assertThat(body).contains("'password')");
@@ -4772,5 +4772,31 @@ class ExplorerShellTest {
         int loadSettings = js.indexOf("async function loadSettings() {");
         assertThat(js.substring(loadSettings, js.indexOf("\n    }\n", loadSettings)))
             .doesNotContain("/settings/sign-in");
+    }
+
+    // --- Settings: finished setup is one line (#378 slice 4c) -------------------------------------------
+
+    @Test
+    void settings_foldsFinishedSetupToOneLine_opensWhatIsUnfinished_andHoldsNoStatus() throws IOException {
+        // F14: ten forms with ten Save buttons, and status mixed in. Finished reads as one line with Change;
+        // unfinished opens, because it still needs the operator. Trouble is said once, in Needs you.
+        String js = read("explorer-shell.js");
+        int item = js.indexOf("function setupItem(");
+        assertThat(item).isPositive();
+        String itemBody = js.substring(item, js.indexOf("\n    }\n", item));
+        assertThat(itemBody).contains("_settingsOpen").contains("'Change'").contains("finished");
+
+        int from = js.indexOf("function renderSettings(pane) {");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(body).as("finished is the server's own fact, never worked out here")
+            .contains("c.smtpConfigured").contains("c.survivalKitWritten");
+        for (String line : List.of("'backups'", "'kit'", "'mail'", "'chat'", "'disks'", "'credentials'")) {
+            assertThat(body).as(line).contains("setupItem(body, " + line);
+        }
+        assertThat(body).as("the wildcard verdict reaches Needs you through the pre-flight")
+            .doesNotContain("wildcardDns");
+        assertThat(body).as("render never reads the settings; arriving does").doesNotContain("loadSettings(");
+        int route = js.indexOf("function applyRoute(path, at) {");
+        assertThat(js.substring(route, js.indexOf("\n    }\n", route))).contains("loadSettings()");
     }
 }

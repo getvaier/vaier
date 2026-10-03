@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The identity providers added from Settings, with their credentials, and whether the first-run door is
+ * The identity providers added under People, with their credentials, and whether the first-run door is
  * held open. dex-init and oauth2-proxy-init read the same facts from the file and apply the same door rule,
  * and a provider whose pair is set in {@code .env} is never taken from here.
  */
@@ -35,7 +35,7 @@ public record SignInSettings(Map<IdentityProvider, ProviderCredentials> provider
                                        Set<IdentityProvider> setInEnvironment) {
         if (setInEnvironment.contains(provider)) {
             throw new IllegalArgumentException(provider.displayName() + " is set in .env, which wins over "
-                + "Settings — change it there.");
+                + "Sign-in providers under People — change it in .env.");
         }
         Map<IdentityProvider, ProviderCredentials> next = new EnumMap<>(IdentityProvider.class);
         next.putAll(providers);

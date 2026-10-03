@@ -86,7 +86,7 @@ Open a **backup repository** entry in the Explorer to browse the point-in-time a
 
 Your repository passphrases live inside Vaier, and Vaier's own backup is encrypted with one of them — so losing the Vaier server would leave you holding archives that nothing left standing can open. Nothing warns about it, because nothing is broken until everything is.
 
-The **survival kit** breaks that circle: every repository's `ssh://` address and passphrase, the borg commands that read them, and Vaier's own **config key**, encrypted under **one passphrase you choose** and copied onto machines Vaier does not run on. Set the passphrase in **Settings → Reading your backups without Vaier** (typed twice, because a mistyped one looks saved until the day you need it) and press **Write the kit now**.
+The **survival kit** breaks that circle: every repository's `ssh://` address and passphrase, the borg commands that read them, and Vaier's own **config key**, encrypted under **one passphrase you choose** and copied onto machines Vaier does not run on. Set the passphrase in **Settings → Survival kit** (typed twice, because a mistyped one looks saved until the day you need it) and press **Write the kit now**.
 
 **Vaier picks the hosts and says why** — a server it can reach over SSH, never a laptop or a phone, never itself, and never two behind the same relay; where the fleet has more sites than copies, it keeps the ones furthest apart on the map, since two relays in one building burn together. It reports where each copy went and the reason, which hosts refused, and the only thing that really matters: whether anything written now outlives this server. A fleet with fewer sites than copies gets fewer copies and is told so.
 

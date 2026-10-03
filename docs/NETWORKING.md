@@ -193,7 +193,7 @@ Tiles show the path segment (for path-based routes) or the subdomain, with an op
 
 ## Reverse proxy
 
-Traefik dynamic config generated automatically, with a per-service **auth mode** (public or **Social login** — Google or GitHub via oauth2-proxy, with Vaier deciding who's approved) and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-dashboard links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway".
+Traefik dynamic config generated automatically, with a per-service **auth mode** (public or **Social login** — Google or GitHub via oauth2-proxy, with Vaier deciding who's approved) and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with a retry and a link back to Vaier) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway".
 
 ## Edge hardening
 
@@ -225,7 +225,7 @@ How it is wired: the bouncer used to ride the HTTPS entry point, and Traefik can
 
 ## Wildcard DNS
 
-DNS is one record you make once, at whatever DNS host your domain lives on: `*.yourdomain.com  A  <your server's public IP>`. Vaier never touches DNS after that — publishing a service writes a Traefik route and nothing else, so a service is live as soon as the route is up. At boot Vaier **checks** the record for you (it looks up a random name under your domain on a public resolver and compares the answer with this server's own public IP) and says in plain words whether it's covered, not resolving, pointing somewhere else, or unconfirmed — in the boot log and in **Settings**.
+DNS is one record you make once, at whatever DNS host your domain lives on: `*.yourdomain.com  A  <your server's public IP>`. Vaier never touches DNS after that — publishing a service writes a Traefik route and nothing else, so a service is live as soon as the route is up. At boot Vaier **checks** the record for you (it looks up a random name under your domain on a public resolver and compares the answer with this server's own public IP) and says in plain words whether it's covered, not resolving, pointing somewhere else, or unconfirmed — in the boot log. Anything but **covered** is a **pre-flight** finding under **Needs you** on the Fleet; a covered record shows nothing.
 
 That one record answers for everything: the console at `vaier.yourdomain.com`, the sign-in hosts `oauth2.yourdomain.com` (where oauth2-proxy serves the sign-in flow) and `dex.yourdomain.com` (the Dex identity broker behind it that federates Google and GitHub), and every service you publish from now on. There is nothing to add when you publish a service, and no DNS credentials to give Vaier — any provider that can serve a wildcard `A` record works.
 

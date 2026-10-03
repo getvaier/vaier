@@ -27,6 +27,8 @@ class SignInSettingsFileAdapterTest {
         assertThat(Files.readAllLines(file))
             .contains("FIRST_RUN_DOOR=open", "GITHUB_CLIENT_ID=Ov23li", "GITHUB_CLIENT_SECRET=abc123")
             .noneMatch(line -> line.startsWith("GOOGLE_"));
+        assertThat(Files.readAllLines(file).get(0)).as("says where in Vaier they are changed")
+            .contains("Sign-in providers").contains("People").doesNotContain("Settings");
         assertThat(Files.getPosixFilePermissions(file))
             .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
         assertThat(new SignInSettingsFileAdapter(dir.toString()).read()).isEqualTo(settings);

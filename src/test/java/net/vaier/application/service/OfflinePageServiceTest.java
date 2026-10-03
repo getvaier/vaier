@@ -27,11 +27,12 @@ class OfflinePageServiceTest {
     }
 
     @Test
-    void includesRetryAndDashboardLinks() {
+    void includesRetryAndBackToVaierLinks() {
         OfflinePage page = service("example.com").render(502, "foo.example.com");
 
-        // Dashboard link points at the Vaier launchpad on the configured domain.
-        assertThat(page.html()).contains("https://vaier.example.com/");
+        // The way back is Vaier's front door on the configured domain, said in plain words.
+        assertThat(page.html()).contains("https://vaier.example.com/").contains(">Back to Vaier</a>")
+            .doesNotContain("dashboard");
         // Retry reloads the current URL (no hard-coded host that would break under the failed service).
         assertThat(page.html()).contains("location.reload");
     }

@@ -56,7 +56,7 @@ public class SignInSettingsFileAdapter implements ForPersistingSignInSettings {
     @Override
     public synchronized void save(SignInSettings settings) {
         List<String> lines = new ArrayList<>(List.of(
-            "# Sign-in providers added from Vaier's Settings. Read by dex-init and oauth2-proxy-init;",
+            "# Sign-in providers added under People in Vaier. Read by dex-init and oauth2-proxy-init;",
             "# a provider whose client id and secret are both set in .env ignores its lines here.",
             DOOR_KEY + "=" + (settings.firstRunDoorOpen() ? "open" : "closed")));
         settings.providers().forEach((provider, credentials) -> {

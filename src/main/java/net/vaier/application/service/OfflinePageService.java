@@ -20,12 +20,12 @@ public class OfflinePageService implements GetOfflinePageUseCase {
     public OfflinePage render(int status, String serviceHost) {
         // The title/message for a given status is a business decision — it lives in the domain.
         GatewayError error = GatewayError.forStatus(status);
-        String dashboardUrl = "https://vaier." + nullToEmpty(configResolver.getDomain()) + "/";
-        String html = renderHtml(error, serviceHost, dashboardUrl);
+        String frontDoorUrl = "https://vaier." + nullToEmpty(configResolver.getDomain()) + "/";
+        String html = renderHtml(error, serviceHost, frontDoorUrl);
         return new OfflinePage(error.status(), CONTENT_TYPE, html);
     }
 
-    private String renderHtml(GatewayError error, String serviceHost, String dashboardUrl) {
+    private String renderHtml(GatewayError error, String serviceHost, String frontDoorUrl) {
         String safeHost = serviceHost == null || serviceHost.isBlank() ? null : escape(serviceHost);
         String hostLine = safeHost == null
             ? ""
@@ -71,7 +71,7 @@ public class OfflinePageService implements GetOfflinePageUseCase {
             %HOST%
             <div class="actions">
             <button class="btn primary" onclick="location.reload()">Retry</button>
-            <a class="btn" href="%DASHBOARD%">Back to dashboard</a>
+            <a class="btn" href="%FRONT_DOOR%">Back to Vaier</a>
             </div>
             </main>
             </body>
@@ -81,7 +81,7 @@ public class OfflinePageService implements GetOfflinePageUseCase {
             .replace("%TITLE%", escape(error.title()))
             .replace("%MESSAGE%", escape(error.message()))
             .replace("%HOST%", hostLine)
-            .replace("%DASHBOARD%", escape(dashboardUrl));
+            .replace("%FRONT_DOOR%", escape(frontDoorUrl));
     }
 
     private static String nullToEmpty(String s) {

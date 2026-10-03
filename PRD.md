@@ -4566,7 +4566,7 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 
 **Backlog.** Say the breach mail in the same plain words (knock, country, time left).
 
-### 6.75 One front door, a flatter menu ✅ parts 4a, 4b (part 4a of [#378](https://github.com/getvaier/vaier/issues/378), slice 4 of [#380](https://github.com/getvaier/vaier/issues/380))
+### 6.75 One front door, a flatter menu ✅ parts 4a–4c (part 4 of [#378](https://github.com/getvaier/vaier/issues/378), slice 4 of [#380](https://github.com/getvaier/vaier/issues/380))
 
 **Why.** An admin landed on the tiles and had to look for the fleet; the menu carried a Fleet item, jobs grouped under headings, and a Credentials entry that read "Nothing stored" every day (audit findings F6, F7).
 
@@ -4583,4 +4583,11 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Sign-in providers** moved here from Settings, unchanged; it leads the page while the first-run door is open. Settings no longer holds it.
 - Read on arrival (`/access`, `/settings/sign-in`), never polled; every write re-reads People and Needs you. `users.html` is deleted; Concepts is the one page still framed.
 
-**Still to come in #378.** 4c: Settings collapses finished setup to one line per item.
+**What (4c).** Settings is set-up-once, not a long form that also hides status (audit finding F14). No endpoint added; finished-ness is a fact the server already sent.
+- **One line per finished item**: nightly backups, survival kit, mail, Chat, disk alerts and Fleet credentials each read as their name, what they are set to, and **Change** (Fleet credentials: **Open**). **Change** unfolds that item's form; **Done** folds it and re-reads. Unfinished setup opens unfolded: mail while `smtpConfigured` is false, the survival kit while `survivalKitWritten` is false. Chat without a key is a choice, so it stays one line with **Turn on**.
+- **Status left**: the wildcard record's verdict is gone from Settings, because anything but covered is already a pre-flight row in Needs you. The pre-flight and the reverse proxy audit were already there.
+- **Kept in Settings**: Vaier updating itself, as one line (**Update Vaier**) only while a newer image is served, and one sentence after a failed or rolled-back update. Vaier's own image is not in Needs you's image-update rows (those cover containers with exposed ports), so moving it would need backend work; it is backlog below.
+- Settings is read on arrival, not from its render.
+- **Wording**: the `.env` refusal and the header of the generated `sign-in-providers.env` name People's Sign-in providers rather than Settings. The offline page's link reads **Back to Vaier**.
+
+**Backlog.** A **Vaier update** row in Needs you (a newer Vaier image, or a failed or rolled-back self-update), so Settings can drop its last status line. `AppSettingsResult`'s four `wildcardDns*` fields have no reader in the browser now. Remove them when that row is built, or sooner.

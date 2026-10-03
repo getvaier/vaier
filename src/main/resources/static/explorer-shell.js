@@ -8884,17 +8884,50 @@
         }
     }
 
-    function renderSettings(pane) {
-        pane.appendChild(paneHead('Settings', false, 'Vaier-wide configuration'));
-        const body = el('div', 'ex-pane-body');
+    // Settings items opened with Change, kept across repaints; a fresh visit folds them again.
+    const _settingsOpen = new Set();
 
-        if (S.settings.state === 'idle' || S.settings.state === 'loading') {
-            if (S.settings.state === 'idle') loadSettings();
-            body.appendChild(note('Reading settings…', false));
-            return pane.appendChild(body);
+    // One line of Settings: what it is, what it is set to, and one verb.
+    function setLine(title, says, verb) {
+        const line = el('div', 'ex-set-line');
+        const name = el('div', 'ex-set-line-name'); name.textContent = title;
+        const what = el('div', 'ex-set-line-says'); what.textContent = says;
+        const words = el('div', 'ex-set-line-words'); words.append(name, what);
+        line.append(words, verb);
+        return line;
+    }
+
+    // Finished setup reads as one line with Change; unfinished, or opened, shows its form, because it still
+    // needs the operator. Whether it is finished is the server's fact, passed in.
+    function setupItem(body, id, item) {
+        const open = !item.finished || _settingsOpen.has(id);
+        if (!open || !item.build) {
+            const verb = el('button', 'ex-btn'); verb.textContent = item.verb || 'Change';
+            verb.onclick = item.run || (() => { _settingsOpen.add(id); render(); });
+            body.appendChild(setLine(item.title, item.says, verb));
+            return;
         }
-        if (S.settings.state === 'error' || !S.settings.config) {
-            body.appendChild(note('Vaier could not read its settings.', true));
+        const head = el('div', 'ex-set-head');
+        head.appendChild(section(item.title));
+        if (item.finished) {
+            // Folding re-reads, so the line says what was just saved.
+            const done = el('button', 'ex-btn'); done.textContent = 'Done';
+            done.onclick = () => { _settingsOpen.delete(id); loadSettings(); };
+            head.appendChild(done);
+        }
+        const form = el('div', 'ex-form');
+        body.append(head, form);
+        item.build(form);
+    }
+
+    function renderSettings(pane) {
+        pane.appendChild(paneHead('Settings', false, 'Set up once, changed rarely'));
+        const body = el('div', 'ex-pane-body ex-settings');
+
+        // Read on arrival (applyRoute), never from here. A re-read keeps the last answer on screen.
+        if (!S.settings.config) {
+            body.appendChild(note(S.settings.state === 'error'
+                ? 'Vaier could not read its settings.' : 'Reading settings…', S.settings.state === 'error'));
             return pane.appendChild(body);
         }
         const c = S.settings.config;
@@ -8912,12 +8945,6 @@
             if (ph) i.placeholder = ph; i.autocomplete = 'off'; i.spellcheck = false;
             return i;
         };
-        // A form section: a titled block of fields with its own Save button and inline note.
-        const sectionForm = (title) => {
-            body.appendChild(section(title));
-            const form = el('div', 'ex-form'); body.appendChild(form);
-            return form;
-        };
         const saveRow = (form, label, onSave) => {
             const row = el('div', 'ex-set-actions');
             const btn = el('button', 'ex-btn is-accent'); btn.textContent = label;
@@ -8928,17 +8955,21 @@
         };
 
         // --- Nightly backups: the fleet-wide "when" (the one backup knob the operator owns) ---
-        const sched = sectionForm('Nightly backups');
-        const hour = el('select', 'ex-input');
-        for (let h = 0; h < 24; h++) {
-            const o = el('option'); o.value = String(h);
-            o.textContent = String(h).padStart(2, '0') + ':00'; hour.appendChild(o);
-        }
-        hour.value = String(c.backupScheduleHour);
-        sched.appendChild(field('Runs each night at',
-            'In ' + (c.backupScheduleZone || 'the server’s zone') + '. A failed run emails the admins.', hour));
-        saveRow(sched, 'Save schedule', (n) => saveSetting('/settings/backup-schedule', 'PUT',
-            { backupScheduleHour: parseInt(hour.value, 10) }, n, 'Schedule saved.'));
+        const at = String(c.backupScheduleHour).padStart(2, '0') + ':00';
+        setupItem(body, 'backups', { title: 'Nightly backups', finished: true,
+            says: 'Run each night at ' + at + (c.backupScheduleZone ? ', ' + c.backupScheduleZone : ''),
+            build: (sched) => {
+            const hour = el('select', 'ex-input');
+            for (let h = 0; h < 24; h++) {
+                const o = el('option'); o.value = String(h);
+                o.textContent = String(h).padStart(2, '0') + ':00'; hour.appendChild(o);
+            }
+            hour.value = String(c.backupScheduleHour);
+            sched.appendChild(field('Runs each night at',
+                'In ' + (c.backupScheduleZone || 'the server’s zone') + '. A failed run emails the admins.', hour));
+            saveRow(sched, 'Save schedule', (n) => saveSetting('/settings/backup-schedule', 'PUT',
+                { backupScheduleHour: parseInt(hour.value, 10) }, n, 'Schedule saved.'));
+        } });
 
         // --- The survival kit: the way out of the circle the backups are otherwise in ---
         //
@@ -8946,170 +8977,182 @@
         // generated, because a strong random string is exactly what nobody carries in their head, and the
         // kit's whole point is that it opens on a day Vaier cannot be asked anything. Typed twice, because a
         // typo here is invisible until the one day it matters.
-        const kitForm = sectionForm('Reading your backups without Vaier');
-        const kitWhy = el('div', 'ex-hint');
-        kitWhy.textContent = 'Every passphrase that unlocks a machine’s backups lives in Vaier, and Vaier’s '
-            + 'own backup is encrypted with one of them — so losing this server would leave you holding '
-            + 'archives nothing can open. A survival kit is that list, encrypted with a passphrase only you '
-            + 'know and copied onto machines Vaier does not run on. Each copy carries the one openssl '
-            + 'command that opens it, printed in the clear on the file itself.';
-        kitForm.appendChild(kitWhy);
+        setupItem(body, 'kit', { title: 'Survival kit', finished: c.survivalKitWritten,
+            says: 'Written to the fleet; it opens with the passphrase you keep',
+            build: (kitForm) => {
+            const kitWhy = el('div', 'ex-hint');
+            kitWhy.textContent = 'Every passphrase that unlocks a machine’s backups lives in Vaier, and Vaier’s '
+                + 'own backup is encrypted with one of them — so losing this server would leave you holding '
+                + 'archives nothing can open. A survival kit is that list, encrypted with a passphrase only you '
+                + 'know and copied onto machines Vaier does not run on. Each copy carries the one openssl '
+                + 'command that opens it, printed in the clear on the file itself.';
+            kitForm.appendChild(kitWhy);
 
-        const kitPass = input('', c.hasSurvivalKitPassphrase
-            ? 'A passphrase is set — type a new one to replace it' : 'Choose a passphrase', 'password');
-        const kitAgain = input('', 'Type it again', 'password');
-        kitForm.append(
-            field('Kit passphrase', 'The one thing you keep yourself. Write it down somewhere that is not a '
-                + 'computer — Vaier cannot recover it, and a kit nobody can open is not a kit.', kitPass),
-            field('Confirm', c.hasSurvivalKitPassphrase
-                ? 'Kits already on the fleet still open with the old passphrase until you write them again.'
-                : 'Typed twice because a mistyped passphrase looks like a saved one until the day you need it.',
-                kitAgain));
+            const kitPass = input('', c.hasSurvivalKitPassphrase
+                ? 'A passphrase is set — type a new one to replace it' : 'Choose a passphrase', 'password');
+            const kitAgain = input('', 'Type it again', 'password');
+            kitForm.append(
+                field('Kit passphrase', 'The one thing you keep yourself. Write it down somewhere that is not a '
+                    + 'computer — Vaier cannot recover it, and a kit nobody can open is not a kit.', kitPass),
+                field('Confirm', c.hasSurvivalKitPassphrase
+                    ? 'Kits already on the fleet still open with the old passphrase until you write them again.'
+                    : 'Typed twice because a mistyped passphrase looks like a saved one until the day you need it.',
+                    kitAgain));
 
-        // The write action and everything it reports live below the passphrase, in their own block: saving a
-        // passphrase and writing a kit are separate acts, and rolling them into one Save would write kits
-        // across the fleet as a side effect of typing a password.
-        const kitOut = el('div', 'ex-kit-out');
-        const writeRow = el('div', 'ex-set-actions');
-        const writeBtn = el('button', 'ex-btn is-accent');
-        writeBtn.textContent = 'Write the kit now';
-        const writeNote = el('span', 'ex-set-note');
-        writeRow.append(writeBtn, writeNote);
+            // The write action and everything it reports live below the passphrase, in their own block: saving a
+            // passphrase and writing a kit are separate acts, and rolling them into one Save would write kits
+            // across the fleet as a side effect of typing a password.
+            const kitOut = el('div', 'ex-kit-out');
+            const writeRow = el('div', 'ex-set-actions');
+            const writeBtn = el('button', 'ex-btn is-accent');
+            writeBtn.textContent = 'Write the kit now';
+            const writeNote = el('span', 'ex-set-note');
+            writeRow.append(writeBtn, writeNote);
 
-        const kitNote = saveRow(kitForm, 'Save passphrase', (n) => {
-            const p = kitPass.value;
-            if (!p.trim()) {
-                n.className = 'ex-set-note is-err'; n.textContent = 'Enter a passphrase.'; return;
-            }
-            if (p !== kitAgain.value) {
-                n.className = 'ex-set-note is-err'; n.textContent = 'The two entries do not match.'; return;
-            }
-            saveSetting('/settings/survival-kit-passphrase', 'PUT', { passphrase: p }, n,
-                'Passphrase saved.').then((ok) => {
-                    kitPass.value = ''; kitAgain.value = '';
-                    if (!ok) return;
-                    c.hasSurvivalKitPassphrase = true;
-                    kitPass.placeholder = 'A passphrase is set — type a new one to replace it';
-                    armWrite();
-                    // Said only when there are kits out there to have gone stale by this.
-                    if (_kitWrite) {
-                        n.textContent = 'Passphrase saved. Write the kit again so the copies match it.';
-                        n.className = 'ex-set-note is-warn';
-                    }
-                });
-        });
-        kitForm.append(writeRow, kitOut);
-
-        // The button is only offered when it can do something. Without a passphrase it would write nothing
-        // and say 409, which is a fact about an endpoint, not an answer to a person.
-        function armWrite() {
-            writeBtn.disabled = !c.hasSurvivalKitPassphrase;
-            writeBtn.title = c.hasSurvivalKitPassphrase
-                ? 'Write the kit and copy it onto the machines Vaier picks'
-                : 'Choose a passphrase first — Vaier will not write a kit that anyone could open';
-        }
-        armWrite();
-        if (_kitWrite) renderKitWrite(kitOut, _kitWrite.report, _kitWrite.at);
-
-        writeBtn.onclick = async () => {
-            writeBtn.disabled = true;
-            writeNote.className = 'ex-set-note';
-            writeNote.textContent = 'Writing the kit and copying it out…';
-            try {
-                const res = await fetch('/survival-kit', { method: 'POST' });
-                if (res.ok) {
-                    const report = await res.json();
-                    _kitWrite = { report, at: new Date() };
-                    renderKitWrite(kitOut, report, _kitWrite.at);
-                    writeNote.textContent = '';
-                } else if (res.status === 409) {
-                    writeNote.className = 'ex-set-note is-err';
-                    writeNote.textContent = 'Choose a passphrase first, then write the kit.';
-                } else {
-                    const err = await res.json().catch(() => ({}));
-                    writeNote.className = 'ex-set-note is-err';
-                    writeNote.textContent = err.message || 'Vaier could not write the kit.';
+            const kitNote = saveRow(kitForm, 'Save passphrase', (n) => {
+                const p = kitPass.value;
+                if (!p.trim()) {
+                    n.className = 'ex-set-note is-err'; n.textContent = 'Enter a passphrase.'; return;
                 }
-            } catch (e) {
-                writeNote.className = 'ex-set-note is-err';
-                writeNote.textContent = 'Vaier could not write the kit.';
+                if (p !== kitAgain.value) {
+                    n.className = 'ex-set-note is-err'; n.textContent = 'The two entries do not match.'; return;
+                }
+                saveSetting('/settings/survival-kit-passphrase', 'PUT', { passphrase: p }, n,
+                    'Passphrase saved.').then((ok) => {
+                        kitPass.value = ''; kitAgain.value = '';
+                        if (!ok) return;
+                        c.hasSurvivalKitPassphrase = true;
+                        kitPass.placeholder = 'A passphrase is set — type a new one to replace it';
+                        armWrite();
+                        // Said only when there are kits out there to have gone stale by this.
+                        if (_kitWrite) {
+                            n.textContent = 'Passphrase saved. Write the kit again so the copies match it.';
+                            n.className = 'ex-set-note is-warn';
+                        }
+                    });
+            });
+            kitForm.append(writeRow, kitOut);
+
+            // The button is only offered when it can do something. Without a passphrase it would write nothing
+            // and say 409, which is a fact about an endpoint, not an answer to a person.
+            function armWrite() {
+                writeBtn.disabled = !c.hasSurvivalKitPassphrase;
+                writeBtn.title = c.hasSurvivalKitPassphrase
+                    ? 'Write the kit and copy it onto the machines Vaier picks'
+                    : 'Choose a passphrase first — Vaier will not write a kit that anyone could open';
             }
             armWrite();
-        };
+            if (_kitWrite) renderKitWrite(kitOut, _kitWrite.report, _kitWrite.at);
+
+            writeBtn.onclick = async () => {
+                writeBtn.disabled = true;
+                writeNote.className = 'ex-set-note';
+                writeNote.textContent = 'Writing the kit and copying it out…';
+                try {
+                    const res = await fetch('/survival-kit', { method: 'POST' });
+                    if (res.ok) {
+                        const report = await res.json();
+                        _kitWrite = { report, at: new Date() };
+                        renderKitWrite(kitOut, report, _kitWrite.at);
+                        writeNote.textContent = '';
+                    } else if (res.status === 409) {
+                        writeNote.className = 'ex-set-note is-err';
+                        writeNote.textContent = 'Choose a passphrase first, then write the kit.';
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        writeNote.className = 'ex-set-note is-err';
+                        writeNote.textContent = err.message || 'Vaier could not write the kit.';
+                    }
+                } catch (e) {
+                    writeNote.className = 'ex-set-note is-err';
+                    writeNote.textContent = 'Vaier could not write the kit.';
+                }
+                armWrite();
+            };
+        } });
 
         // --- Email (SMTP): the channel every alert goes out on ---
-        const smtp = sectionForm('Email (SMTP)');
-        const host = input(c.smtpHost, 'smtp.example.com');
-        const port = input(c.smtpPort || 587, '587', 'number');
-        const user = input(c.smtpUsername, 'user@example.com');
-        const pass = input('', 'Leave blank to keep the stored password', 'password');
-        const sender = input(c.smtpSender, 'noreply@example.com');
-        const test = input('', 'you@example.com');
-        smtp.append(field('Host', null, host), field('Port', null, port), field('Username', null, user),
-            field('Password', null, pass), field('Sender', null, sender),
-            field('Send a test to', 'Optional — checks the settings above send mail.', test));
-        const smtpBody = () => ({ smtpHost: host.value.trim(), smtpPort: parseInt(port.value, 10) || 587,
-            smtpUsername: user.value.trim(), smtpPassword: pass.value, smtpSender: sender.value.trim() });
-        const smtpNote = saveRow(smtp, 'Save email', (n) => {
-            if (!host.value.trim() || !user.value.trim() || !sender.value.trim()) {
-                n.className = 'ex-set-note is-err'; n.textContent = 'Host, username and sender are required.'; return;
-            }
-            saveSetting('/settings/smtp', 'PUT', smtpBody(), n, 'Email settings saved.').then(() => { pass.value = ''; });
-        });
-        const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Send test email';
-        testBtn.onclick = () => {
-            if (!test.value.trim()) { smtpNote.className = 'ex-set-note is-err'; smtpNote.textContent = 'Enter a recipient for the test.'; return; }
-            saveSetting('/settings/smtp/test', 'POST', { ...smtpBody(), recipient: test.value.trim() },
-                smtpNote, 'Test email sent to ' + test.value.trim() + '.');
-        };
-        smtp.querySelector('.ex-set-actions').insertBefore(testBtn, smtp.querySelector('.ex-set-note'));
+        setupItem(body, 'mail', { title: 'Mail', finished: c.smtpConfigured,
+            says: 'Sends as ' + (c.smtpSender || c.smtpUsername) + ' through ' + c.smtpHost,
+            build: (smtp) => {
+            const host = input(c.smtpHost, 'smtp.example.com');
+            const port = input(c.smtpPort || 587, '587', 'number');
+            const user = input(c.smtpUsername, 'user@example.com');
+            const pass = input('', 'Leave blank to keep the stored password', 'password');
+            const sender = input(c.smtpSender, 'noreply@example.com');
+            const test = input('', 'you@example.com');
+            smtp.append(field('Host', null, host), field('Port', null, port), field('Username', null, user),
+                field('Password', null, pass), field('Sender', null, sender),
+                field('Send a test to', 'Optional — checks the settings above send mail.', test));
+            const smtpBody = () => ({ smtpHost: host.value.trim(), smtpPort: parseInt(port.value, 10) || 587,
+                smtpUsername: user.value.trim(), smtpPassword: pass.value, smtpSender: sender.value.trim() });
+            const smtpNote = saveRow(smtp, 'Save email', (n) => {
+                if (!host.value.trim() || !user.value.trim() || !sender.value.trim()) {
+                    n.className = 'ex-set-note is-err'; n.textContent = 'Host, username and sender are required.'; return;
+                }
+                saveSetting('/settings/smtp', 'PUT', smtpBody(), n, 'Email settings saved.').then(() => { pass.value = ''; });
+            });
+            const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Send test email';
+            testBtn.onclick = () => {
+                if (!test.value.trim()) { smtpNote.className = 'ex-set-note is-err'; smtpNote.textContent = 'Enter a recipient for the test.'; return; }
+                saveSetting('/settings/smtp/test', 'POST', { ...smtpBody(), recipient: test.value.trim() },
+                    smtpNote, 'Test email sent to ' + test.value.trim() + '.');
+            };
+            smtp.querySelector('.ex-set-actions').insertBefore(testBtn, smtp.querySelector('.ex-set-note'));
+        } });
 
         // --- Chat: your own Anthropic API key, and nothing else about it ---
-        const ask = sectionForm('Chat');
-        const keyState = el('div', 'ex-hint');
-        keyState.textContent = c.hasAnthropicApiKey
-            ? 'A key is stored. Chat is in the menu.'
-            : 'No key stored. Chat appears in the menu once there is one.';
-        // Never prefilled: the key is written once and never read back to a browser.
-        const key = input('', c.hasAnthropicApiKey ? 'Paste a new key to replace the stored one' : 'sk-ant-…', 'password');
-        ask.append(keyState, field('Anthropic API key',
-            'Your own key for the Claude API. Vaier stores it encrypted and never shows it again; it leaves the server only to talk to Claude.',
-            key));
-        const askNote = saveRow(ask, 'Save key', (n) => {
-            if (!key.value.trim()) { n.className = 'ex-set-note is-err'; n.textContent = 'Paste a key first.'; return; }
-            saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: key.value.trim() }, n, 'Key saved. Chat is in the menu.')
-                .then((ok) => { key.value = ''; if (ok) afterKeyChange(); });
-        });
-        if (c.hasAnthropicApiKey) {
-            const forget = el('button', 'ex-btn'); forget.textContent = 'Remove key';
-            forget.onclick = () => saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: '' }, askNote, 'Key removed. Chat has left the menu.')
-                .then((ok) => { if (ok) afterKeyChange(); });
-            ask.querySelector('.ex-set-actions').insertBefore(forget, askNote);
-        }
+        // Chat is a choice, not unfinished setup: without a key it is simply off, and says so in one line.
+        setupItem(body, 'chat', { title: 'Chat', finished: true,
+            says: c.hasAnthropicApiKey ? 'On, with your Anthropic API key' : 'Off until you add an Anthropic API key',
+            verb: c.hasAnthropicApiKey ? 'Change' : 'Turn on',
+            build: (ask) => {
+            const keyState = el('div', 'ex-hint');
+            keyState.textContent = c.hasAnthropicApiKey
+                ? 'A key is stored. Chat is in the menu.'
+                : 'No key stored. Chat appears in the menu once there is one.';
+            // Never prefilled: the key is written once and never read back to a browser.
+            const key = input('', c.hasAnthropicApiKey ? 'Paste a new key to replace the stored one' : 'sk-ant-…', 'password');
+            ask.append(keyState, field('Anthropic API key',
+                'Your own key for the Claude API. Vaier stores it encrypted and never shows it again; it leaves the server only to talk to Claude.',
+                key));
+            const askNote = saveRow(ask, 'Save key', (n) => {
+                if (!key.value.trim()) { n.className = 'ex-set-note is-err'; n.textContent = 'Paste a key first.'; return; }
+                saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: key.value.trim() }, n, 'Key saved. Chat is in the menu.')
+                    .then((ok) => { key.value = ''; if (ok) afterKeyChange(); });
+            });
+            if (c.hasAnthropicApiKey) {
+                const forget = el('button', 'ex-btn'); forget.textContent = 'Remove key';
+                forget.onclick = () => saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: '' }, askNote, 'Key removed. Chat has left the menu.')
+                    .then((ok) => { if (ok) afterKeyChange(); });
+                ask.querySelector('.ex-set-actions').insertBefore(forget, askNote);
+            }
+        } });
 
-        // --- Disk monitoring ---
-        const disk = sectionForm('Disk monitoring');
-        const thresh = input(c.diskMonitorThresholdPercent || 85, '85', 'number');
-        // This is the fleet-wide DEFAULT, not the threshold: since every filesystem got a watch of its own,
-        // it is only what a filesystem is judged at until someone gives it a level on the machine's own disk
-        // (DiskWatch.thresholdPercent null means "use this one"). Calling it "Alert above" read as though it
-        // were the only threshold there is, which made the per-disk levels look like they were being ignored.
-        disk.appendChild(field('Default alert level',
-            'Percent full. Every filesystem is judged at this unless you give it a level of its own on the '
-            + 'machine’s disk. Vaier emails the admins when a watched filesystem crosses its level.', thresh));
-        saveRow(disk, 'Save threshold', (n) => {
-            const t = parseInt(thresh.value, 10);
-            if (!t || t < 1 || t > 99) { n.className = 'ex-set-note is-err'; n.textContent = 'Enter 1–99.'; return; }
-            saveSetting('/settings/disk-monitor', 'PUT', { diskMonitorThresholdPercent: t }, n, 'Threshold saved.');
-        });
+        // --- Disk alerts: the fleet-wide default level ---
+        const level = c.diskMonitorThresholdPercent || 85;
+        setupItem(body, 'disks', { title: 'Disk alerts', finished: true,
+            says: 'At ' + level + '% full, unless a filesystem has a level of its own',
+            build: (disk) => {
+            const thresh = input(c.diskMonitorThresholdPercent || 85, '85', 'number');
+            // This is the fleet-wide DEFAULT, not the threshold: since every filesystem got a watch of its own,
+            // it is only what a filesystem is judged at until someone gives it a level on the machine's own disk
+            // (DiskWatch.thresholdPercent null means "use this one"). Calling it "Alert above" read as though it
+            // were the only threshold there is, which made the per-disk levels look like they were being ignored.
+            disk.appendChild(field('Default alert level',
+                'Percent full. Every filesystem is judged at this unless you give it a level of its own on the '
+                + 'machine’s disk. Vaier emails the admins when a watched filesystem crosses its level.', thresh));
+            saveRow(disk, 'Save threshold', (n) => {
+                const t = parseInt(thresh.value, 10);
+                if (!t || t < 1 || t > 99) { n.className = 'ex-set-note is-err'; n.textContent = 'Enter 1–99.'; return; }
+                saveSetting('/settings/disk-monitor', 'PUT', { diskMonitorThresholdPercent: t }, n, 'Threshold saved.');
+            });
+        } });
 
-        // --- Fleet credentials: one file kept the same on every machine (moved here from the menu, #378) ---
-        body.appendChild(section('Fleet credentials'));
-        const credRow = el('div', 'ex-set-actions');
-        const credLine = el('span', 'ex-set-note');
-        credLine.textContent = 'One file, such as a token or a licence, that Vaier keeps the same on every machine.';
-        credRow.append(selVerb('key', 'Open', 'ex-btn', () => go(['settings', 'credentials'])), credLine);
-        body.appendChild(credRow);
+        // --- Fleet credentials: one file kept the same on every machine; its own view does the work ---
+        setupItem(body, 'credentials', { title: 'Fleet credentials', finished: true,
+            says: 'One file, such as a token or a licence, kept the same on every machine',
+            verb: 'Open', run: () => go(['settings', 'credentials']) });
 
         // --- Updating Vaier itself ---
         //
@@ -9117,8 +9160,7 @@
         // in the fleet is detect-only (see ImageUpdateWatcher): pulling someone else's container on a hunch is
         // not Vaier's business. Doing it to yourself, on request, is a different act.
         const upd = S.settings.update || {};
-        // Silent while Vaier is current: the section exists only for a newer image or a failed update.
-        if (upd.trouble || upd.available) body.appendChild(section('Vaier'));
+        // Silent while Vaier is current; one line for a newer image, one sentence for a failed update.
         // A rollback is the one outcome nothing else reveals: Vaier is running, just on the build from before.
         if (upd.trouble) {
             body.appendChild(note(upd.outcome === 'ROLLED_BACK'
@@ -9128,38 +9170,18 @@
                   + '). Vaier was not touched.', true));
         }
         if (upd.available) {
-            const upRow = el('div', 'ex-runline');
-            upRow.textContent = 'A newer Vaier image is being served.';
-            body.appendChild(upRow);
-            const upActs = el('div', 'ex-lactions is-static');
-            upActs.appendChild(selVerb('arrowup', 'Update Vaier', 'ex-btn is-accent', () => updateVaier()));
-            body.appendChild(upActs);
+            body.appendChild(setLine('Vaier', 'A newer Vaier image is being served',
+                selVerb('arrowup', 'Update Vaier', 'ex-btn is-accent', () => updateVaier())));
         }
 
-        // The pre-flight and the reverse proxy audit are not here: what they find is trouble, and trouble is
-        // said once, in Needs you on the fleet.
-
-        // --- know: read-only facts, last, because nothing here is a decision ---
-        //
-        // The wildcard record's verdict used to sit up between two things the operator can change, which put
-        // a fact they cannot act on in the middle of the work. It belongs to the row that names it: the kv
-        // says which state Vaier found the record in, and the sentence under it says what that means.
-        // Vaier grades the verdict (OK / WARNING / ERROR); this only picks a style from the grade, and nothing
-        // is drawn before the boot check has run — "not checked yet" is not a problem.
+        // --- read-only facts, last, because nothing here is a decision. The wildcard record's verdict is not
+        // among them: trouble with it is a pre-flight finding in Needs you, and a healthy record paints nothing.
         body.appendChild(section('About this server'));
         body.appendChild(kv([
             ['Version', coord(S.settings.version)],
             ['Domain', coord(c.domain)],
             ['Let’s Encrypt email', coord(c.acmeEmail)],
-            ['Wildcard DNS', c.wildcardDnsLabel],
         ]));
-        if (c.wildcardDnsStatus) {
-            const wcCls = { OK: 'is-ok', WARNING: 'is-warn', ERROR: 'is-err' }[c.wildcardDnsSeverity]
-                || 'is-warn';
-            const wcNote = el('div', 'ex-set-note ' + wcCls);
-            wcNote.textContent = c.wildcardDnsMessage || '';
-            body.appendChild(wcNote);
-        }
 
         pane.appendChild(body);
     }
@@ -10713,6 +10735,7 @@
         if (key(path) !== key(S.path)) _updateCheck = null;
         // Arriving on People re-reads it: nothing pushes who signed in, so the visit is the moment to ask.
         if (kindOf(path) === 'people' && kindOf(S.path) !== 'people') loadPeople();
+        if (kindOf(path) === 'settings' && kindOf(S.path) !== 'settings') { _settingsOpen.clear(); loadSettings(); }
         const timeChanged = (at || null) !== (S.at || null);
         S.path = path;
         S.at = at || null;
@@ -11286,6 +11309,7 @@
         location.replace(location.pathname + location.search + _route);
         // A link straight to People (the access-request mail's) is an arrival too.
         if (kindOf(S.path) === 'people') loadPeople();
+        if (kindOf(S.path) === 'settings') loadSettings();
 
         // The services are awaited because a machine cannot be honest without them: a `services` entry exists
         // only on a machine that actually publishes something, and an entry that grew a moment later would

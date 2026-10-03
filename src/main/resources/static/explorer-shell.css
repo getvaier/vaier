@@ -1714,6 +1714,22 @@ select.ex-input { cursor: pointer; }
 .ex-set-note.is-err { color: var(--red); }
 .ex-set-note.is-warn { color: var(--yellow); }
 
+/* Settings: finished setup is one line — its name, what it is set to, one verb — divided by a rule. */
+.ex-settings { max-width: 720px; }
+.ex-set-line {
+    display: flex; align-items: center; gap: 14px;
+    padding: 13px 0; border-bottom: 1px solid var(--border);
+}
+.ex-set-line-words { flex: 1; min-width: 0; }
+.ex-set-line-name { font-weight: 600; color: var(--text); }
+.ex-set-line-says { font-size: 14px; color: var(--text-muted); overflow-wrap: anywhere; margin-top: 2px; }
+.ex-set-line > .ex-btn { flex: none; }
+/* An opened item's heading carries its Done. */
+.ex-set-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 26px 0 14px; }
+.ex-set-head .ex-sect { margin: 0; }
+.ex-settings > .ex-set-head:first-child { margin-top: 0; }
+.ex-settings > .ex-form { margin-bottom: 0; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+
 /* Settings → Sign-in: one block per identity provider, divided by a rule rather than boxed. A client id is one
    long unbroken token, so the state line may break anywhere rather than push a phone's page sideways. */
 .ex-signin-provider { margin: 4px 0 0; padding-top: 13px; border-top: 1px solid var(--border); }

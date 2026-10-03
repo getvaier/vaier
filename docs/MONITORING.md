@@ -32,9 +32,9 @@ Both silences are logged, so a quiet disk is never indistinguishable from one no
 
 **Readings carry size, not just a percentage.** Alerts read *"[Vaier] NAS /volume1 is at 91% full (10.8 TiB, 1.0 TiB free)"* — the mount, the size and the free space, in the same binary units `df -h` prints. "NAS is at 88%" was a number nobody could act on.
 
-This reuses the same SMTP configuration as the up/down machine alerts (Settings → *Email notifications*), so it needs no extra mail setup. With SMTP unconfigured, monitoring is silent.
+This reuses the same SMTP configuration as the up/down machine alerts (Settings → *Mail*), so it needs no extra mail setup. With SMTP unconfigured, monitoring is silent.
 
-**Threshold** — the alert fires when usage rises above the configured percentage (default **85%**), and clears five points below it. Adjust it in Settings; valid range is 1–99. This is the **fleet-wide fallback**: it governs every filesystem that hasn't been given one of its own.
+**Threshold** — the alert fires when usage rises above the configured percentage (default **85%**), and clears five points below it. Adjust it under Settings → *Disk alerts*; valid range is 1–99. This is the **fleet-wide fallback**: it governs every filesystem that hasn't been given one of its own.
 
 **Watching and muting a filesystem** — no single rule fits a whole fleet, so each filesystem on each machine carries its own **watch**, set from its machine's **disk** entry in the **Explorer**: leave it watched at the fleet-wide threshold, give it a threshold of its own (`/` on the NAS is fine at 95%), or **mute** it entirely (a system partition that's near-full by design). The default is **watched, at the fleet-wide threshold** — nothing is ever silently unwatched, so a new volume that appears on a machine nags rather than hides, and muting is always something you chose. Only your exceptions are stored (in `vaier/config/disk-watches.yml`); no file means every filesystem is watched at the fleet-wide threshold. The Explorer and the alert email ask the same question of the same code, so they can never disagree about whether a disk is in trouble.
 

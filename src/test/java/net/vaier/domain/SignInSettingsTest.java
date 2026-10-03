@@ -47,7 +47,8 @@ class SignInSettingsTest {
 
         assertThatThrownBy(() -> SignInSettings.none().withProvider(GITHUB, CREDS, Set.of(GITHUB)))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining(".env");
+            .hasMessageContaining(".env")
+            .as("the providers live under People now, not Settings").hasMessageContaining("People");
     }
 
     @Test
