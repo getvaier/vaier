@@ -803,6 +803,8 @@ class DockerComposeStructureTest {
         assertThat(page).contains("Continue with Google").contains("Continue with GitHub");
         assertThat(page).as("two choices keep their primary/secondary hierarchy")
             .contains("class=\"btn btn-secondary\"");
+        assertThat(page).as("each provider wears its own logo, in its own colours")
+            .contains("class=\"mark mark-google\"").contains("#EA4335").contains("class=\"mark mark-github\"");
     }
 
     @Test
