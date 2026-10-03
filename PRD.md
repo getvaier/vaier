@@ -4592,7 +4592,7 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 
 **Backlog.** A **Vaier update** row in Needs you (a newer Vaier image, or a failed or rolled-back self-update), so Settings can drop its last status line. `AppSettingsResult`'s four `wildcardDns*` fields have no reader in the browser now. Remove them when that row is built, or sooner.
 
-### 6.76 Thumb-sized: the shell on a phone ✅ part 5a (part 5 of [#379](https://github.com/getvaier/vaier/issues/379), slice 5 of [#380](https://github.com/getvaier/vaier/issues/380))
+### 6.76 Thumb-sized: the shell on a phone ✅ parts 5a–5b (closes [#379](https://github.com/getvaier/vaier/issues/379), slice 5 of [#380](https://github.com/getvaier/vaier/issues/380))
 
 **Why.** At phone width the audit measured controls of 13–34 px, a full name crowding the address bar, crumbs that lost their right end, the Map and Topology a whole fleet's scroll below the machines, and the Topology cropped to its left edge.
 
@@ -4604,4 +4604,11 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Heads carry only a title and verbs.** Every pane head lost its info line — the counts ("8 apps", "7 websites", "N items"), the taglines (Chat, Settings, Storage, Backups, Map) and the machine name beside crumbs that already say it. A Files selection ("3 selected") is the one line left, since it is what is being acted on.
 - **Topology** fits a phone's width: the whole coast, no sideways scroll, so the lighthouse sits where the layout puts it (the centre on a two-coast fleet). Full screen is unchanged.
 
-**Still to come in #379 (5b).** The machine page reordered as head (verdict, Open shell, Files), then doors with live facts, then one Manage fold; Files' row icons stop overlapping the Modified date, and no Delete where the user cannot write.
+**What (5b).** Frontend only; no endpoint added and no authorization changed. #379 is done, and with it the last slice of #380.
+- **Machine page**: head (name, **Open shell**, **Files**), then this machine's Needs you rows when there are any, then the doors (Apps, Websites, Storage, Backups) with their live facts as compact tiles, rows on a phone, then **What to do next** when a nudge applies, then one **Manage** fold. Manage holds Edit details and the setup command, switched off on purpose, Shell sign-in, OS updates, Connection details, and Keys and removal under a warning-coloured heading. Shell and Files are head verbs only, never doors as well. A phone or laptop keeps its **This device** claim in the open.
+- **Folds survive repaints**: an opened fold stays open while live pushes repaint its pane.
+- **Files**: on a wide screen a row's Copy, Download and Delete have their own lane, clear of the Modified date. Standing in the past, no write verb is offered at all, not even for live files ticked elsewhere.
+- **Cold links**: a link into a machine opened before the fleet is read says "Reading the fleet…", not "no longer in the fleet".
+- **One head verb on a phone** keeps the title's line, and the title ellipsises; two or more take their own row.
+
+**Backlog.** *No Delete where the operator cannot write (present).* The directory listing carries no permission, owner or writability fact (`FileEntryResponse`: name, path, directory, size, modifiedAt, backedUp, containsBackedUp, viewable), so the browser cannot tell a file Vaier's sign-in can remove from one it cannot. Deciding it needs backend work: read the SFTP attributes (mode, uid/gid) the listing already fetches, judge writability against the **effective user** in the domain, and carry the verdict per entry. Until then a delete that the machine refuses is reported by the server's own sentence.

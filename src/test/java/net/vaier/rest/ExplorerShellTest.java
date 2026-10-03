@@ -101,8 +101,9 @@ class ExplorerShellTest {
         assertThat(js).contains("function openShellWindow(");
         assertThat(js).contains("terminal.html?machine=");
         assertThat(js).doesNotContain("TerminalDock.open(");
-        // A door among the doors, in the same grid and greyed by the same two rules as files and disk.
-        assertThat(js).contains("card(svg('shell', 'ex-ico'), 'Shell',");
+        // #379 5b: the way in an operator most often comes for is the machine head's first verb, and only
+        // there — a door saying it again on the same screen would say one thing twice.
+        assertThat(js).contains("selVerb('shell', 'Open shell',").doesNotContain("card(svg('shell'");
         // The shell is not a navigable kind any more: no 'shell' child, no renderShell pane.
         assertThat(js).doesNotContain("kind: 'shell'");
         assertThat(js).doesNotContain("function renderShell(");
@@ -1997,12 +1998,13 @@ class ExplorerShellTest {
     void openingAMachine_leadsWithWhatItIs_andFoldsTheAddressesAway() throws IOException {
         // The pane used to open on a table of addresses. An operator opening a machine asks what it does and
         // what is inside it, not what its tunnel address is — so the addresses fold, they do not disappear.
+        // #379 5b: the fold is the machine's one Manage fold now, not a fold of their own.
         String js = read("explorer-shell.js");
         int from = js.indexOf("function renderMachine(pane) {");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }\n", from));
 
-        int fold = body.indexOf("disclosure('Connection details')");
+        int fold = body.indexOf("disclosure('Manage')");
         assertThat(fold).as("the addresses fold away behind the shell's own disclosure, not a new component")
             .isPositive();
         for (String mechanism : List.of("'Address inside Vaier'", "'Connects from'", "'Sent and received'",
@@ -4849,5 +4851,99 @@ class ExplorerShellTest {
             assertThat(js.substring(r, js.indexOf("\n    }\n", r))).as(render).contains("fleetViews(");
         }
         assertThat(js).doesNotContain("The fleet, seen whole");
+    }
+
+    // --- Thumb-sized, part two: the machine page, Files and the cold link (#379 slice 5b) ---------------
+
+    @Test
+    void aMachinePage_isItsVerbs_thenItsDoors_thenOneManageFold() throws IOException {
+        // Audit F16: a phone scrolled past six tall cards, About, an SSH paragraph and three folds to find
+        // anything. The head carries the two ways in (shell, files), the doors carry live facts in compact
+        // rows, trouble stands above them, and everything else is one fold.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderMachine(pane) {");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+
+        int headDone = body.indexOf("pane.appendChild(head);");
+        assertThat(body.indexOf("selVerb('shell', 'Open shell'")).as("the shell is the head's verb")
+            .isPositive().isLessThan(headDone);
+        assertThat(body.indexOf("selVerb('dir', 'Files'")).as("and so are its files").isPositive().isLessThan(headDone);
+        assertThat(body).as("neither is a door as well").doesNotContain("'Browse its files'")
+            .contains("kid.kind !== 'files'").doesNotContain("About this machine");
+
+        int needs = body.indexOf("needsBlock(mine, m)");
+        int doors = body.indexOf("'ex-grid is-doors'");
+        int manage = body.indexOf("disclosure('Manage')");
+        assertThat(needs).as("trouble above the doors").isPositive().isLessThan(doors);
+        assertThat(doors).as("the doors above Manage").isLessThan(manage);
+        for (String managed : List.of("'Edit details'", "'Setup command'", "switchedOffLine(m)", "sshAccessRow()",
+                "'Sign-in for the shell'", "osUpgradeVerb(m)", "'Last seen'", "'Send its setup again'",
+                "'Remove machine'")) {
+            assertThat(body.lastIndexOf(managed)).as("%s is managed", managed).isGreaterThan(manage);
+        }
+        assertThat(body.split("disclosure\\(", -1)).as("one fold, not a fold per topic").hasSize(2);
+
+        String css = read("explorer-shell.css");
+        assertThat(css).contains(".ex-grid.is-doors .ex-card {")
+            .contains(".ex-grid:is(.is-machines, .is-doors) .ex-card {");
+    }
+
+    @Test
+    void anOpenedFold_staysOpenThroughARepaint() throws IOException {
+        // A push repaints the pane every few seconds, and a rebuilt <details> came back shut — with the whole
+        // of Manage behind one fold, it closed under the operator's thumb mid-read.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function keepOpen(d, summaryText) {");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(body).contains("paneViewKey()").contains("_openFolds.has(").contains("'toggle'");
+        for (String fold : List.of("function disclosure(summaryText) {", "function dangerFold(summaryText) {")) {
+            int f = js.indexOf(fold);
+            assertThat(js.substring(f, js.indexOf("\n    }\n", f))).as(fold).contains("keepOpen(d, summaryText)");
+        }
+    }
+
+    @Test
+    void aMachineScopedLink_waitsQuietlyForTheFleet_beforeSayingTheMachineIsGone() throws IOException {
+        // Opened cold, Needs you could land before /machines and paint "no longer in the fleet" for seconds.
+        String js = read("explorer-shell.js");
+        int load = js.indexOf("async function loadMachines() {");
+        assertThat(js.substring(load, js.indexOf("\n    }\n", load))).contains("S.machinesRead = true;");
+        int draw = js.indexOf("function drawPane(pane, kind) {");
+        String drawBody = js.substring(draw, js.indexOf("\n    }\n", draw));
+        assertThat(drawBody).contains("!S.machinesRead && S.path[0] === 'fleet'");
+        assertThat(drawBody.indexOf("!S.machinesRead")).as("asked before any machine pane draws")
+            .isLessThan(drawBody.indexOf("renderMachine(pane)"));
+        // ...and says so from the first frame, before the boot reads are back.
+        int init = js.indexOf("async function init() {");
+        String initBody = js.substring(init, js.indexOf("\n    }\n", init));
+        assertThat(initBody.indexOf("renderPane();")).isPositive().isLessThan(initBody.indexOf("await Promise.all("));
+    }
+
+    @Test
+    void aFilesRow_keepsItsVerbsOffTheModifiedDate_andThePastOffersNoWriteVerb() throws IOException {
+        // The row's Copy, Download and Delete rode over the Modified column and hid the year.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("rows.className = 'ex-listing is-files';");
+        String css = read("explorer-shell.css");
+        int wide = css.indexOf("@media (min-width: 761px) {\n    .ex-listing.is-files");
+        assertThat(wide).isPositive();
+        assertThat(css.substring(wide, css.indexOf("\n}", wide))).contains("padding-right:");
+
+        // An archive is read-only: a live selection ticked elsewhere waits for the present to be acted on.
+        int verbs = js.indexOf("function selectionVerbs(");
+        assertThat(js.substring(verbs, js.indexOf("\n    }", verbs))).contains("const live = S.at ? [] :");
+    }
+
+    @Test
+    void onAPhone_aHeadWithOneVerb_keepsItBesideTheTitle_andALongTitleGivesWay() throws IOException {
+        String css = read("explorer-shell.css");
+        int narrow = css.indexOf("/* One verb keeps the title's line");
+        assertThat(narrow).isPositive();
+        assertThat(css.substring(narrow, css.indexOf("\n}", narrow)))
+            .contains(".ex-pane-head:has(> .ex-pane-actions > :only-child:is(button, a)) .ex-pane-title,")
+            .contains(".ex-pane-head:has(> .ex-pane-actions > .ex-verbgroup:only-child > :only-child) .ex-pane-title { flex: 1 1 0; }")
+            .contains(".ex-pane-actions:has(> :only-child:is(button, a)),")
+            .contains(".ex-pane-actions:has(> .ex-verbgroup:only-child > :only-child) { width: auto; margin-left: auto; }");
     }
 }

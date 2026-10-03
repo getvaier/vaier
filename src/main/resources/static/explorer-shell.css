@@ -336,6 +336,13 @@ a.ex-vmenu-item { text-decoration: none; box-sizing: border-box; }
     transition: opacity .12s ease;
 }
 .ex-lrow:hover .ex-lactions, .ex-lrow:focus-within .ex-lactions { opacity: 1; }
+/* In Files the verbs get a lane of their own on a wide screen, so they never sit over the Modified date. */
+@media (min-width: 761px) {
+    .ex-listing.is-files .ex-lhead, .ex-listing.is-files .ex-lrow { padding-right: 132px; }
+}
+@media (min-width: 761px) and (pointer: coarse) {
+    .ex-listing.is-files .ex-lhead, .ex-listing.is-files .ex-lrow { padding-right: 176px; }
+}
 /* A touch device never hovers, so "dimmed until hovered" would leave the row verbs permanently half-lit and
    permanently cramped. Where there is no hover they are simply on, at thumb size. */
 @media (hover: none) {
@@ -677,6 +684,18 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 /* Trouble marks, and only those: a healthy card has none and reserves no room for them. Each is the whole
    mark recoloured on a tinted ground, so the one thing on a card wearing a shape is the thing to act on. */
 .ex-card-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+/* A machine's doors are compact: badge beside the name, its one live fact under it. A phone lists them as rows. */
+.ex-grid.is-doors { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.ex-grid.is-doors .ex-card {
+    display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 12px; row-gap: 2px;
+    align-items: center; padding: 12px 14px;
+}
+.ex-grid.is-doors .ex-card-top { display: contents; }
+.ex-grid.is-doors .ex-badge { grid-column: 1; grid-row: 1 / span 2; width: 36px; height: 36px; }
+.ex-grid.is-doors .ex-badge .ex-ico { width: 18px; height: 18px; }
+.ex-grid.is-doors .ex-card-name { grid-column: 2; grid-row: 1; font-size: 15.5px; }
+.ex-grid.is-doors .ex-card-note { grid-column: 2; grid-row: 2; font-size: 13.5px; -webkit-line-clamp: 1; line-clamp: 1; }
+.ex-grid.is-doors .ex-card-marks { grid-column: 2; grid-row: 3; margin-top: 4px; }
 .ex-mark {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 11px 3px 9px;
@@ -1820,6 +1839,12 @@ select.ex-input { cursor: pointer; }
 .ex-adv > .ex-adv-sum:hover { color: var(--accent); border-color: var(--accent); }
 .ex-adv > .ex-adv-sum:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-1); }
 .ex-adv > *:not(.ex-adv-sum) { margin-top: 13px; }
+/* The machine's one Manage fold: everything but its verbs and doors. A heading inside it still finds its part. */
+.ex-adv.is-manage { margin-top: 28px; }
+.ex-adv.is-manage > .ex-adv-sum { font-size: 14px; padding: 7px 14px; }
+.ex-adv.is-manage .ex-sect { margin-top: 28px; margin-bottom: 12px; }
+.ex-adv.is-manage .ex-off { margin-bottom: 0; }
+.ex-sect.is-danger { color: var(--red); }
 
 /* Two inputs on one row — the version endpoint and the property it reads. Stacks on a narrow pane. */
 .ex-field-pair { display: flex; gap: 8px; }
@@ -2127,12 +2152,19 @@ select.ex-input { cursor: pointer; }
     /* Beside the switch, the head's one action shares the title's line rather than taking a row of its own. */
     .ex-pane-head:has(.ex-seg) .ex-pane-actions { width: auto; margin-left: auto; }
 
+    /* One verb keeps the title's line, as the Fleet's Add machine does; two or more take a row of their own.
+       The title takes what is left and ellipsises, so a long name never pushes the verb off the screen. */
+    .ex-pane-head:has(> .ex-pane-actions > :only-child:is(button, a)) .ex-pane-title,
+    .ex-pane-head:has(> .ex-pane-actions > .ex-verbgroup:only-child > :only-child) .ex-pane-title { flex: 1 1 0; }
+    .ex-pane-actions:has(> :only-child:is(button, a)),
+    .ex-pane-actions:has(> .ex-verbgroup:only-child > :only-child) { width: auto; margin-left: auto; }
+
     /* Machines as compact rows, not cards: badge, name, one line of what it is for, trouble when there is some. */
-    .ex-grid.is-machines {
+    .ex-grid:is(.is-machines, .is-doors) {
         display: block; background: var(--bg-card); border-radius: var(--radius-2); overflow: hidden;
         box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, .045);
     }
-    .ex-grid.is-machines .ex-card {
+    .ex-grid:is(.is-machines, .is-doors) .ex-card {
         position: relative;
         display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 1px;
         align-items: center;
@@ -2140,18 +2172,18 @@ select.ex-input { cursor: pointer; }
         background: none; box-shadow: none; border: 0; border-radius: var(--radius-0);
         border-bottom: 1px solid var(--border);
     }
-    .ex-grid.is-machines .ex-card:last-child { border-bottom: 0; }
-    .ex-grid.is-machines .ex-card:active { background: var(--bg-hover); }
+    .ex-grid:is(.is-machines, .is-doors) .ex-card:last-child { border-bottom: 0; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-card:active { background: var(--bg-hover); }
     .ex-grid.is-machines .ex-card.is-down { background: rgba(244, 135, 113, .07); }
-    .ex-grid.is-machines .ex-card-top { display: contents; }
-    .ex-grid.is-machines .ex-badge { grid-column: 1; grid-row: 1 / span 2; align-self: start; width: 34px; height: 34px; }
-    .ex-grid.is-machines .ex-badge .ex-ico { width: 18px; height: 18px; }
-    .ex-grid.is-machines .ex-card-name { grid-column: 2; grid-row: 1; font-size: 15.5px; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-card-top { display: contents; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-badge { grid-column: 1; grid-row: 1 / span 2; align-self: start; width: 34px; height: 34px; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-badge .ex-ico { width: 18px; height: 18px; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-card-name { grid-column: 2; grid-row: 1; font-size: 15.5px; }
     .ex-grid.is-machines .ex-card-caps { grid-column: 3; grid-row: 1; }
     .ex-grid.is-machines .ex-dot { grid-column: 3; grid-row: 1; justify-self: end; }
-    .ex-grid.is-machines .ex-card-note { grid-column: 2 / -1; grid-row: 2; font-size: 13.5px; -webkit-line-clamp: 1; line-clamp: 1; }
-    .ex-grid.is-machines .ex-card-marks { grid-column: 2 / -1; grid-row: 3; margin-top: 6px; }
-    .ex-grid.is-machines .ex-card::after {
+    .ex-grid:is(.is-machines, .is-doors) .ex-card-note { grid-column: 2 / -1; grid-row: 2; font-size: 13.5px; -webkit-line-clamp: 1; line-clamp: 1; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-card-marks { grid-column: 2 / -1; grid-row: 3; margin-top: 6px; }
+    .ex-grid:is(.is-machines, .is-doors) .ex-card::after {
         content: ''; position: absolute; right: 14px; top: 50%;
         width: 7px; height: 7px;
         border-right: 1.5px solid var(--text-dim); border-top: 1.5px solid var(--text-dim);

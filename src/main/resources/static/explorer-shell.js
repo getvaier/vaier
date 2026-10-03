@@ -165,6 +165,7 @@
         needs: [],               // GET /fleet/needs — Needs you, in the domain's order; empty when nothing needs anyone
         path: ['fleet'],                 // the selected entry, as its path
         machines: [],                    // GET /machines
+        machinesRead: false,             // whether that read has answered once — until then no machine is "gone"
         peers: new Map(),                // machine id -> its live WireGuard peer (tunnel address, liveness)
         peersById: new Map(),            // WireGuard peer id -> the same peer (the SSE keys stats that way)
         lan: new Map(),                  // machine identity -> its LAN server (the domain's MachineStatus)
@@ -1380,6 +1381,12 @@
         if (kind === 'fleet') return renderFleet(pane);
         if (kind === 'map') return renderMap(pane);
         if (kind === 'topology') return renderTopology(pane);
+        // A link into a machine, opened cold, waits for the fleet before it may say the machine is gone.
+        if (!S.machinesRead && S.path[0] === 'fleet') {
+            const wait = el('div', 'ex-pane-body');
+            wait.appendChild(note('Reading the fleet…', false));
+            return pane.appendChild(wait);
+        }
         if (kind === 'settings') return renderSettings(pane);
         if (kind === 'people') return renderPeople(pane);
         if (kind === 'chat') return renderChat(pane);
@@ -2112,32 +2119,39 @@
         if (!m) return pane.appendChild(note('That machine is no longer in the fleet.', true));
 
         const peer = S.peers.get(m.id);
-        // Vaier's own machine answers differently in three places below, so the question is asked once here.
+        // Vaier's own machine answers differently in several places below, so the question is asked once here.
         const isVaierServer = !!m.vaierServer;
         const head = paneHead(m.name, false);
         head.querySelector('.ex-pane-title').appendChild(dot(m.id));
-        // The machine's open verbs live where every other pane keeps the verbs that apply right now: the
-        // head's one action group, hugging the right. Editing details is common, and a LAN server's setup
-        // command is the whole of onboarding it — neither had earned a section heading of its own halfway
-        // down the body. The Vaier server is this machine: it is never edited or removed here.
         // Vaier's last-known belief about whether this machine has an SSH server at all — pushed live by the
         // same 5-minute sweep that already reaches every SSH-accessible, credentialed machine
         // (RemoteDiskWatcher), never a fresh probe from here. Transient and self-healing: the next sweep that
         // reaches the machine lifts every greying below without a reload.
         const noSshServer = m.sshServerPresence === 'ABSENT';
         const reachable = reachesInside(m);
+        const NO_WAY_IN = 'Vaier found no way to sign in here on the last check';
+        const inside = childrenOf(S.path);
 
-        const acts = el('div', 'ex-pane-actions');
-        if (!isVaierServer) {
-            acts.appendChild(selVerb('gear', 'Edit details', 'ex-btn', () => editMachine(m)));
-            // Whether a setup script can be run on the machine is the server's reading of it — an
-            // appliance has no shell for one, however it is anchored — so the verb is not offered
-            // where a click could only end in a toast.
-            if (m.acceptsSetupScript) {
-                acts.appendChild(selVerb('shell', 'Setup command', 'ex-btn', () => lanSetupScript(m.id)));
-            }
+        // --- go: the two ways in an operator most often comes for are the head's verbs, and only there ----
+        //
+        // Greyed rather than removed when the last check found no way in, so the verb still names what is there.
+        const verbs = [];
+        if (reachable && m.sshAccess) {
+            let shellStop = null;
+            if (!m.hasCredential) shellStop = 'Give Vaier a sign-in for the shell first (under Manage)';
+            else if (noSshServer) shellStop = NO_WAY_IN;
+            const shell = selVerb('shell', 'Open shell', 'ex-btn is-accent', () => openShellWindow(m.id));
+            // It outlives its window, so say how it is ended.
+            if (shellStop) { shell.disabled = true; shell.title = shellStop; }
+            else shell.title = 'Keeps running on ' + m.name + ' when you close the window; Exit shell, inside it, ends it.';
+            verbs.push(shell);
         }
-        if (acts.childNodes.length) head.appendChild(acts);
+        if (inside.some((kid) => kid.kind === 'files')) {
+            const files = selVerb('dir', 'Files', 'ex-btn', () => go(['fleet', m.id, 'files']));
+            if (noSshServer) { files.disabled = true; files.title = NO_WAY_IN; }
+            verbs.push(files);
+        }
+        headActions(head, verbs);
         pane.appendChild(head);
 
         const body = document.createElement('div');
@@ -2147,23 +2161,17 @@
         // to a page that never mentions why. A fact about now, so it stands down in the past.
         const mine = S.at ? [] : S.needs.filter((n) => n.trouble && n.value === m.id);
         if (mine.length) body.appendChild(needsBlock(mine, m));
-        // Said once, calmly, with the way back. Vaier also clears it itself the first time the machine answers.
-        if (m.switchedOffSince && !S.at) body.appendChild(switchedOffLine(m));
 
-        // Whether Vaier may open a session at all. It appears in one of two places depending on the answer:
-        // while it is off it is the next step and stands in the open, because granting it is what gives this
-        // page anything to show; once on it is a fact about the machine and sits quietly among the others.
-        // A control shouts while acting on it changes the page, and stops shouting once it has.
+        // Whether Vaier may open a session at all. While it is off it is the next step and stands in the open;
+        // once on it is a fact about the machine and sits in Manage.
         function sshAccessRow() {
             const access = el('label', 'ex-check-row');
             const box = el('input'); box.type = 'checkbox'; box.checked = !!m.sshAccess;
-            // Never disable an already-on toggle: an operator who turned access on must still be able to turn
-            // it back off, see the stored credential, or retry — never stranded behind a control with no way
-            // back. The gate only ever stops turning access ON for a machine Vaier already knows has nothing
-            // listening.
+            // Never disable an already-on toggle: turning access back off must always stay possible. The gate
+            // only stops turning access ON for a machine Vaier already knows has nothing listening.
             if (!m.sshAccess && noSshServer) {
                 box.disabled = true;
-                box.title = 'Vaier found no way to sign in here on the last check';
+                box.title = NO_WAY_IN;
             }
             box.onchange = () => toggleSshAccess(m.id, box.checked, box);
             const atxt = el('span'); atxt.textContent = 'Let Vaier open a shell on this machine';
@@ -2171,45 +2179,19 @@
             return access;
         }
 
-        // --- go: the ways into this machine, first and under no heading -------------------------------
-        //
-        // A machine is opened in order to get somewhere — its files, a shell, what it runs, how full it is,
-        // what is kept of it. Those doors used to sit fourth, below a details table and a fold, so the page
-        // answered "what is this machine" before "where can I go", which is the wrong way round for the one
-        // page an operator lands on most. What the machine IS is reference, and reference reads second.
-        const inside = childrenOf(S.path);
-        const grid = el('div', 'ex-grid');
+        // --- the doors: what the machine runs, holds and keeps, each with one live fact ------------------
+        const grid = el('div', 'ex-grid is-doors');
         // The backup entry reads both ways, exactly as childrenOf grows it: this machine is the one backup
         // server, or a job backs it up. Colina once introduced itself as where the fleet backs up.
         const isBackupServer = !!S.backupServer && S.backupServer.machineId === m.id;
-        // Each door carries one live fact, read off what the page already holds.
         const NOTE = {
-            files:      () => 'Browse its files',
             containers: () => appsFact(m.id),
             services:   () => websitesFact(m.id),
             disk:       () => storageFact(m.id),
             backup:     () => (isBackupServer ? 'Keeps the fleet’s backups' : backupsFact(m)),
         };
-        // Files and storage both need a way in — greyed rather than removed when the last check found none,
-        // so the door still names what is there; the next sweep lifts the greying on its own.
-        const SSH_ENTRY_KINDS = new Set(['files', 'disk']);
-        const NO_WAY_IN = 'Vaier found no way to sign in here on the last check';
-        // The shell first: it is the door an operator most often comes for. It opens a window, not a pane.
-        if (reachable && m.sshAccess) {
-            let shellStop = null;
-            if (!m.hasCredential) shellStop = 'Give Vaier a sign-in for the shell first';
-            else if (noSshServer) shellStop = NO_WAY_IN;
-            const shellCard = card(svg('shell', 'ex-ico'), 'Shell', shellStop || 'Opens where you left off',
-                () => openShellWindow(m.id), null, shellStop);
-            // It outlives its window, so say how it is ended.
-            if (!shellStop) {
-                shellCard.title = 'Keeps running on ' + m.name + ' when you close the window; '
-                    + 'Exit shell, inside it, is what ends it.';
-            }
-            grid.appendChild(shellCard);
-        }
-        inside.forEach((kid) => {
-            const disabledTitle = (noSshServer && SSH_ENTRY_KINDS.has(kid.kind)) ? NO_WAY_IN : null;
+        inside.filter((kid) => kid.kind !== 'files').forEach((kid) => {
+            const disabledTitle = (noSshServer && kid.kind === 'disk') ? NO_WAY_IN : null;
             const door = card(entryIco(kid.kind, kid.name), DOOR[kid.name] || kid.name,
                 NOTE[kid.name](), () => go(['fleet', m.id, kid.name]), null, disabledTitle);
             // The backup door wears the fleet card's trouble mark, so a red card never leads to a calm door.
@@ -2222,33 +2204,16 @@
             grid.appendChild(door);
         });
         if (grid.childNodes.length) body.appendChild(grid);
-        else if (reachable) {
+        else if (reachable && !verbs.length) {
             body.appendChild(note('Nothing to open here yet. Let Vaier open a shell on it to see its files '
                 + 'and storage too.', false));
         }
 
-        // Pending OS updates, said only when some wait, in the sweep's own words, with the one way to install
-        // them. Nothing waiting says nothing; not read yet keeps the quiet fold further down.
-        const pending = m.osUpdates;
-        const saidAbove = mine.some((n) => n.kind === 'OS_SECURITY_UPDATES');   // once per page
-        if (reachable && m.sshAccess && m.hasCredential && !noSshServer && !saidAbove
-                && ((pending && pending.sentence) || _upgradingOs.has(m.id))) {
-            const line = el('div', 'ex-off is-os');
-            const words = el('span', 'ex-off-words');
-            words.textContent = pending && pending.sentence ? pending.sentence : 'Installing OS updates';
-            line.append(words, osUpgradeVerb(m));
-            body.appendChild(line);
-        }
-
         // --- do: what is worth doing here right now ---------------------------------------------------
         //
-        // What Vaier suggests doing next with this machine — progressive-adoption nudges (§6.15.1): publish its
-        // services, back it up, or (in the bootstrapping moment before any exists) make it the fleet's backup
-        // server. Each is an evidence-backed single action. The *domain* decides which apply
-        // (GET /machines/{name}/nudges) — so the shell no longer hand-rolls "offer a backup server when none
-        // exists yet" here; it renders whatever the domain returns and only routes the action. Read once per
-        // machine, repainted, never polled. Granting SSH joins them while it is ungranted: it is the step that
-        // unlocks every other one.
+        // Progressive-adoption nudges (§6.15.1), decided by the domain (GET /machines/{machineId}/nudges) and
+        // read once per machine, never polled. Granting SSH joins them while it is ungranted: it is the step
+        // that unlocks every other one. Nothing to suggest paints nothing.
         const nudges = S.nudges.get(m.id);
         if (!nudges) loadNudges(m.id);
         const hasNudges = nudges && nudges.state === 'ready' && nudges.list.length;
@@ -2264,15 +2229,12 @@
         }
 
         // A phone or a laptop has no SSH story — Vaier cannot reach inside it. What it CAN do is ask the
-        // device itself where it is, and the device's own browser is the only witness that can say. The claim
-        // is the one-time act of that browser vouching "I am the one running on this machine"; sharing and
-        // forgetting only make sense once it has. This is that machine's whole Do band.
+        // device itself where it is, and the device's own browser is the only witness that can say. This is
+        // what such a machine's page is for, so it stays in the open.
         if (!reachable) {
             body.appendChild(section('This device'));
-            // "I claim this machine" is per-browser, not per-machine — GET /vpn/peers/my-device says which
-            // ONE machine THIS browser's cookie is bound to, read once at boot and held in S. Comparing a
-            // per-peer flag would have shown Share on every browser looking at Geir's phone, not just his
-            // phone's own.
+            // Per-browser, not per-machine: GET /vpn/peers/my-device says which ONE machine THIS browser's
+            // cookie is bound to, read once at boot and held in S.
             if (S.myDeviceMachineId === m.id) {
                 body.appendChild(devicePlacementControls(m));
             } else {
@@ -2284,9 +2246,67 @@
             }
         }
 
-        // --- know: what this machine is ---------------------------------------------------------------
-        body.appendChild(section('About this machine'));
+        // --- manage: everything else, in one fold ------------------------------------------------------
+        const manage = disclosure('Manage');
+        manage.classList.add('is-manage');
+
+        // The Vaier server is this machine: it is never edited or removed here. A LAN server's setup command
+        // is offered only where the server says a script can run at all.
+        if (!isVaierServer) {
+            const own = el('div', 'ex-lactions is-static');
+            own.appendChild(selVerb('gear', 'Edit details', 'ex-btn', () => editMachine(m)));
+            if (m.acceptsSetupScript) {
+                own.appendChild(selVerb('shell', 'Setup command', 'ex-btn', () => lanSetupScript(m.id)));
+            }
+            manage.appendChild(own);
+        }
+        // Said once, calmly, with the way back. Vaier also clears it itself the first time the machine answers.
+        if (m.switchedOffSince && !S.at) manage.appendChild(switchedOffLine(m));
+
+        // Vaier's reach into this machine: that it may go in, and who it is when it does.
+        if (reachable && m.sshAccess) {
+            manage.appendChild(section('Shell sign-in'));
+            manage.appendChild(sshAccessRow());
+            const cred = el('div', 'ex-lactions is-static');
+            cred.appendChild(selVerb('gear', 'Sign-in for the shell', 'ex-btn', () => credentialDialog(m.id)));
+            manage.appendChild(cred);
+            // The credential's username IS the effective user — the difference between a delete that removes a
+            // file you did not want and one that removes a file the machine needs to boot.
+            if (m.effectiveUsername) {
+                const said = 'Vaier signs in as ' + m.effectiveUsername;
+                // Privilege is the one fact here that earns a bordered box.
+                if (m.effectiveUserPrivileged) {
+                    const warn = note(said + ', who can do anything on ' + m.name + ' — reading, changing and '
+                        + 'deleting alike.', false);
+                    warn.classList.add('is-warn');
+                    manage.appendChild(warn);
+                } else {
+                    const who = hint(said + ' and can only do what ' + m.effectiveUsername + ' can.');
+                    who.classList.add('is-who');
+                    manage.appendChild(who);
+                }
+            }
+        }
+
+        // Rides on SSH like the shell does, so it is offered only where a session could open at all. Whether
+        // Vaier can get root there is the server's to judge on the click, and its refusal says why. Urgent
+        // updates are Needs you's to say, so they are not said a second time here.
+        if (reachable && m.sshAccess && m.hasCredential && !noSshServer) {
+            const pending = m.osUpdates;
+            const saidAbove = mine.some((n) => n.kind === 'OS_SECURITY_UPDATES');
+            manage.appendChild(section('OS updates'));
+            const line = el('div', 'ex-off is-os');
+            const words = el('span', 'ex-off-words');
+            if (pending && pending.sentence && !saidAbove) words.textContent = pending.sentence;
+            else if (_upgradingOs.has(m.id)) words.textContent = 'Installing OS updates';
+            else words.textContent = 'Installs the pending package updates as root. Nothing is removed, and '
+                + 'Vaier never reboots; it says when a reboot is due.';
+            line.append(words, osUpgradeVerb(m));
+            manage.appendChild(line);
+        }
+
         // A LAN server has no tunnel, so it never gets mesh rows — blanks would claim one that is merely down.
+        manage.appendChild(section('Connection details'));
         const isLan = m.type === 'LAN_SERVER';
         const rows = [];
         if (isVaierServer) {
@@ -2298,90 +2318,35 @@
             rows.push(['Last seen', peer ? agoFromEpochSeconds(peer.latestHandshake) : '']);
         }
         // Only an access that came over the tunnel identifies a device rather than a person, so this is the
-        // last published service Vaier SAW this machine reach — which is why the row says so, and why no
-        // record draws no row: never having seen one is not the same as the machine having reached none.
+        // last published service Vaier SAW this machine reach; never having seen one draws no row.
         const reached = peer && peer.lastServiceReached;
         if (reached) {
             const age = timeAgo(reached.at);
             rows.push(['Last website it opened', (reached.displayName || reached.host) + (age ? ' · ' + age : '')]);
         }
-        body.appendChild(kv(rows));
-
-        // Vaier's reach into this machine, stated as the fact it now is: that it may go in, and who it is
-        // when it does. The shell that uses this is a door and sits at the top of the page with the others.
-        if (reachable && m.sshAccess) {
-            body.appendChild(sshAccessRow());
-            const cred = el('div', 'ex-lactions is-static');
-            cred.appendChild(selVerb('gear', 'Sign-in for the shell', 'ex-btn', () => credentialDialog(m.id)));
-            body.appendChild(cred);
-            // Who Vaier actually is on this machine. The credential's username IS the effective user, so
-            // saying it costs nothing — and it is the whole difference between a delete that removes a file
-            // you did not want and one that removes a file the machine needs to boot. Nobody chose root on
-            // the DietPi boxes; it arrived with the image. Naming it is the first step to deciding whether
-            // it stays.
-            if (m.effectiveUsername) {
-                const said = 'Vaier signs in as ' + m.effectiveUsername;
-                // Privilege is the one fact here that earns a bordered box. A warning only reads as a warning
-                // while the paragraphs beside it are not wearing the same edge.
-                if (m.effectiveUserPrivileged) {
-                    const warn = note(said + ', who can do anything on ' + m.name + ' — reading, changing and '
-                        + 'deleting alike.', false);
-                    warn.classList.add('is-warn');
-                    body.appendChild(warn);
-                } else {
-                    // is-who: not an aside. This is the machine's blast radius and the line the Claude card
-                    // hangs off, so it reads a shade above the hints around it.
-                    const who = hint(said + ' and can only do what ' + m.effectiveUsername + ' can.');
-                    who.classList.add('is-who');
-                    body.appendChild(who);
-                }
-            }
-        }
-
-        const wires = disclosure('Connection details');
-        const wireRows = [];
         if (!isVaierServer && !isLan) {
-            wireRows.push(['Address inside Vaier', coord(tunnelAddress(m))]);
-            wireRows.push(['Connects from', coord(m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : '')]);
-            wireRows.push(['Sent and received', m.transferRx || m.transferTx
+            rows.push(['Address inside Vaier', coord(tunnelAddress(m))]);
+            rows.push(['Connects from', coord(m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : '')]);
+            rows.push(['Sent and received', m.transferRx || m.transferTx
                 ? humanBytes(m.transferTx) + ' sent · ' + humanBytes(m.transferRx) + ' received' : '']);
         }
-        if (isLan) wireRows.push(['Its address', coord(m.lanAddress || m.lanCidr)]);
-        else if (m.lanCidr || m.lanAddress) wireRows.push(['Its home network', coord(m.lanCidr || m.lanAddress)]);
-        wireRows.push(['Runs apps (Docker)', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No']);
-        wires.appendChild(kv(wireRows));
-        body.appendChild(wires);
+        if (isLan) rows.push(['Its address', coord(m.lanAddress || m.lanCidr)]);
+        else if (m.lanCidr || m.lanAddress) rows.push(['Its home network', coord(m.lanCidr || m.lanAddress)]);
+        rows.push(['Runs apps (Docker)', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No']);
+        manage.appendChild(kv(rows));
 
-        // --- maintenance: rare, root on the whole machine, so folded rather than in the head ----------
-        //
-        // Rides on SSH like the shell does, so it is offered only where a session could open at all. Whether
-        // Vaier can get root there is the server's to judge on the click, and its refusal says why.
-        if (reachable && m.sshAccess && m.hasCredential && !noSshServer) {
-            if (!m.osUpdates && !_upgradingOs.has(m.id)) {
-                // Not read yet (or no apt): nothing to say, but the way to install stays within reach.
-                const upkeep = disclosure('Install OS updates');
-                const row = el('div', 'ex-lactions is-static');
-                row.appendChild(osUpgradeVerb(m));
-                upkeep.appendChild(row);
-                upkeep.appendChild(hint('Installs the pending package updates as root. Nothing is removed, and '
-                    + 'Vaier never reboots; it says when a reboot is due.'));
-                body.appendChild(upkeep);
-            }
-        }
-
-        // --- danger: rare, and able to undo work ------------------------------------------------------
-        //
-        // Named by what it does rather than "Advanced", which said only that the operator was unlikely to
-        // want it — never that opening it put a working machine at risk.
+        // --- danger: rare, and able to undo work, so marked as such even inside Manage ----------------
         if (!isVaierServer) {
             // A personal device joins through the Vaier app, so Vaier mints it no config: neither Reissue nor
-            // Regenerate is offered, and the server refuses both anyway. Said as "send its setup again" and
-            // "give it new keys".
+            // Regenerate is offered, and the server refuses both anyway.
             const peerRec = S.peers.get(m.id) || {};
             const deviceHeld = !!peerRec.deviceHeldKey;
             const viaApp = !!peerRec.joinsThroughVaierApp;
             const canReissue = S.peers.has(m.id) && !deviceHeld && !viaApp;
-            const adv = dangerFold(canReissue ? 'Keys and removal' : 'Remove this machine');
+            const adv = el('div', 'ex-manage-danger');
+            const title = section(canReissue ? 'Keys and removal' : 'Remove this machine');
+            title.classList.add('is-danger');
+            adv.appendChild(title);
             if (canReissue) {
                 const cfg = el('div', 'ex-lactions is-static');
                 cfg.appendChild(selVerb('refresh', 'Send its setup again', 'ex-btn', () => reissuePeer(m)));
@@ -2406,8 +2371,9 @@
                 rm.appendChild(selVerb('trash', 'Remove machine', 'ex-btn is-danger', () => removeMachine(m)));
                 adv.appendChild(rm);
             }
-            body.appendChild(adv);
+            manage.appendChild(adv);
         }
+        body.appendChild(manage);
         pane.appendChild(body);
     }
 
@@ -9324,7 +9290,7 @@
             armDropTarget(body, zone, machineId, path);
         }
         const rows = document.createElement('div');
-        rows.className = 'ex-listing';
+        rows.className = 'ex-listing is-files';
         body.appendChild(rows);
         pane.appendChild(body);
 
@@ -9630,8 +9596,9 @@
         const sel = S.sel;
         if (!sel.length) return document.createDocumentFragment();
 
-        // Present-only items are the ones a write can touch — an archived (past) coordinate is read-only.
-        const live = sel.filter((s) => !s.at);
+        // Present-only items are the ones a write can touch — an archived (past) coordinate is read-only — and
+        // standing in the past, nothing is written at all.
+        const live = S.at ? [] : sel.filter((s) => !s.at);
         const backupItems = live.filter((s) => backupEligible(s.machine));
         const unbackupItems = backupItems.filter(anyBackedUp);
 
@@ -9691,6 +9658,15 @@
         const s = el('summary', 'ex-adv-sum');
         s.textContent = summaryText;
         d.appendChild(s);
+        return keepOpen(d, summaryText);
+    }
+
+    // A push repaints the pane and rebuilds every fold, so an opened one is remembered for its view.
+    const _openFolds = new Set();
+    function keepOpen(d, summaryText) {
+        const id = paneViewKey() + '\u0000' + summaryText;
+        d.open = _openFolds.has(id);
+        d.addEventListener('toggle', () => { if (d.open) _openFolds.add(id); else _openFolds.delete(id); });
         return d;
     }
 
@@ -9705,7 +9681,7 @@
         t.textContent = summaryText;
         s.appendChild(t);
         d.appendChild(s);
-        return d;
+        return keepOpen(d, summaryText);
     }
 
     function categoryLabel(category) {
@@ -10840,6 +10816,7 @@
         } catch (e) {
             S.machines = [];
         }
+        S.machinesRead = true;
     }
 
     async function loadPeers() {
@@ -11342,6 +11319,8 @@
         // A link straight to People (the access-request mail's) is an arrival too.
         if (kindOf(S.path) === 'people') loadPeople();
         if (kindOf(S.path) === 'settings') loadSettings();
+        // A link into a machine says "Reading the fleet…" at once. Only the pane: the crumbs would show an id.
+        if (S.path[0] === 'fleet' && !['fleet', 'map', 'topology'].includes(kindOf(S.path))) renderPane();
 
         // The services are awaited because a machine cannot be honest without them: a `services` entry exists
         // only on a machine that actually publishes something, and an entry that grew a moment later would
