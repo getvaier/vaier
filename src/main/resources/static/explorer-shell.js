@@ -1127,10 +1127,13 @@
     function renderCrumbs() {
         const bar = $('exCrumbs');
         bar.textContent = '';
+        // On a narrow bar only "‹ parent / here" shows: the far ancestors are marked, and the parent wears the
+        // back chevron, so the way back is never the part that gets cut.
+        const last = S.path.length - 1;
         S.path.forEach((seg, i) => {
             if (i) {
                 const sep = document.createElement('span');
-                sep.className = 'ex-crumb-sep';
+                sep.className = 'ex-crumb-sep' + (i < last ? ' ex-crumb-far' : '');
                 sep.textContent = '/';
                 bar.appendChild(sep);
             }
@@ -1155,7 +1158,7 @@
                 bar.appendChild(here);
             } else {
                 const crumb = document.createElement('button');
-                crumb.className = 'ex-crumb';
+                crumb.className = 'ex-crumb ' + (i === last - 1 ? 'is-parent' : 'ex-crumb-far');
                 crumb.textContent = text;
                 crumb.onclick = () => go(S.path.slice(0, i + 1));
                 bar.appendChild(crumb);
@@ -1183,8 +1186,7 @@
             const machines = new Set(S.sel.map((s) => s.machine));
             return S.sel.length + ' selected' + (machines.size > 1 ? ' · ' + machines.size + ' machines' : '');
         }
-        const count = loaded && loaded.state === 'ready' ? loaded.entries.length : null;
-        return count == null ? null : count + (count === 1 ? ' item' : ' items');
+        return null;
     }
 
     // The verbs that are always there: Refresh, and Upload in the present. Pinned LAST in the action group so
@@ -1396,13 +1398,10 @@
     }
 
     function renderFleet(pane) {
-        const online = S.machines.filter((m) => ['is-up', 'is-present'].includes(livenessOf(m.id))).length;
-        const head = paneHead('Fleet', false,
-            S.machines.length + (S.machines.length === 1 ? ' machine · ' : ' machines · ') + online
-            + ' online');
-        // Adding a machine is a fleet-level act, so it lives on the fleet's own head; Your services is one tap away.
-        headActions(head, [headLink('route', 'Your services', '/launchpad.html'),
-            selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine())]);
+        // No tally: the machines below say who is up, and Needs you says what is wrong.
+        const head = paneHead('Fleet', false);
+        head.appendChild(fleetViews('fleet'));
+        headActions(head, [selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine())]);
         pane.appendChild(head);
 
         const body = document.createElement('div');
@@ -1418,7 +1417,7 @@
         // nothing more either: the first rung above is the one sentence it needs.
         if (S.machines.length) {
             const grid = document.createElement('div');
-            grid.className = 'ex-grid';
+            grid.className = 'ex-grid is-machines';
             fleetOrder().forEach((m) => {
                 // The card says what the machine is FOR, not where it answers. A tunnel address is Vaier's own
                 // plumbing: standing on the fleet an operator can do nothing with 10.13.13.6, while the
@@ -1446,21 +1445,26 @@
             body.appendChild(grid);
         }
 
-        // The fleet seen as one picture rather than a list — a child of the fleet exactly as each machine is,
-        // and reached from here. Its own section: it is a different way of looking at the
-        // same machines, not another machine, and dropping it into the grid above would have said it was one.
-        body.appendChild(section('The fleet, seen whole'));
-        const views = el('div', 'ex-grid');
-        views.appendChild(card(svg('map', 'ex-ico'), 'Map', 'Where the machines physically are',
-            () => go(['fleet', 'map'])));
-        views.appendChild(card(svg('topology', 'ex-ico'), 'Topology', 'How the machines connect, drawn as a coast',
-            () => go(['fleet', 'topology'])));
-        body.appendChild(views);
-
         // Discovery lives in the Add-a-machine flow and nowhere else: a fleet page listing things which are
         // *not* in the fleet would be a second road in, competing with the head's Add machine.
 
         pane.appendChild(body);
+    }
+
+    // Machines, Map and Topology are three ways of looking at the same fleet, so one switch in each one's head
+    // moves between them — they used to be cards a whole fleet's scroll below the machines.
+    function fleetViews(current) {
+        const nav = el('nav', 'ex-seg');
+        nav.setAttribute('aria-label', 'Fleet views');
+        [['fleet', 'Machines', ['fleet']], ['map', 'Map', ['fleet', 'map']], ['topology', 'Topology', ['fleet', 'topology']]]
+            .forEach(([kind, label, path]) => {
+                const b = el('button', 'ex-seg-btn');
+                b.textContent = label;
+                if (kind === current) b.setAttribute('aria-current', 'page');
+                else b.onclick = () => go(path);
+                nav.appendChild(b);
+            });
+        return nav;
     }
 
     // The fleet on a map — where the machines physically are. Leaflet, loaded from explorer.html; if it did not
@@ -1848,10 +1852,9 @@
     }
 
     function renderMap(pane) {
-        const seen = S.threats.filter((d) => d.locatable).length;
-        pane.appendChild(paneHead('Map', false,
-            seen ? 'Where the fleet is, and where ' + seen + (seen === 1 ? ' blocked address is' : ' blocked addresses are')
-                 : 'Where the fleet is'));
+        const head = paneHead('Map', false);
+        head.appendChild(fleetViews('map'));
+        pane.appendChild(head);
         const body = el('div', 'ex-pane-body ex-map-body');
         pane.appendChild(body);
         if (typeof L === 'undefined') { body.appendChild(note('The map could not load its library.', true)); return; }
@@ -1916,6 +1919,7 @@
         }
         const head = paneHead(domain, false);
         if (!domain) head.querySelector('.ex-pane-title').remove();
+        head.appendChild(fleetViews('topology'));
         const acts = el('div', 'ex-pane-actions');
         acts.appendChild(selVerb('expand', 'Full screen', 'ex-btn', () => setTopologyFull(true)));
         head.appendChild(acts);
@@ -2108,13 +2112,9 @@
         if (!m) return pane.appendChild(note('That machine is no longer in the fleet.', true));
 
         const peer = S.peers.get(m.id);
-        // The same subtitle the card the operator just clicked was wearing — what the machine is, and what
-        // the operator said it is FOR. Losing the second half on the way in made the pane say less about the
-        // machine than the grid it came from.
-        const purpose = machineDescription(m);
         // Vaier's own machine answers differently in three places below, so the question is asked once here.
         const isVaierServer = !!m.vaierServer;
-        const head = paneHead(m.name, false, kindLabel(m) + (purpose ? ' · ' + purpose : ''));
+        const head = paneHead(m.name, false);
         head.querySelector('.ex-pane-title').appendChild(dot(m.id));
         // The machine's open verbs live where every other pane keeps the verbs that apply right now: the
         // head's one action group, hugging the right. Editing details is common, and a LAN server's setup
@@ -4328,8 +4328,7 @@
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
         const found = containersOn(machineId);
-        const head = paneHead(DOOR.containers, false,
-            found.length + (found.length === 1 ? ' app' : ' apps'));
+        const head = paneHead(DOOR.containers, false);
         // The registry check is a single fleet-wide act, fronted here because this is where the operator lands
         // after pulling a stack. Hidden in the past: there is no "now" back there to re-check.
         if (!S.at && S.containersRead && found.length) {
@@ -4398,7 +4397,7 @@
                 true));
         }
 
-        pane.appendChild(paneHead(name, true, machineName));
+        pane.appendChild(paneHead(name, true));
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
 
@@ -4456,8 +4455,7 @@
         const found = servicesOn(machineId);
         const open = candidatesOn(machineId).filter((c) => !c.ignored);
         const hidden = candidatesOn(machineId).filter((c) => c.ignored);
-        const head = paneHead(DOOR.services, false,
-            found.length + (found.length === 1 ? ' website' : ' websites'));
+        const head = paneHead(DOOR.services, false);
         // A service Vaier did not discover — a LAN app, a device's own page — is published by hand.
         headActions(head, [selVerb('route', 'Publish a service by hand', 'ex-btn', () => lanPublish(machineId))]);
         pane.appendChild(head);
@@ -5047,8 +5045,7 @@
             true));
 
         // The head is the service and the way into it. A stream has no page to open, so it says where to dial.
-        const head = paneHead(s.launchpadAlias || serviceName(s), false,
-            s.stream ? s.connectAddress : machineName);
+        const head = paneHead(s.launchpadAlias || serviceName(s), false);
         if (!s.stream) headActions(head, [openLink(s)]);
         pane.appendChild(head);
 
@@ -5200,7 +5197,7 @@
     function renderDisk(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
-        pane.appendChild(paneHead(DOOR.disk, false, 'How full its disks are'));
+        pane.appendChild(paneHead(DOOR.disk, false));
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -5780,8 +5777,7 @@
             return pane.appendChild(note('This machine has no part in fleet backup — it is not the backup '
                 + 'server, and no job backs it up.', true));
         }
-        const head = paneHead(DOOR.backup, false,
-            isServer ? 'The fleet’s backup server' : 'How this machine is backed up');
+        const head = paneHead(DOOR.backup, false);
         pane.appendChild(head);
         const body = el('div', 'ex-pane-body');
         // One machine can be both the store and a thing stored, and then this pane is two halves stacked.
@@ -6210,8 +6206,7 @@
         // saying out loud, not quietly rendering as an ordinary entry.
         const owner = repoLabel(r.name);
         const claimed = S.backupJobs.some((j) => j.repositoryName === r.name);
-        pane.appendChild(paneHead(owner, false,
-            claimed ? 'Backed up to ' + (s ? s.name : '') : 'Kept on ' + (s ? s.name : '')));
+        pane.appendChild(paneHead(owner, false));
         const body = el('div', 'ex-pane-body');
         if (!claimed) {
             body.appendChild(note('No machine backs up here any more. These archives are still kept — Vaier '
@@ -7166,7 +7161,7 @@
     // opposite ways, and that is precisely the misclick #349 exists to make impossible.
     function renderSecurity(pane) {
         // The body's first sentence says the count, so the head does not say it a second time.
-        pane.appendChild(paneHead('Security', false, ''));
+        pane.appendChild(paneHead('Security', false));
 
         const body = el('div', 'ex-pane-body');
         renderBlocked(body);
@@ -7511,7 +7506,7 @@
             ? (c.list.length ? c.list.length + (c.list.length === 1 ? ' credential' : ' credentials')
                              : 'Nothing stored')
             : '';
-        const head = paneHead('Fleet credentials', false, stored);
+        const head = paneHead('Fleet credentials', false);
         // The empty state carries its own accented Add, so the head offers it only beside a list.
         if (c.state === 'ready' && c.list.length) {
             headActions(head, [selVerb('key', 'Add a credential', 'ex-btn', () => credentialFileDialog(null))]);
@@ -7830,18 +7825,22 @@
     };
     const providerOf = (e) => PROVIDER_GLYPHS[String(e.provider || '').toLowerCase()] || null;
 
-    function personAvatar(e) {
-        const a = el('div', 'ex-avatar');
+    // Initials on a stable hue per email; someone waiting wears the amber of waiting. People and the topbar alike.
+    function monogram(label, email, waiting) {
         const mono = el('div', 'ex-mono');
-        // A stable hue per email; someone waiting wears the amber of waiting.
         let hue = 44;
-        if (e.role !== 'pending') { hue = 0; for (let i = 0; i < e.email.length; i++) hue = (hue * 31 + e.email.charCodeAt(i)) % 360; }
+        if (!waiting) { hue = 0; for (let i = 0; i < email.length; i++) hue = (hue * 31 + email.charCodeAt(i)) % 360; }
         mono.style.background = 'hsl(' + hue + ',42%,20%)';
         mono.style.color = 'hsl(' + hue + ',60%,72%)';
-        const words = personLabel(e).trim().split(/\s+/).filter(Boolean);
+        const words = label.trim().split(/\s+/).filter(Boolean);
         mono.textContent = (words.length >= 2 ? words[0][0] + words[1][0]
-            : (personLabel(e).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?')).toUpperCase();
-        a.appendChild(mono);
+            : (label.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?')).toUpperCase();
+        return mono;
+    }
+
+    function personAvatar(e) {
+        const a = el('div', 'ex-avatar');
+        a.appendChild(monogram(personLabel(e), e.email, e.role === 'pending'));
         const url = S.peopleView.photos[e.email];
         if (url) {
             const img = el('img', 'ex-avatar-photo');
@@ -7876,7 +7875,7 @@
 
     function renderPeople(pane) {
         const v = S.peopleView;
-        const head = paneHead('People', false, '');
+        const head = paneHead('People', false);
         if (v.state === 'ready') headActions(head, [selVerb('users', 'Add a person', 'ex-btn', addPersonDialog)]);
         pane.appendChild(head);
         const body = el('div', 'ex-pane-body');
@@ -8218,7 +8217,7 @@
     let _chatOpen = false;   // whether the Chat pane is the one being visited — the box takes focus once, on entry
 
     function renderChat(pane) {
-        const head = paneHead('Chat', false, 'Marvin answers, looks, proposes, hands over files, and remembers.');
+        const head = paneHead('Chat', false);
         head.classList.add('ex-chat-head');
         // Marvin's memory and his cost are reached from one menu on the pane's own bar: facts
         // about Chat, kept off the thread and out of the way of typing.
@@ -8921,7 +8920,7 @@
     }
 
     function renderSettings(pane) {
-        pane.appendChild(paneHead('Settings', false, 'Set up once, changed rarely'));
+        pane.appendChild(paneHead('Settings', false));
         const body = el('div', 'ex-pane-body ex-settings');
 
         // Read on arrival (applyRoute), never from here. A re-read keeps the last answer on screen.
@@ -11182,6 +11181,8 @@
         + 'stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>'
         + '<polyline points="10 11 14 8 10 5"/><line x1="14" y1="8" x2="5" y2="8"/></svg>';
 
+    // The person is their avatar: a monogram at once, the photo over it when one loads. The name and Sign out
+    // are its menu, so the address bar keeps the room a full name used to take.
     async function loadUser() {
         const host = $('topbarUser');
         try {
@@ -11191,36 +11192,57 @@
             if (!me.username) return;
 
             const label = me.displayname || me.username;
-            const name = document.createElement('span');
-            name.className = 'display-name';
-            name.title = label;
-            name.textContent = label;
+            const btn = el('button', 'topbar-me');
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
+            btn.setAttribute('aria-haspopup', 'true');
+            btn.setAttribute('aria-expanded', 'false');
+            const face = el('span', 'ex-avatar is-me');
+            face.appendChild(monogram(label, me.email || me.username, false));
+            btn.appendChild(face);
 
-            // The photo is a non-essential enhancement — never let it break the name + Logout controls.
-            let profile = name;
-            let photoUrl = null;
+            const menu = el('div', 'ex-vmenu ex-user-menu');
+            menu.setAttribute('role', 'menu');
+            const who = el('div', 'ex-user-name');
+            who.textContent = label;
+            const out = el('a', 'ex-vmenu-item');
+            out.setAttribute('role', 'menuitem');
+            out.href = me.logoutUrl || '#';
+            out.innerHTML = ICON_LOGOUT;   // trusted constant SVG
+            out.firstChild.classList.add('ex-ico');
+            const outLbl = el('span');
+            outLbl.textContent = 'Sign out';
+            out.appendChild(outLbl);
+            menu.append(who, out);
+            menu.onclick = (e) => e.stopPropagation();
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                setVMenu(false);
+                setUserMenu(!menu.classList.contains('is-open'));
+            };
+            host.replaceChildren(btn, menu);
+
+            // The photo is a non-essential enhancement: the monogram stands until it loads, and stays if it does not.
             try {
-                photoUrl = await VaierAvatar.photoUrl({
-                    provider: me.provider, providerUserId: me.providerUserId, email: me.email, size: 48 });
-            } catch (e) { /* keep the name text */ }
-            if (photoUrl) {
-                const img = document.createElement('img');
-                img.className = 'topbar-avatar';
-                img.src = photoUrl;
-                img.alt = label;
-                img.title = label;
-                img.onerror = () => img.replaceWith(name);
-                profile = img;
-            }
-
-            const logout = document.createElement('a');
-            logout.href = me.logoutUrl || '#';
-            logout.className = 'topbar-item';
-            logout.title = 'Logout';
-            logout.setAttribute('aria-label', 'Logout');
-            logout.innerHTML = ICON_LOGOUT;   // trusted constant SVG
-            host.replaceChildren(profile, logout);
+                const url = await VaierAvatar.photoUrl({
+                    provider: me.provider, providerUserId: me.providerUserId, email: me.email, size: 64 });
+                if (url) {
+                    const img = el('img', 'ex-avatar-photo');
+                    img.alt = '';
+                    img.onerror = () => img.remove();
+                    img.src = url;
+                    face.appendChild(img);
+                }
+            } catch (e) { /* the monogram stands */ }
         } catch (e) { /* the shell works without a name on it */ }
+    }
+
+    function setUserMenu(open) {
+        const btn = document.querySelector('.topbar-me');
+        const menu = document.querySelector('.ex-user-menu');
+        if (!btn || !menu) return;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        menu.classList.toggle('is-open', open);
     }
 
     // --- wiring -----------------------------------------------------------------------------------------
@@ -11258,6 +11280,15 @@
         menu.textContent = '';
         // Help is there when wanted, and quiet when not: below a rule, smaller than the jobs above it.
         const foot = el('div', 'ex-vmenu-foot');
+        // Your services is a page of its own, so a real link: it opens in a new tab when asked to.
+        const yours = el('a', 'ex-vmenu-item');
+        yours.setAttribute('role', 'menuitem');
+        yours.href = '/launchpad.html';
+        yours.innerHTML = svg('route', 'ex-ico');
+        const yoursText = el('span', 'ex-vmenu-text');
+        yoursText.appendChild(el('span')).textContent = 'Your services';
+        yours.appendChild(yoursText);
+        menu.appendChild(yours);
         GLOBALS.forEach((g) => {
             if (!offered(g)) return;
             (g.footer ? foot : menu).appendChild(vMenuItem(g.icon, g.label, [g.name], g.desc));
@@ -11273,13 +11304,14 @@
 
     $('exVMenuBtn').onclick = (e) => {
         e.stopPropagation();
+        setUserMenu(false);
         setVMenu($('exVMenu').className.indexOf('is-open') < 0);
     };
     // A click anywhere else closes it — the reflex every menu has.
-    document.addEventListener('click', () => setVMenu(false));
+    document.addEventListener('click', () => { setVMenu(false); setUserMenu(false); });
     $('exVMenu').onclick = (e) => e.stopPropagation();
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') setVMenu(false);
+        if (e.key === 'Escape') { setVMenu(false); setUserMenu(false); }
     });
 
     // On a phone the soft keyboard shrinks the visual viewport but not the layout viewport, which would leave

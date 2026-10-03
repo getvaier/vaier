@@ -527,10 +527,6 @@ class ExplorerShellTest {
             assertThat(rule).as("presence borrows no trouble colour")
                 .doesNotContain("--red").doesNotContain("--yellow").doesNotContain("--green");
         }
-
-        // The fleet's "N online" count already counted a connected phone; it must not lose it to the rename.
-        int count = js.indexOf("const online = ");
-        assertThat(js.substring(count, js.indexOf("\n", count))).contains("is-present");
     }
 
     @Test
@@ -2009,8 +2005,6 @@ class ExplorerShellTest {
         int fold = body.indexOf("disclosure('Connection details')");
         assertThat(fold).as("the addresses fold away behind the shell's own disclosure, not a new component")
             .isPositive();
-        assertThat(body.indexOf("kindLabel(m)"))
-            .as("what the machine is stays in the open").isPositive().isLessThan(fold);
         for (String mechanism : List.of("'Address inside Vaier'", "'Connects from'", "'Sent and received'",
                                         "'Runs apps (Docker)'")) {
             assertThat(body.indexOf(mechanism)).as("%s is folded away", mechanism)
@@ -3298,8 +3292,7 @@ class ExplorerShellTest {
 
     @Test
     void aLiveSelectionTakesOverTheSubtitle_whileTheMachineNameKeepsTheTitle() throws IOException {
-        // The head's subtitle is the "how much is here" slot, and a live selection is the more urgent version
-        // of that same fact. The TITLE stays the machine name: it is the pane's identity and where you are
+        // A live selection is the one line a head still carries: it is what is being acted on. The TITLE stays the machine name: it is the pane's identity and where you are
         // standing, and swapping it for a count would move the one label that should never move.
         String js = read("explorer-shell.js");
 
@@ -3308,7 +3301,6 @@ class ExplorerShellTest {
         String body = js.substring(from, js.indexOf("\n    }", from));
         assertThat(body).contains("S.sel");
         assertThat(body).contains("selected");
-        assertThat(body).contains("items");
     }
 
     @Test
@@ -4591,7 +4583,6 @@ class ExplorerShellTest {
         int narrow = css.indexOf("@media (max-width: 760px)");
         String narrowBody = css.substring(narrow, css.indexOf("\n}", narrow));
         assertThat(narrowBody).contains(".ex-chat-head .ex-pane-actions { width: auto; margin-left: auto; }")
-            .contains(".ex-chat-head .ex-pane-sub { order: 3; flex-basis: 100%; }")
             .contains(".ex-chat-menu .ex-vmenu { min-width: 0; width: max-content; max-width: calc(100vw - 28px); }");
         assertThat(css).contains(".ex-chat-memory-text { flex: 1; min-width: 0; overflow-wrap: anywhere;")
             .contains(".ex-chat-errand-lines { flex: 1; min-width: 0;");
@@ -4633,7 +4624,7 @@ class ExplorerShellTest {
         assertThat(js).contains("{ name: 'chat',     label: 'Chat',");
         assertThat(js).contains("desc: 'Ask Marvin about your fleet' }");
         assertThat(js).contains("function vMenuItem(icon, label, path, desc)");
-        assertThat(js).contains("paneHead('Chat', false, 'Marvin answers, looks, proposes, hands over files, and remembers.')");
+        assertThat(js).contains("paneHead('Chat', false)");
         assertThat(js).doesNotContain("label: 'Ask'");
     }
 
@@ -4690,13 +4681,38 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theFleetHead_opensYourServices_inOneTap() throws IOException {
+    void aPaneHeadIsItsTitleAndVerbs_onlyAFileSelectionAddsALine() throws IOException {
+        // Counts, taglines and the machine's name beside the crumbs that already say it: the operator asked
+        // for every head to lose them. What is being acted on right now is the one line that stays.
+        String js = read("explorer-shell.js");
+        List<String> withALine = new ArrayList<>();
+        for (int at = js.indexOf("paneHead("); at >= 0; at = js.indexOf("paneHead(", at + 1)) {
+            if (js.startsWith("function paneHead(", at - "function ".length())) continue;
+            int depth = 0, commas = 0, i = at + "paneHead(".length();
+            for (; depth >= 0; i++) {
+                char c = js.charAt(i);
+                if (c == '(' || c == '[' || c == '{') depth++;
+                else if (c == ')' || c == ']' || c == '}') depth--;
+                else if (c == ',' && depth == 0) commas++;
+            }
+            if (commas >= 2) withALine.add(js.substring(at, i));
+        }
+        assertThat(withALine).containsExactly("paneHead(machineName, false, directorySubtitle(loaded))");
+        int sub = js.indexOf("function directorySubtitle(");
+        assertThat(js.substring(sub, js.indexOf("\n    }", sub))).doesNotContain(" item");
+    }
+
+    @Test
+    void theFleetHead_isTheSwitchAndAddMachine_andYourServicesIsInTheMenu() throws IOException {
+        // The head said "14 machines · 4 online" and carried a second button before a phone saw one machine.
         String js = read("explorer-shell.js");
         int from = js.indexOf("function renderFleet(pane) {");
         String body = js.substring(from, js.indexOf("\n    }\n", from));
-        assertThat(body).contains("headLink('route', 'Your services', '/launchpad.html')");
-        assertThat(body.indexOf("'Your services'")).as("the quiet verb sits before the accented Add")
-            .isLessThan(body.indexOf("'Add machine'"));
+        assertThat(body).contains("paneHead('Fleet', false)").contains("'Add machine'")
+            .doesNotContain("Your services").doesNotContain("' online'");
+        int menu = js.indexOf("function renderVMenu() {");
+        assertThat(js.substring(menu, js.indexOf("\n    }\n", menu)))
+            .contains("'Your services'").contains("'/launchpad.html'");
     }
 
     @Test
@@ -4798,5 +4814,40 @@ class ExplorerShellTest {
         assertThat(body).as("render never reads the settings; arriving does").doesNotContain("loadSettings(");
         int route = js.indexOf("function applyRoute(path, at) {");
         assertThat(js.substring(route, js.indexOf("\n    }\n", route))).contains("loadSettings()");
+    }
+
+    // --- Thumb-sized: the shell on a phone (#379 slice 5a) ---------------------------------------------
+
+    @Test
+    void theTopbar_wearsTheAvatar_withNameAndSignOutBehindIt_andTheCrumbsKeepTheWayBack() throws IOException {
+        // The full name ate the address bar's room on a phone. The avatar (a monogram until a photo loads) is
+        // the button; the name and Sign out are its menu. On a narrow bar the crumbs keep "‹ parent / here".
+        String js = read("explorer-shell.js");
+        int user = js.indexOf("async function loadUser() {");
+        assertThat(user).isPositive();
+        String userBody = js.substring(user, js.indexOf("\n    }\n", user));
+        assertThat(userBody).contains("monogram(").contains("aria-haspopup").contains("'Sign out'")
+            .doesNotContain("'display-name'");
+
+        int crumbs = js.indexOf("function renderCrumbs() {");
+        String crumbBody = js.substring(crumbs, js.indexOf("\n    }\n", crumbs));
+        assertThat(crumbBody).contains("'ex-crumb-far'").contains("is-parent");
+        assertThat(read("explorer-shell.css")).contains(".ex-crumb.ex-crumb-far").contains(".ex-crumb.is-parent::before");
+    }
+
+    @Test
+    void theFleetViews_areOneSwitcher_inTheHeadOfMachinesMapAndTopology() throws IOException {
+        // Map and Topology were cards under "The fleet, seen whole", a scroll below every machine on a phone.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function fleetViews(");
+        assertThat(from).isPositive();
+        String views = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(views).contains("'Machines'").contains("'Map'").contains("'Topology'").contains("aria-current");
+        for (String render : List.of("function renderFleet(pane) {", "function renderMap(pane) {",
+                "function renderTopology(pane) {")) {
+            int r = js.indexOf(render);
+            assertThat(js.substring(r, js.indexOf("\n    }\n", r))).as(render).contains("fleetViews(");
+        }
+        assertThat(js).doesNotContain("The fleet, seen whole");
     }
 }

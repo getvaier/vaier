@@ -3998,7 +3998,7 @@ All original open questions have been resolved:
 
 ## 12. Backlog
 
-**Status hover text on a machine's dot (found stale 2026-09-01).** `UBIQUITOUS_LANGUAGE.md` and `docs/NETWORKING.md` both described a per-machine tooltip giving the liveness state in words plus its evidence ("connected, last handshake 12s ago"). No such tooltip has ever existed — the dot carries no `title` at all — so both entries were corrected rather than kept. It is worth building now in a way it was not before: the fleet page paints only trouble, so a machine that is up, one that is asleep and one nothing has ever probed all draw nothing, and the words are the only thing that could still tell them apart. The listing's "N online" count is currently the sole place that gap shows. Note the placement problem it has to solve: a healthy dot is an invisible 6px target, so the text belongs on the machine's name or card rather than on the dot itself.
+**Status hover text on a machine's dot (found stale 2026-09-01).** `UBIQUITOUS_LANGUAGE.md` and `docs/NETWORKING.md` both described a per-machine tooltip giving the liveness state in words plus its evidence ("connected, last handshake 12s ago"). No such tooltip has ever existed — the dot carries no `title` at all — so both entries were corrected rather than kept. It is worth building now in a way it was not before: the fleet page paints only trouble, so a machine that is up, one that is asleep and one nothing has ever probed all draw nothing, and the words are the only thing that could still tell them apart. The listing's "N online" count was the sole place that gap showed, and it was removed with the Fleet head's trim (#379). Note the placement problem it has to solve: a healthy dot is an invisible 6px target, so the text belongs on the machine's name or card rather than on the dot itself.
 
 **Backup survival kit (next up, designed 2026-07-23).** Everything needed to read Vaier's backups is currently *inside* Vaier, in a circle: repository passphrases are encrypted in its config store; the key that decrypts them (`SecretCipher`, `vault.key`) sits in the same directory; and that directory is backed up to the backup server — encrypted with a passphrase held in the store being backed up. Losing the Vaier server leaves an encrypted repository whose passphrase is inside itself, and every other machine's archives in the same position. Nothing warns, because nothing is broken until everything is.
 
@@ -4591,3 +4591,17 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Wording**: the `.env` refusal and the header of the generated `sign-in-providers.env` name People's Sign-in providers rather than Settings. The offline page's link reads **Back to Vaier**.
 
 **Backlog.** A **Vaier update** row in Needs you (a newer Vaier image, or a failed or rolled-back self-update), so Settings can drop its last status line. `AppSettingsResult`'s four `wildcardDns*` fields have no reader in the browser now. Remove them when that row is built, or sooner.
+
+### 6.76 Thumb-sized: the shell on a phone ✅ part 5a (part 5 of [#379](https://github.com/getvaier/vaier/issues/379), slice 5 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** At phone width the audit measured controls of 13–34 px, a full name crowding the address bar, crumbs that lost their right end, the Map and Topology a whole fleet's scroll below the machines, and the Topology cropped to its left edge.
+
+**What (5a).** Frontend only; no endpoint added and no authorization changed.
+- **Avatar**: the topbar wears the signed-in person's avatar (photo, or initials until one loads) on every screen. It opens their name and **Sign out**.
+- **Address bar**: on a narrow screen it shows **‹ parent / here** and nothing further left, so the way back is never cut.
+- **44 px**: on a phone-width or touch screen every shell control is at least 44 px (buttons, menus and their items, crumbs, icon buttons, inputs, folds, checkboxes and check rows by their label, a chip's ×, the Map's zoom). The time rail's stops share the whole track instead, because fourteen archives cannot each be 44 px wide on a phone. A desktop keeps its density.
+- **Fleet views**: one **Machines · Map · Topology** switch in the head of all three replaces the cards under "The fleet, seen whole". The Fleet head is only the switch and **Add machine**: its "N machines · N online" tally is gone, and **Your services** moved to the top of the Vaier menu. On a phone the machines are compact rows and the head scrolls away; desktop cards are unchanged.
+- **Heads carry only a title and verbs.** Every pane head lost its info line — the counts ("8 apps", "7 websites", "N items"), the taglines (Chat, Settings, Storage, Backups, Map) and the machine name beside crumbs that already say it. A Files selection ("3 selected") is the one line left, since it is what is being acted on.
+- **Topology** fits a phone's width: the whole coast, no sideways scroll, so the lighthouse sits where the layout puts it (the centre on a two-coast fleet). Full screen is unchanged.
+
+**Still to come in #379 (5b).** The machine page reordered as head (verdict, Open shell, Files), then doors with live facts, then one Manage fold; Files' row icons stop overlapping the Modified date, and no Delete where the user cannot write.
