@@ -4611,4 +4611,14 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Cold links**: a link into a machine opened before the fleet is read says "Reading the fleet…", not "no longer in the fleet".
 - **One head verb on a phone** keeps the title's line, and the title ellipsises; two or more take their own row.
 
-**Backlog.** *No Delete where the operator cannot write (present)* — [#381](https://github.com/getvaier/vaier/issues/381). The directory listing carries no permission, owner or writability fact (`FileEntryResponse`: name, path, directory, size, modifiedAt, backedUp, containsBackedUp, viewable), so the browser cannot tell a file Vaier's sign-in can remove from one it cannot. Deciding it needs backend work: read the SFTP attributes (mode, uid/gid) the listing already fetches, judge writability against the **effective user** in the domain, and carry the verdict per entry. Until then a delete that the machine refuses is reported by the server's own sentence.
+### 6.77 No write verb where Vaier's sign-in cannot write ✅ (closes [#381](https://github.com/getvaier/vaier/issues/381))
+
+**Why.** Files offered Delete on every entry in the present. Where Vaier signs in as an ordinary user, many deletes were doomed, and the operator learned that only from the machine's refusal.
+
+**What.**
+- **Effective user ids**: the fleet's five-minute rounds read `id -u` and `id -G` in front of their `df`, on the same sign-in, and hold the answer in memory. No SSH exec per listing.
+- **Mode and owner** of every listed entry ride on the SFTP listing that already fetched them, and the listed folder's own come from readdir's `.`, so nothing is fetched twice.
+- **The verdict is the domain's** (`FolderAccess`): removing an entry needs write and search on its folder, for the one permission class the user falls in, and in a sticky folder owning the entry or the folder. Root may do either. Adding to a folder needs write and search on it.
+- The listing carries `writable` per entry (Delete) and for the folder (Upload, Paste, the drop target). `null` means not known, and **unknown is not no**: the verb stays offered until the rounds have read the machine.
+- A Selection's **Delete** acts only on what the sign-in can remove, and its confirmation says how many it skips.
+- Judged from mode bits only: an ACL, a read-only mount or a capability can still make the machine answer differently, and then its own sentence speaks, as before.

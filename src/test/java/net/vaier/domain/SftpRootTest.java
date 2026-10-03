@@ -177,7 +177,7 @@ class SftpRootTest {
 
         List<FileEntry> anchored = nas.anchor(List.of(
             FileEntry.in("/homes", "geir", true, 4096, WHEN),
-            FileEntry.in("/homes", "notes.txt", false, 120, WHEN)));
+            FileEntry.in("/homes", "notes.txt", false, 120, WHEN, new FilePermissions(0640, 1026, 100))));
 
         assertThat(anchored).extracting(FileEntry::path)
             .containsExactly("/volume1/homes/geir", "/volume1/homes/notes.txt");
@@ -185,6 +185,8 @@ class SftpRootTest {
         assertThat(anchored.getFirst().directory()).isTrue();
         assertThat(anchored.getLast().sizeBytes()).isEqualTo(120);
         assertThat(anchored.getLast().modified()).isEqualTo(WHEN);
+        // The owner and mode travel too: a jailed machine's entries are judged for writing like any other's.
+        assertThat(anchored.getLast().permissions()).isEqualTo(new FilePermissions(0640, 1026, 100));
     }
 
     @Test

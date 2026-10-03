@@ -14,6 +14,7 @@ import net.vaier.application.ViewFileUseCase;
 import net.vaier.application.ViewFileUseCase.View;
 import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FolderAccess;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.Selection;
 import net.vaier.domain.ProtectedPaths;
@@ -281,17 +282,23 @@ public class ExplorerRestController {
      * <p>The root travels with every listing because the browser cannot deduce it and must not assume it. A
      * bare array — what this endpoint answered with before #326 — had nowhere to carry it, and a browser that
      * assumed {@code /} opened the NAS on the one path the NAS cannot answer.
+     *
+     * <p>{@code writable} says whether the sign-in may add to this folder ({@link FolderAccess#toAdd}) — Upload
+     * and Paste — with {@code null} for not known.
      */
-    record DirectoryResponse(String root, String path, String at, List<FileEntryResponse> entries) {
+    record DirectoryResponse(String root, String path, String at, Boolean writable,
+                             List<FileEntryResponse> entries) {
         static DirectoryResponse from(MachineDirectory directory) {
             // Whether an entry is backed up (or merely contains backed-up content) is the domain's decision —
             // ProtectedPaths.covers / enclosesUnder on what the machine actually backs up, source paths minus
             // excludes — asked here per entry so the browser only has to render the flags. In the past the
             // protection is empty, so every archived entry is simply unmarked.
             ProtectedPaths protectedPaths = directory.protectedPaths();
+            FolderAccess access = directory.access();
             return new DirectoryResponse(directory.root().path(), directory.path(), directory.at(),
+                access.toAdd().answer(),
                 directory.entries().stream()
-                    .map(entry -> FileEntryResponse.from(entry, protectedPaths))
+                    .map(entry -> FileEntryResponse.from(entry, protectedPaths, access))
                     .toList());
         }
     }
@@ -327,16 +334,20 @@ public class ExplorerRestController {
      * a copy of the allowlist. The browser must not hold one: the allowlist is a security boundary, and a
      * second copy of a security boundary is a copy that drifts. Unaffected by the past — opening a file as it
      * was in an archive is a read like any other.
+     *
+     * <p>{@code writable} is the domain's verdict ({@link FolderAccess#toRemove}) on whether Vaier's sign-in may
+     * remove this entry: {@code false} withholds Delete, and {@code null} — not known — keeps it offered.
      */
     record FileEntryResponse(String name, String path, boolean directory, long size, String modifiedAt,
-                             boolean backedUp, boolean containsBackedUp, boolean viewable) {
-        static FileEntryResponse from(FileEntry entry, ProtectedPaths protectedPaths) {
+                             boolean backedUp, boolean containsBackedUp, boolean viewable, Boolean writable) {
+        static FileEntryResponse from(FileEntry entry, ProtectedPaths protectedPaths, FolderAccess access) {
             // Both verdicts are asked of the domain whole — including their mutual exclusion. Restating that
             // rule here with a !backedUp guard is how the two copies eventually disagree.
             boolean backedUp = protectedPaths.isBackedUp(entry.path());
             boolean containsBackedUp = protectedPaths.containsBackedUp(entry.path());
             return new FileEntryResponse(entry.name(), entry.path(), entry.directory(),
-                entry.sizeBytes(), entry.modified().toString(), backedUp, containsBackedUp, entry.viewable());
+                entry.sizeBytes(), entry.modified().toString(), backedUp, containsBackedUp, entry.viewable(),
+                access.toRemove(entry).answer());
         }
     }
 }

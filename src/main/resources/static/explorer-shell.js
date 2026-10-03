@@ -473,6 +473,11 @@
     // they are not the same directory. The present is the empty archive.
     const dirKey = (machine, path, at) =>
         machine + DIR_SEP + (path == null ? '' : path) + DIR_SEP + (at || '');
+    // The server's verdict on adding to a folder (#381): true, false, or null while Vaier does not know.
+    const folderWritable = (machine, path) => {
+        const d = S.dirs.get(dirKey(machine, path, S.at));
+        return d ? d.writable : null;
+    };
 
     const dirStateOf = (path) => {
         const entry = S.dirs.get(dirKey(path[1], remotePath(path), S.at));
@@ -514,6 +519,7 @@
             entry.state = 'ready';
             entry.entries = result.entries;
             entry.path = result.path;
+            entry.writable = result.writable;
 
             // Where this tree begins, straight from the machine. Remembered per machine *and* time — a jail
             // ("/volume1") is a fact about the live filesystem, never about an archive rooted at "/".
@@ -9283,7 +9289,7 @@
         // the WHOLE body — a file let go over the listing rows must upload, not make the browser open it and
         // navigate the tab off the Explorer — and stays hidden until a file drag is actually overhead, so at
         // rest it takes no room from the listing at all.
-        if (!S.at && path != null) {
+        if (!S.at && path != null && folderWritable(machineId, path) !== false) {
             body.classList.add('ex-dropzone-host');
             const zone = renderDropzone(path, machineName);
             body.appendChild(zone);
@@ -9423,8 +9429,10 @@
         box.appendChild(dl);
 
         // Delete is present-only and destructive, so it never appears while time-travelling (you cannot edit
-        // the past) and it goes through a typed-name gate before anything is removed.
-        if (!S.at) {
+        // the past) and it goes through a typed-name gate before anything is removed. Nor where the server says
+        // Vaier's sign-in cannot remove this entry (#381) — an unknown verdict (null) still offers it.
+        const refused = entry.writable === false;
+        if (!S.at && !refused) {
             const rm = el('button', 'ex-iconbtn is-danger');
             rm.innerHTML = svg('trash', 'ex-ico');
             rm.title = 'Delete';
@@ -9464,7 +9472,7 @@
             // so carrying only the full shield would take the verb away from a folder with a hole in it.
             : S.sel.concat([{ machine: machineId, path: entry.path, at: S.at, name: entry.name,
                               directory: entry.directory, size: entry.size, backedUp: !!entry.backedUp,
-                              containsBackedUp: !!entry.containsBackedUp }]);
+                              containsBackedUp: !!entry.containsBackedUp, writable: entry.writable }]);
     }
     // A machine is back-up-eligible only while the fleet HAS a backup server, and never when it IS that server
     // (the store, not a thing that is stored). Present-only items only — you protect the live tree, not an
@@ -9614,7 +9622,10 @@
                 actions.appendChild(selVerb('cross', 'Stop backing up', 'ex-btn', () => selUnbackup()));
             }
         }
-        if (live.length) actions.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => selDelete()));
+        // Delete acts on what the sign-in can remove; the confirmation says how many it skips (#381).
+        if (live.some((s) => s.writable !== false)) {
+            actions.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => selDelete()));
+        }
         const clear = el('button', 'ex-iconbtn');
         clear.innerHTML = svg('cross', 'ex-ico');
         clear.title = 'Clear selection';
@@ -9902,7 +9913,9 @@
     // strong machine-name gate; several require the word "delete" and the body names every machine that will be
     // touched. A failure on one item is reported and the rest still go; the visible listing is re-read at the end.
     async function selDelete() {
-        const items = S.sel.filter((s) => !s.at);
+        const live = S.sel.filter((s) => !s.at);
+        const items = live.filter((s) => s.writable !== false);
+        const skipped = live.length - items.length;
         if (!items.length) return;
         const groups = groupByMachine(items);
         const machineNames = [...groups.keys()].map(nameOf);
@@ -9913,7 +9926,9 @@
             'Delete ' + items.length + (items.length === 1 ? ' item?' : ' items?'),
             preview + '\n\nEverything selected is deleted, folders and all they contain'
             + (single ? '' : ', across ' + machineNames.length + ' machines (' + machineNames.join(', ') + ')')
-            + '. This cannot be undone. Type ' + (single ? 'the machine name' : '“delete”') + ' to confirm.',
+            + '.' + (skipped ? ' ' + skipped + (skipped === 1 ? ' other selected item is' : ' other selected items are')
+                + ' skipped: Vaier’s sign-in cannot delete ' + (skipped === 1 ? 'it' : 'them') + '.' : '')
+            + ' This cannot be undone. Type ' + (single ? 'the machine name' : '“delete”') + ' to confirm.',
             single ? machineNames[0] : 'delete', 'Delete');
         if (!ok) return;
         let failed = 0;
@@ -9942,7 +9957,10 @@
     // label has no room and "here" has no referent, so the count moves into the button and it says exactly
     // what it will do. What is ON the Clipboard is still listed in the tray, which is where it belongs.
     function pasteVerb(machineId, destPath) {
-        if (S.at || !S.clipboard.length || destPath == null) return document.createDocumentFragment();
+        const writable = destPath == null ? null : folderWritable(machineId, destPath);
+        if (S.at || !S.clipboard.length || destPath == null || writable === false) {
+            return document.createDocumentFragment();   // nowhere Vaier can put it (#381)
+        }
 
         const group = el('div', 'ex-verbgroup');
         const n = S.clipboard.length;
@@ -9974,7 +9992,8 @@
     // — and it needs a real destination (the machine has said where its tree begins). Absent either, nothing
     // is drawn.
     function renderUploadAction(machineId, destPath) {
-        if (S.at || destPath == null) return document.createDocumentFragment();
+        const writable = destPath == null ? null : folderWritable(machineId, destPath);
+        if (S.at || destPath == null || writable === false) return document.createDocumentFragment();
 
         // A real file input, kept out of sight and clicked by the button: the OS picker is the only way to
         // reach the filesystem, and a bare <input type=file> cannot be styled to belong in this row. Files

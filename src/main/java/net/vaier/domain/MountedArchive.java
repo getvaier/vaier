@@ -87,8 +87,7 @@ public record MountedArchive(String mountpoint) {
     /** {@code entries}, as read under the mountpoint, moved back onto their archive coordinates. */
     public List<FileEntry> anchor(List<FileEntry> entries) {
         return entries.stream()
-            .map(e -> new FileEntry(e.name(), toArchivePath(e.path()), e.directory(), e.sizeBytes(),
-                e.modified()))
+            .map(e -> e.at(toArchivePath(e.path())))
             .toList();
     }
 }

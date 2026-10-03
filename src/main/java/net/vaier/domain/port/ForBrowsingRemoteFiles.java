@@ -1,6 +1,7 @@
 package net.vaier.domain.port;
 
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FilePermissions;
 import net.vaier.domain.SshTarget;
 
 import java.io.IOException;
@@ -153,7 +154,12 @@ public interface ForBrowsingRemoteFiles {
      * The entries are as the remote reported them — unordered; listing order is a domain decision
      * ({@link FileEntry#listing}).
      */
-    record DirectoryListing(List<FileEntry> entries, String hostKeyFingerprint) {
+    record DirectoryListing(List<FileEntry> entries, String hostKeyFingerprint, FilePermissions directory) {
+
+        /** A listing whose folder reported no mode or owner of its own. */
+        public DirectoryListing(List<FileEntry> entries, String hostKeyFingerprint) {
+            this(entries, hostKeyFingerprint, null);
+        }
     }
 
     /** Whether a path is a directory, and its size in bytes — the answer to {@link #stat}. */

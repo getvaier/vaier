@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.adapter.driven.SshConnector.Connection;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FilePermissions;
 import net.vaier.domain.NoSftpSubsystemException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PermissionDeniedException;
@@ -37,8 +38,9 @@ import java.util.Map;
  * pin an SSH connection to a machine for every directory the operator clicked.
  *
  * <p>Translation only, no decisions: the remote's {@code readdir} answer becomes {@link FileEntry}
- * values, and the domain decides what a path is and what order a directory reads in. The one thing the
- * adapter drops is {@code .} and {@code ..} — those are artifacts of the SFTP protocol, not files.
+ * values, and the domain decides what a path is and what order a directory reads in. {@code .} and {@code ..}
+ * are artifacts of the SFTP protocol, not files, so neither is an entry; {@code .}'s attributes are kept as the
+ * listed folder's own.
  */
 @Component
 @Slf4j
@@ -56,15 +58,21 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
              SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
 
             List<FileEntry> entries = new ArrayList<>();
+            FilePermissions folder = null;
             for (SftpClient.DirEntry entry : sftp.readDir(path)) {
                 String name = entry.getFilename();
-                if (SELF.equals(name) || PARENT.equals(name)) {
+                if (SELF.equals(name)) {
+                    // readdir's "." is the listed folder itself: its owner and mode, with no second round trip.
+                    folder = permissions(entry.getAttributes());
+                    continue;
+                }
+                if (PARENT.equals(name)) {
                     continue;
                 }
                 entries.add(toFileEntry(path, name, entry.getAttributes()));
             }
             log.debug("Listed {} entries in {} on {}", entries.size(), path, target.host());
-            return new DirectoryListing(List.copyOf(entries), conn.fingerprint());
+            return new DirectoryListing(List.copyOf(entries), conn.fingerprint(), folder);
 
         } catch (IOException | UncheckedIOException e) {
             // UncheckedIOException is not belt-and-braces: MINA's readDir is lazy, so an SFTP status arrives
@@ -481,7 +489,17 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
     private static FileEntry toFileEntry(String parentPath, String name, SftpClient.Attributes attrs) {
         // The name is joined to the requested directory by the domain, so a remote that answers readdir
         // with a path-shaped name cannot fabricate an entry outside the directory being listed.
-        return FileEntry.in(parentPath, name, attrs.isDirectory(), Math.max(0, attrs.getSize()), modifiedAt(attrs));
+        return FileEntry.in(parentPath, name, attrs.isDirectory(), Math.max(0, attrs.getSize()), modifiedAt(attrs),
+            permissions(attrs));
+    }
+
+    /** The mode and owner, or {@code null} when the server did not report both. */
+    private static FilePermissions permissions(SftpClient.Attributes attrs) {
+        if (!attrs.getFlags().contains(SftpClient.Attribute.Perms)
+                || !attrs.getFlags().contains(SftpClient.Attribute.UidGid)) {
+            return null;
+        }
+        return new FilePermissions(attrs.getPermissions(), attrs.getUserId(), attrs.getGroupId());
     }
 
     /** A server that reports no mtime still lists — the entry simply carries the epoch. */

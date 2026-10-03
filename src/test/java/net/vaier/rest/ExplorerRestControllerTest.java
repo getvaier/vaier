@@ -12,8 +12,11 @@ import net.vaier.application.ViewFileUseCase.View;
 import net.vaier.domain.Archive;
 import net.vaier.domain.CannotDeleteSftpRootException;
 import net.vaier.domain.ConflictException;
+import net.vaier.domain.EffectiveUserIds;
 import net.vaier.domain.Excludes;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FilePermissions;
+import net.vaier.domain.FolderAccess;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PathOutsideSftpRootException;
@@ -50,6 +53,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -539,6 +543,23 @@ class ExplorerRestControllerTest {
             .extracting(FileEntryResponse::viewable).isEqualTo(false);
         assertThat(entries).filteredOn(e -> e.name().equals("photos")).singleElement()
             .extracting(FileEntryResponse::viewable).isEqualTo(false);
+    }
+
+    @Test
+    void get_carriesTheDomainsWritableVerdict_perEntryAndForTheFolder_andUnknownStaysUnsaid() {
+        // /tmp as geir: the folder takes new entries, but only geir's own may be removed from it.
+        FolderAccess access = FolderAccess.of(new FilePermissions(01777, 0, 0), new EffectiveUserIds(1000, Set.of(1000)));
+        when(browseFilesUseCase.listDirectory(mid("apalveien5"), "/tmp", null)).thenReturn(new MachineDirectory(
+            SftpRoot.NONE, "/tmp", List.of(
+                FileEntry.in("/tmp", "mine", false, 1, WHEN, new FilePermissions(0644, 1000, 1000)),
+                FileEntry.in("/tmp", "roots", false, 1, WHEN, new FilePermissions(0644, 0, 0)),
+                FileEntry.in("/tmp", "unread", false, 1, WHEN)),
+            null, ProtectedPaths.none(), access));
+
+        DirectoryResponse body = controller.list(mid("apalveien5").value(), "/tmp", null).getBody();
+
+        assertThat(body.writable()).isTrue();
+        assertThat(body.entries()).extracting(FileEntryResponse::writable).containsExactly(true, false, null);
     }
 
     // --- selection zip: download a whole fleet-wide selection as one zip -------------------------------

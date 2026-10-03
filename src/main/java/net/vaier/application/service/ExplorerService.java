@@ -12,6 +12,7 @@ import net.vaier.application.UploadFileUseCase;
 import net.vaier.application.ViewFileUseCase;
 import net.vaier.application.ViewFileUseCase.View;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FolderAccess;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.Operator;
@@ -30,6 +31,7 @@ import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
 import net.vaier.domain.port.ForMountingArchives;
+import net.vaier.domain.port.ForHoldingEffectiveUserIds;
 import net.vaier.domain.port.ForReadingProtectedPaths;
 import net.vaier.domain.port.ForResolvingSftpRoots;
 import net.vaier.domain.port.ForResolvingSshTargets;
@@ -70,6 +72,7 @@ public class ExplorerService
     private final ForHoldingBundles forHoldingBundles;
     private final ForMountingArchives forMountingArchives;
     private final ForReadingProtectedPaths forReadingProtectedPaths;
+    private final ForHoldingEffectiveUserIds forHoldingEffectiveUserIds;
 
     @Override
     public MachineDirectory listDirectory(MachineId machineId, String path, String at) {
@@ -103,9 +106,13 @@ public class ExplorerService
         // Whether a given entry is covered is the domain's decision (ProtectedPaths.covers — source paths minus
         // excludes), asked per entry when the response is rendered, never re-derived in the browser.
         ProtectedPaths protectedPaths = forReadingProtectedPaths.protectedPathsFor(machineId);
+        // Who Vaier signs in as was learned on the fleet's rounds; whether that user may write here is the
+        // domain's to decide (FolderAccess), asked per entry when the response is rendered.
+        FolderAccess access = FolderAccess.of(listing.directory(),
+            forHoldingEffectiveUserIds.get(machineId).orElse(null));
         log.debug("Listed {} on {}", directory, machineId);
-        return new MachineDirectory(root, directory, FileEntry.listing(root.anchor(listing.entries())),
-            protectedPaths);
+        return new MachineDirectory(root, directory, FileEntry.listing(root.anchor(listing.entries())), null,
+            protectedPaths, access);
     }
 
     /**

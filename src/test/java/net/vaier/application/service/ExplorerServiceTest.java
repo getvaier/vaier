@@ -6,7 +6,10 @@ import net.vaier.application.ViewFileUseCase.View;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CannotDeleteSftpRootException;
 import net.vaier.domain.ConflictException;
+import net.vaier.domain.EffectiveUserIds;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FilePermissions;
+import net.vaier.domain.FolderAccess;
 import net.vaier.domain.Upload;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.MachineId;
@@ -22,6 +25,7 @@ import net.vaier.domain.Selection;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.port.ForHoldingBundles;
+import net.vaier.domain.port.ForHoldingEffectiveUserIds;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
@@ -52,6 +56,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -86,6 +91,7 @@ class ExplorerServiceTest {
     @Mock ForMountingArchives forMountingArchives;
     @Mock ForReadingProtectedPaths forReadingProtectedPaths;
     @Mock ForHoldingBundles forHoldingBundles;
+    @Mock ForHoldingEffectiveUserIds forHoldingEffectiveUserIds;
 
     @InjectMocks ExplorerService service;
 
@@ -142,6 +148,21 @@ class ExplorerServiceTest {
         // the coverage decision itself stays in the domain.
         assertThat(directory.protectedPaths().covers("/home/geir/docs")).isTrue();
         verify(forReadingProtectedPaths).protectedPathsFor(mid("apalveien5"));
+    }
+
+    @Test
+    void listDirectory_carriesTheFoldersAccess_fromItsListedAttributesAndTheHeldEffectiveUserIds() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        FilePermissions etc = new FilePermissions(0755, 0, 0);
+        EffectiveUserIds geir = new EffectiveUserIds(1000, Set.of(1000));
+        when(forHoldingEffectiveUserIds.get(mid("apalveien5"))).thenReturn(Optional.of(geir));
+        remoteAnswers(new DirectoryListing(List.of(
+            FileEntry.in("/etc", "hosts", false, 120, WHEN)), "SHA256:pinned", etc));
+
+        MachineDirectory directory = service.listDirectory(mid("apalveien5"), "/etc");
+
+        // Learned on the rounds, read here from memory: no SSH exec per listing.
+        assertThat(directory.access()).isEqualTo(FolderAccess.of(etc, geir));
     }
 
     @Test

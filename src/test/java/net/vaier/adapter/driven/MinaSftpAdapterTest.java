@@ -2,6 +2,7 @@ package net.vaier.adapter.driven;
 
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FilePermissions;
 import net.vaier.domain.HostKeyMismatchException;
 import net.vaier.domain.NoSftpSubsystemException;
 import net.vaier.domain.NoSshServerException;
@@ -16,6 +17,7 @@ import org.apache.sshd.common.channel.Channel;
 import org.apache.sshd.common.channel.ChannelListener;
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory;
 import org.apache.sshd.server.SshServer;
+import org.apache.sshd.sftp.SftpModuleProperties;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.AbstractCommandSupport;
 import org.apache.sshd.server.command.Command;
@@ -122,6 +124,26 @@ class MinaSftpAdapterTest {
 
         FileEntry media = listing.entries().stream().filter(e -> e.name().equals("media")).findFirst().orElseThrow();
         assertThat(media.directory()).isTrue();
+    }
+
+    @Test
+    void carriesEachEntrysModeAndOwner_andTheListedFoldersOwn_soWritingCanBeJudged() throws Exception {
+        int port = startServer();
+        // OpenSSH speaks SFTP v3, which reports numeric owners; MINA would otherwise negotiate v6 and send names.
+        SftpModuleProperties.SFTP_VERSION.set(server, 3);
+        Path notes = Files.writeString(remoteRoot.resolve("notes.txt"), "x");
+        Files.setPosixFilePermissions(notes, PosixFilePermissions.fromString("rw-r-----"));
+        Files.setPosixFilePermissions(remoteRoot, PosixFilePermissions.fromString("rwxr-x---"));
+        int uid = (Integer) Files.getAttribute(notes, "unix:uid");
+        int gid = (Integer) Files.getAttribute(notes, "unix:gid");
+
+        DirectoryListing listing = adapter.list(target(port), remote(""));
+
+        assertThat(listing.entries()).singleElement().extracting(FileEntry::permissions)
+            .isEqualTo(new FilePermissions(0640, uid, gid));
+        // The folder's own attributes come from readdir's "." — no second round trip to stat it.
+        assertThat(listing.directory()).isEqualTo(new FilePermissions(0750,
+            (Integer) Files.getAttribute(remoteRoot, "unix:uid"), (Integer) Files.getAttribute(remoteRoot, "unix:gid")));
     }
 
     @Test

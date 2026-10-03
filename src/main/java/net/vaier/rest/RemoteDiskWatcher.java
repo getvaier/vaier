@@ -28,6 +28,7 @@ import net.vaier.domain.NoSshServerException;
 import net.vaier.domain.RemoteDiskForecastTracker;
 import net.vaier.domain.RemoteDiskPressureTracker;
 import net.vaier.domain.DockerCommandAccess;
+import net.vaier.domain.EffectiveUserIds;
 import net.vaier.domain.PendingOsUpdates;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.ReverseProxyAuditTracker;
@@ -38,6 +39,7 @@ import net.vaier.domain.port.ForPersistingDiskFillTrends;
 import net.vaier.domain.port.ForPersistingDiskPressureState;
 import net.vaier.domain.port.ForPersistingContainerStandings;
 import net.vaier.domain.port.ForPersistingMissingDefaultRoutes;
+import net.vaier.domain.port.ForHoldingEffectiveUserIds;
 import net.vaier.domain.port.ForHoldingPendingOsUpdates;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRecordingDockerCommandAccess;
@@ -173,6 +175,8 @@ public class RemoteDiskWatcher {
     private final RemoteDiskForecastTracker forecastTracker;
     // The sixth fact on this trip: how many OS updates wait, read without refreshing the lists or needing root.
     private final ForHoldingPendingOsUpdates pendingOsUpdates;
+    // The seventh: who the effective user is in numbers, so the Explorer can tell where it may write.
+    private final ForHoldingEffectiveUserIds effectiveUserIds;
 
     // The stream the Explorer already holds open for fleet liveness (peers, LAN reachability) — piggybacking
     // here costs no new connection and no timer.
@@ -202,7 +206,8 @@ public class RemoteDiskWatcher {
                              ForPersistingMissingDefaultRoutes missingDefaultRoutes,
                              NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier,
                              ForPersistingContainerStandings containerStandings,
-                             ForHoldingPendingOsUpdates pendingOsUpdates) {
+                             ForHoldingPendingOsUpdates pendingOsUpdates,
+                             ForHoldingEffectiveUserIds effectiveUserIds) {
         this.machines = machines;
         this.credentials = credentials;
         this.remoteCommand = remoteCommand;
@@ -231,6 +236,7 @@ public class RemoteDiskWatcher {
         this.missingRouteTracker = new MissingDefaultRouteTracker(missingDefaultRoutes);
         this.containerStandings = containerStandings;
         this.pendingOsUpdates = pendingOsUpdates;
+        this.effectiveUserIds = effectiveUserIds;
     }
 
     @Scheduled(fixedDelay = 300000)
@@ -249,6 +255,7 @@ public class RemoteDiskWatcher {
         diskStandings.retainOnly(fleet);
         claudeStandings.retainOnly(fleet);
         pendingOsUpdates.retainOnly(fleet);
+        effectiveUserIds.retainOnly(fleet);
         diskFillTrends.retainOnly(fleet);
         forgetMachineNetworks.forgetMachineNetworksExcept(fleet);
         auditReverseProxyConfig();
@@ -401,7 +408,7 @@ public class RemoteDiskWatcher {
             // and how full its disks are — each printed where the next one's parser cannot mistake it.
             CommandResult result = remoteCommand.run(machine.id(),
                 MachineBoot.readAheadOf(DockerCommandAccess.probeAheadOf(
-                    PendingOsUpdates.readAheadOf(RemoteDiskUsage.DF_COMMAND))));
+                    PendingOsUpdates.readAheadOf(EffectiveUserIds.readAheadOf(RemoteDiskUsage.DF_COMMAND)))));
             // Reaching a CommandResult at all — whatever df itself said — already proves the SSH session
             // connected and authenticated, so the server is present regardless of df's own exit status.
             recordSshServerPresent(machine);
@@ -411,6 +418,7 @@ public class RemoteDiskWatcher {
             DockerCommandAccess.retain(machine.id(), result, dockerAccessRecorder);
             retainMachineBoot(machine, result);
             PendingOsUpdates.retain(machine.id(), result, pendingOsUpdates, eventPublisher);
+            EffectiveUserIds.retain(machine.id(), result, effectiveUserIds);
             if (result.timedOut() || result.exitCode() != 0) {
                 log.debug("Remote df on {} failed (exit={}, timedOut={}); skipping",
                         machine.name(), result.exitCode(), result.timedOut());

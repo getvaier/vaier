@@ -2503,6 +2503,20 @@ class ExplorerShellTest {
     }
 
     @Test
+    void writeVerbs_honourTheServersWritableVerdict_andOnlyAFirmNoWithholdsThem() throws IOException {
+        // #381: the listing carries the domain's verdict; the shell never judges a mode bit itself, and an
+        // unknown verdict (null) still offers the verb so the machine's own refusal can speak.
+        String js = read("explorer-shell.js");
+        for (String fn : new String[] { "function rowActions(", "function selectionVerbs(",
+                                        "function renderUploadAction(", "function pasteVerb(" }) {
+            int from = js.indexOf(fn);
+            assertThat(from).as(fn).isPositive();
+            assertThat(js.substring(from, js.indexOf("\n    }", from))).as(fn).containsPattern("writable [!=]== false");
+        }
+        assertThat(js).doesNotContain(".permissions").doesNotContain("0o7");
+    }
+
+    @Test
     void openDoesNotReplaceDownload_everyFileCanStillBeSaved() throws IOException {
         // Opening is an addition, not a swap: the Download button stays on every row, viewable or not, and
         // /files/download is untouched — it always saves.

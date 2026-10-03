@@ -1,6 +1,7 @@
 package net.vaier.application;
 
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.FolderAccess;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.SftpRoot;
@@ -62,22 +63,22 @@ public interface BrowseFilesUseCase {
      * empty, because an old archive's backup shape is not today's protection.
      */
     record MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at,
-                            ProtectedPaths protectedPaths) {
+                            ProtectedPaths protectedPaths, FolderAccess access) {
 
-        /** A present-tense listing (no archive coordinate, nothing marked protected). */
+        /** A present-tense listing (no archive coordinate, nothing marked protected, access unknown). */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries) {
-            this(root, path, entries, null, ProtectedPaths.none());
+            this(root, path, entries, null, ProtectedPaths.none(), FolderAccess.UNKNOWN);
         }
 
-        /** A listing at an archive coordinate — the past, where nothing is marked protected. */
+        /** A listing at an archive coordinate — the past, where nothing is marked protected or writable. */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at) {
-            this(root, path, entries, at, ProtectedPaths.none());
+            this(root, path, entries, at, ProtectedPaths.none(), FolderAccess.UNKNOWN);
         }
 
         /** A present-tense listing carrying what the machine backs up, so entries can be marked. */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries,
                                 ProtectedPaths protectedPaths) {
-            this(root, path, entries, null, protectedPaths);
+            this(root, path, entries, null, protectedPaths, FolderAccess.UNKNOWN);
         }
     }
 }

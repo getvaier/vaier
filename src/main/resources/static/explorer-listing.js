@@ -91,7 +91,9 @@
                 // The entries are at the machine's TRUE coordinates — the ones df, borg and the operator's own
                 // terminal use — and `root` says where its tree begins. In the past those are the paths the
                 // archive captured, and `root` is "/", the archive's own beginning; `at` echoes the archive read.
-                return { root: body.root, path: body.path, at: body.at, entries: body.entries };
+                // `writable` is the server's verdict on adding to this folder (null: not known).
+                return { root: body.root, path: body.path, at: body.at, writable: body.writable,
+                         entries: body.entries };
             } catch (e) {
                 if (ticket !== inFlight) return { stale: true };
                 return { error: 'Could not reach ' + machineName(machineId) + '.' };

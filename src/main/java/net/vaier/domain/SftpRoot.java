@@ -157,7 +157,7 @@ public record SftpRoot(String prefix) {
             return entries;
         }
         return entries.stream()
-            .map(e -> new FileEntry(e.name(), toTruePath(e.path()), e.directory(), e.sizeBytes(), e.modified()))
+            .map(e -> e.at(toTruePath(e.path())))
             .toList();
     }
 

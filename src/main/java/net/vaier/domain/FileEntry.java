@@ -24,7 +24,8 @@ import java.util.Objects;
  * metacharacters — Explorer speaks SFTP, a binary protocol with no command line, and {@code $(…)} or a
  * backtick is a perfectly legal Linux filename that must stay reachable.
  */
-public record FileEntry(String name, String path, boolean directory, long sizeBytes, Instant modified) {
+public record FileEntry(String name, String path, boolean directory, long sizeBytes, Instant modified,
+                        FilePermissions permissions) {
 
     /** Directories first, then by name, case-insensitively — how a human expects a folder to read. */
     private static final Comparator<FileEntry> LISTING_ORDER =
@@ -40,13 +41,29 @@ public record FileEntry(String name, String path, boolean directory, long sizeBy
         Objects.requireNonNull(modified, "A file entry must carry a modified time");
     }
 
+    /** An entry whose mode and owner were not reported — unknown, never "nobody may write it". */
+    public FileEntry(String name, String path, boolean directory, long sizeBytes, Instant modified) {
+        this(name, path, directory, sizeBytes, modified, null);
+    }
+
     /**
      * The entry named {@code name} inside the directory at {@code parentPath} — the only way the SFTP
      * adapter builds an entry, so a remote server cannot fabricate a path by answering {@code readdir}
      * with something like {@code ../../etc}: the name is validated as a single segment and joined here.
      */
     public static FileEntry in(String parentPath, String name, boolean directory, long sizeBytes, Instant modified) {
-        return new FileEntry(name, childPath(parentPath, name), directory, sizeBytes, modified);
+        return in(parentPath, name, directory, sizeBytes, modified, null);
+    }
+
+    /** As {@link #in(String, String, boolean, long, Instant)}, carrying the mode and owner SFTP reported. */
+    public static FileEntry in(String parentPath, String name, boolean directory, long sizeBytes, Instant modified,
+                               FilePermissions permissions) {
+        return new FileEntry(name, childPath(parentPath, name), directory, sizeBytes, modified, permissions);
+    }
+
+    /** This same entry at {@code path} — how a jail or an archive mount maps it home, keeping all it carries. */
+    public FileEntry at(String path) {
+        return new FileEntry(name, path, directory, sizeBytes, modified, permissions);
     }
 
     /**
