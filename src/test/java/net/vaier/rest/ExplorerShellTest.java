@@ -4065,6 +4065,66 @@ class ExplorerShellTest {
     }
 
     @Test
+    void aServicesPage_opensTheService_thenSaysWhoCanOpenIt_signingIn_theLaunchpad_andFoldsTheMechanism()
+            throws IOException {
+        // #377: the page mixed four jobs and had no way to the service itself. The head opens it; the blocks
+        // follow in the order an operator decides them, and the route's mechanism folds under Details.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderService(pane) {");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+
+        assertThat(body).as("the head opens the service").contains("openLink(s)");
+        int open = js.indexOf("function openLink(");
+        assertThat(js.substring(open, js.indexOf("\n    }", open)))
+            .contains("'https://' + s.dnsAddress").contains("'_blank'").contains("noopener");
+
+        int who = body.indexOf("section('Who can open it')");
+        int signIn = body.indexOf("disclosure('Sign people in for it')");
+        int pad = body.indexOf("section('On the Launchpad')");
+        int details = body.indexOf("disclosure('Details')");
+        assertThat(who).isPositive();
+        assertThat(signIn).isGreaterThan(who);
+        assertThat(pad).isGreaterThan(signIn);
+        assertThat(details).isGreaterThan(pad);
+        for (String signing : List.of("serviceCredentialEditor(s)", "Marvin always asks")) {
+            assertThat(body.indexOf(signing)).as("%s sits under signing in", signing)
+                .isGreaterThan(signIn).isLessThan(pad);
+        }
+        for (String mechanism : List.of("'Backend'", "'Container image'", "'Path prefix'", "'Root redirect'",
+                                        "'Version endpoint'", "three homes")) {
+            assertThat(body.indexOf(mechanism)).as("%s is folded under Details", mechanism)
+                .isGreaterThan(details);
+        }
+        assertThat(body).as("no jargon headings left")
+            .doesNotContain("section('Access')").doesNotContain("section('About this service')");
+    }
+
+    @Test
+    void signingPeopleIn_staysFolded_untilSomethingIsSet() throws IOException {
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderService(pane) {");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(body).contains(".open = signsPeopleIn(s)");
+
+        int rule = js.indexOf("function signsPeopleIn(");
+        assertThat(js.substring(rule, js.indexOf("\n    }", rule)))
+            .contains("sharedUsername").contains("people").contains("marvinsUsername").contains("askBeforeReading");
+    }
+
+    @Test
+    void theWebsitesList_namesOnlyTroubledRoutes_andLeavesTheBackendToTheServicesDetails() throws IOException {
+        // F11: a Backend column of tunnel addresses and an "OK" on every row. A healthy route paints nothing.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderServices(");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+
+        assertThat(body).doesNotContain("'Backend'").doesNotContain("hostAddress");
+        assertThat(body).as("no header row and no State column").doesNotContain("listHead(");
+        assertThat(body).contains("s.state === 'OK' ? [] : [routeTrouble(s.state)]");
+    }
+
+    @Test
     void hidingAControl_actuallyHidesIt() throws IOException {
         // `el.hidden = true` leans on the browser's own `[hidden] { display: none }`, which ANY display
         // declaration outranks — and `.ex-check-row` sets `display: flex`. So the stream answer put the

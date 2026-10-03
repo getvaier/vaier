@@ -81,8 +81,8 @@ public class ServiceCredentials {
     public void requireMarvinsFor(String host) {
         if (!hasMarvinsFor(host)) {
             throw new IllegalArgumentException(host + " has no login for Marvin, so he cannot use it. The operator "
-                + "can add one on the service's pane under Service credential, after switching it to Social "
-                + "sign-in if it is not already.");
+                + "can add one on the service's page under Sign people in for it, once only people who sign in "
+                + "to Vaier can open it.");
         }
     }
 

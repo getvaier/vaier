@@ -845,6 +845,8 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
 .ex-listing.is-wide.is-stateless .ex-lhead,
 .ex-listing.is-wide.is-stateless .ex-lrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
 .ex-listing.is-wide .ex-lmeta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The Websites list: a name, and a word only on a route in trouble. */
+.ex-listing.is-wide.is-routes .ex-lrow { grid-template-columns: minmax(0, 1fr) auto; }
 
 /* The blocked list (#329). Its verbs get a column of their own instead of riding over the last one the way
    the file listing's do: those are icon-sized and reveal on hover, these are two worded buttons, and at
@@ -1900,7 +1902,8 @@ select.ex-input { cursor: pointer; }
        on a phone while the areas above describe two, and the row would come apart. */
     .ex-listing.is-wide .ex-lhead { display: none; }
     .ex-listing.is-wide .ex-lrow,
-    .ex-listing.is-wide.is-stateless .ex-lrow { grid-template-columns: auto minmax(0, 1fr); }
+    .ex-listing.is-wide.is-stateless .ex-lrow,
+    .ex-listing.is-wide.is-routes .ex-lrow { grid-template-columns: auto minmax(0, 1fr); }
     .ex-listing.is-wide .ex-lmeta { display: none; }
     /* The verbs are not lost, they have moved: Copy, Download and Delete are all on the selection bar, which
        rises the moment anything is ticked. So on a phone the row is a thing and the bar is the verbs — the

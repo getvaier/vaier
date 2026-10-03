@@ -4470,19 +4470,17 @@
         if (!found.length) {
             body.appendChild(note('Nothing is published from this machine yet.', false));
         } else {
-            // The State column exists only while some route is not OK.
-            const withState = found.some((s) => s.state !== 'OK');
-            const rows = el('div', 'ex-listing is-wide' + (withState ? '' : ' is-stateless'));
-            rows.appendChild(listHead(withState ? ['Published at', 'Backend', 'State'] : ['Published at', 'Backend']));
+            // One name per row. Where it points is mechanism (the service's Details); a healthy route paints
+            // nothing, so only a route in trouble carries a word.
+            const rows = el('div', 'ex-listing is-wide is-routes');
             // A stream is not reached at a URL, so the row shows what a client actually dials — the name
             // and the one TLS port — and says which kind of route it is in a word.
             found.forEach((s) => {
-                const backend = (s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : '');
                 rows.appendChild(listRow(entryIco('service'),
                     (s.stream ? s.connectAddress : s.dnsAddress) || serviceName(s),
                     () => go(['fleet', machineId, 'services', serviceName(s)]),
-                    withState ? [backend, s.state || 'UNKNOWN'] : [backend],
-                    withState ? s.state : undefined, s.stream ? kindMark('stream') : null));
+                    s.state === 'OK' ? [] : [routeTrouble(s.state)],
+                    s.state === 'OK' ? undefined : s.state, s.stream ? kindMark('stream') : null));
             });
             body.appendChild(rows);
         }
@@ -4513,6 +4511,11 @@
             }
         }
         pane.appendChild(body);
+    }
+
+    // A route's trouble in words; OK never reaches here.
+    function routeTrouble(state) {
+        return state === 'UNREACHABLE' ? 'Not answering' : 'Not checked yet';
     }
 
     // What kind of route a row is, when it is not the ordinary one. A word: shapes and colour are trouble's.
@@ -4902,7 +4905,7 @@
         const host = s.dnsAddress;
         const current = S.serviceCredentials[host] || { sharedUsername: null, people: [] };
         const wrap = el('div', 'ex-field');
-        const l = el('label'); l.textContent = 'Service credential'; wrap.appendChild(l);
+        const l = el('label'); l.textContent = 'The login Vaier gives it'; wrap.appendChild(l);
 
         if (current.sharedUsername) {
             wrap.appendChild(credentialLine('Everyone', current.sharedUsername, 'Clear',
@@ -4972,9 +4975,9 @@
     // The verdict is the server's (OwnSignIn.advice); this only chooses the words.
     const OWN_SIGN_IN_ADVICE = {
         set_service_credential: (own) => note('This service asks for a username and password. Enter them once '
-            + 'under Service credential and Vaier signs people in, so nobody needs to know them.', false),
-        switch_to_social: (own) => note('This service asks for a username and password. Switch it to social '
-            + 'login and give it a service credential, and Vaier signs people in for it.', false),
+            + 'under Sign people in for it and Vaier signs people in, so nobody needs to know them.', false),
+        switch_to_social: (own) => note('This service asks for a username and password. Let only people who '
+            + 'sign in to Vaier open it, give it a login under Sign people in for it, and Vaier signs them in.', false),
         ignore_opensprinkler_password: (own) => hint('OpenSprinkler still asks for its own password. Turn on '
             + 'Ignore password in the controller’s options and Vaier’s sign-in is the only one people meet.'),
         own_sign_in_page: (own) => hint('It has its own sign-in page too — people sign in to it themselves.'),
@@ -5019,6 +5022,22 @@
         return wrap;
     }
 
+    // The service's own public address, opened beside Vaier rather than in place of it.
+    function openLink(s) {
+        const a = el('a', 'ex-btn is-accent');
+        a.href = 'https://' + s.dnsAddress + (s.pathPrefix || '');
+        a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.innerHTML = svg('route', 'ex-ico');
+        const t = el('span'); t.textContent = 'Open'; a.appendChild(t);
+        return a;
+    }
+
+    // Something about signing people in is already set, so its fold opens on arrival.
+    function signsPeopleIn(s) {
+        const c = S.serviceCredentials[s.dnsAddress] || {};
+        return !!(c.sharedUsername || (c.people || []).length || c.marvinsUsername || s.askBeforeReading);
+    }
+
     function renderService(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
@@ -5026,75 +5045,83 @@
         if (!s) return pane.appendChild(note('That service is no longer published from ' + machineName + '.',
             true));
 
-        pane.appendChild(paneHead(s.dnsAddress || serviceName(s), false, machineName));
+        // The head is the service and the way into it. A stream has no page to open, so it says where to dial.
+        const head = paneHead(s.launchpadAlias || serviceName(s), false,
+            s.stream ? s.connectAddress : machineName);
+        if (!s.stream) headActions(head, [openLink(s)]);
+        pane.appendChild(head);
 
         const body = el('div', 'ex-pane-body');
 
-        // --- do: the route's settings, which are the whole reason to open a service ------------------
-        //
-        // Two named groups rather than one "What to do next", because they answer two different questions —
-        // who may reach this service, and how it appears — and the first of those is the most consequential
-        // control on the pane. A field label says which field it is; a band heading says what you are
-        // deciding, and collapsing the two left a security setting in an undifferentiated list beside a
-        // cosmetic one. The rule that governs a band is its ORDER; a band may still name its groups where
-        // they are genuinely about different things.
-        body.appendChild(section('Access'));
+        // 1. Who can open it — the most consequential control on the page, so first.
+        body.appendChild(section('Who can open it'));
         const authMode = s.authMode || (s.authenticated ? 'social' : 'none');
         if (s.stream) {
-            // No picker, because there is nothing to pick: the backend refuses a login on a stream, and a
-            // control that can only be refused is worse than none. Say why instead.
-            body.appendChild(hint('Nothing inside a stream is a web request, so Vaier cannot put a login in '
-                + 'front of it and CrowdSec cannot watch it. The service’s own password is the only gate.'));
+            // No picker, because there is nothing to pick: the backend refuses a login on a stream.
+            body.appendChild(hint('This is not a website, so Vaier cannot ask visitors to sign in first. The '
+                + 'service’s own password is the only gate.'));
         } else {
             const authSel = el('select', 'ex-input');
-            [['none', 'Public — no sign-in'], ['social', 'Social login (Google)']].forEach(([v, t]) => {
+            [['none', 'Anyone — no sign-in'], ['social', 'Only people who sign in to Vaier']].forEach(([v, t]) => {
                 const o = el('option'); o.value = v; o.textContent = t; if (v === authMode) o.selected = true;
                 authSel.appendChild(o);
             });
             authSel.onchange = () => patchService(s, { authMode: authSel.value },
-                'Could not update the sign-in requirement.');
-            body.appendChild(formField('Sign-in', 'Which login a visitor must pass to reach this service.', authSel));
+                'Could not update who can open it.');
+            const authField = el('div', 'ex-field'); authField.appendChild(authSel);
+            body.appendChild(authField);
             const hole = openServiceBlock(s);
             if (hole) body.appendChild(hole);
             const own = ownSignInLine(s);
             if (own) body.appendChild(own);
+            if (authMode === 'social') body.appendChild(allowedGroupsEditor(s));
+        }
+
+        // 2. Sign people in for it — folded unless something is set, since most services need none of it.
+        if (!s.stream) {
+            const signIn = disclosure('Sign people in for it');
+            signIn.open = signsPeopleIn(s);
             if (authMode === 'social') {
-                body.appendChild(allowedGroupsEditor(s));
-                body.appendChild(serviceCredentialEditor(s));
+                signIn.appendChild(serviceCredentialEditor(s));
+            } else {
+                signIn.appendChild(hint('Vaier can sign people in only once they have signed in to Vaier — '
+                    + 'choose that under Who can open it.'));
             }
             // Only Marvin reads through a service credential, so the mark sits with it; a marked service
-            // that left Social keeps the box so the mark can still be cleared.
+            // that left Vaier's sign-in keeps the box so the mark can still be cleared.
             if (authMode === 'social' || s.askBeforeReading) {
-                body.appendChild(checkRow('Reading can change things here — Marvin always asks', s.askBeforeReading,
+                signIn.appendChild(checkRow('Reading can change things here — Marvin always asks', s.askBeforeReading,
                     (checked) => patchService(s, { askBeforeReading: checked },
                         'Could not save whether Marvin asks before reading.')));
             }
+            body.appendChild(signIn);
         }
 
-        // The launchpad is a wall of links, and a stream has no link — so it has no tile and no name for one.
+        // 3. On the Launchpad. A stream has no link, so it has no tile.
         if (!s.stream) {
-            body.appendChild(section('Launchpad'));
-            body.appendChild(formField('Display name', 'The name on its launchpad tile — defaults to the subdomain.',
-                blurInput(s.launchpadAlias || '', '(default)',
-                    (val) => patchService(s, { launchpadAlias: val }, 'Could not save the display name.'))));
-            body.appendChild(checkRow('Show a tile for this service on the launchpad', !s.hiddenFromLaunchpad,
+            body.appendChild(section('On the Launchpad'));
+            body.appendChild(checkRow('Show it on the Launchpad', !s.hiddenFromLaunchpad,
                 (checked) => patchService(s, { hiddenFromLaunchpad: !checked },
-                    'Could not update the launchpad visibility.')));
+                    'Could not update whether it shows on the Launchpad.')));
+            body.appendChild(formField('Its name there', 'Leave empty to use ' + serviceName(s) + '. Its icon is '
+                + 'the one the service shows for itself.',
+                blurInput(s.launchpadAlias || '', serviceName(s),
+                    (val) => patchService(s, { launchpadAlias: val }, 'Could not save its name.'))));
         }
 
-        // --- know: what the service is, and the reference behind it -----------------------------------
-        //
-        // The coordinates — the read-only truth about the route, the name it answers on and its backend.
-        body.appendChild(section('About this service'));
-        body.appendChild(kv(s.stream ? [
+        // 4. Details — the route's mechanism, read and set rarely.
+        const details = disclosure('Details');
+        details.appendChild(kv(s.stream ? [
             ['Connect at', coord(s.connectAddress)],
+            ['Kind', 'Stream (TCP)'],
+            ['Runs on', machineName],
             ['Route', s.state],
             ['Backend', coord((s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : ''))],
-            ['Kind', 'Stream (TCP)'],
             ['Container image', coord(s.image)],
             ['Version', coord(s.version)],
         ] : [
             ['Address', coord(s.dnsAddress)],
+            ['Runs on', machineName],
             ['Route', s.state],
             ['Backend', coord((s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : ''))],
             ['Path prefix', coord(s.pathPrefix)],
@@ -5102,49 +5129,45 @@
             ['Version', coord(s.version)],
         ]));
 
-        // Rarely wanted, so folded — but named by what is inside it. "Advanced" said only that the operator
-        // was unlikely to want it, which is not enough to decide whether to open it. Every knob in it is an
-        // HTTP one — a redirect, a URL to probe, a URL to swap — so a stream is not offered the fold at all.
+        // Every knob here is an HTTP one, so a stream is offered none of them.
         if (!s.stream) {
-        const adv = disclosure('Root redirect, version probe and the direct LAN link');
-        adv.appendChild(formField('Root redirect', 'Send the bare address straight on to a sub-path.',
-            blurInput(s.rootRedirectPath || '', 'e.g. /dashboard',
-                (val) => patchService(s, { rootRedirectPath: val }, 'Could not save the redirect.'))));
+            details.appendChild(formField('Root redirect', 'Send the bare address straight on to a sub-path.',
+                blurInput(s.rootRedirectPath || '', 'e.g. /dashboard',
+                    (val) => patchService(s, { rootRedirectPath: val }, 'Could not save the redirect.'))));
 
-        const ve = plainInput(s.versionEndpoint || '', '/sys/metrics');
-        const vp = plainInput(s.versionProperty || '', 'property');
-        ve.dataset.original = s.versionEndpoint || ''; vp.dataset.original = s.versionProperty || '';
-        const saveVersion = () => {
-            const endpoint = ve.value.trim(), property = vp.value.trim();
-            if (endpoint === (ve.dataset.original || '') && property === (vp.dataset.original || '')) return;
-            patchService(s, { versionEndpoint: endpoint, versionProperty: property },
-                'Could not save the version endpoint.').then((ok) => {
-                    if (ok !== false) { ve.dataset.original = endpoint; vp.dataset.original = property; }
-                });
-        };
-        ve.onblur = saveVersion; vp.onblur = saveVersion;
-        ve.onkeydown = vp.onkeydown = (e) => { if (e.key === 'Enter') e.target.blur(); };
-        const verPair = el('div', 'ex-field-pair'); verPair.append(ve, vp);
-        adv.appendChild(formField('Version endpoint',
-            'Where Vaier reads this service’s running version, and the JSON property to read from it.', verPair));
+            const ve = plainInput(s.versionEndpoint || '', '/sys/metrics');
+            const vp = plainInput(s.versionProperty || '', 'property');
+            ve.dataset.original = s.versionEndpoint || ''; vp.dataset.original = s.versionProperty || '';
+            const saveVersion = () => {
+                const endpoint = ve.value.trim(), property = vp.value.trim();
+                if (endpoint === (ve.dataset.original || '') && property === (vp.dataset.original || '')) return;
+                patchService(s, { versionEndpoint: endpoint, versionProperty: property },
+                    'Could not save the version endpoint.').then((ok) => {
+                        if (ok !== false) { ve.dataset.original = endpoint; vp.dataset.original = property; }
+                    });
+            };
+            ve.onblur = saveVersion; vp.onblur = saveVersion;
+            ve.onkeydown = vp.onkeydown = (e) => { if (e.key === 'Enter') e.target.blur(); };
+            const verPair = el('div', 'ex-field-pair'); verPair.append(ve, vp);
+            details.appendChild(formField('Version endpoint',
+                'Where Vaier reads this service’s running version, and the JSON property to read from it.', verPair));
 
-        adv.appendChild(checkRow('Link straight to the LAN URL when the visitor shares its network',
-            !s.directUrlDisabled,
-            (checked) => patchService(s, { directUrlDisabled: !checked },
-                'Could not update the direct LAN URL setting.')));
-        body.appendChild(adv);
+            details.appendChild(checkRow('Link straight to the LAN URL when the visitor shares its network',
+                !s.directUrlDisabled,
+                (checked) => patchService(s, { directUrlDisabled: !checked },
+                    'Could not update the direct LAN URL setting.')));
         }
 
-        // The point of the single namespace, said plainly. These three are not three things that happen to
-        // share a name — they are one service, and when one of them is wrong the service is down.
-        body.appendChild(note('A published service is one thing with three homes: a container on '
+        // One service, three homes: when one of them is wrong the service is down.
+        details.appendChild(hint('A published service is one thing with three homes: a container on '
             + machineName + ', a route through Traefik, and the name it answers on — '
             + (s.dnsAddress || 'its name') + '. '
             + (s.stream ? 'Traefik answers that name on 443, proves it with a Let’s Encrypt certificate, '
                 + 'and hands the bytes to the backend port unchanged. ' : '')
             + 'Unpublishing removes the route; the name goes on resolving '
             + 'under your wildcard record, which is yours and Vaier never touches. The container keeps '
-            + 'running — the machine that hosts it does not notice.', false));
+            + 'running — the machine that hosts it does not notice.'));
+        body.appendChild(details);
 
         // --- danger: the one verb that takes the service off the internet -----------------------------
         //
@@ -5390,6 +5413,8 @@
         // it a phone would simply lose them — a container row would be a name and nothing else, no image, no
         // state — so the narrow layout would be hiding facts rather than rearranging them. The state keeps
         // its dot here too: it is the one column that is a colour before it is a word.
+        // A row with nothing to restate keeps no second line.
+        if (state === undefined && !meta.some(Boolean)) return row;
         const sub = document.createElement('span');
         sub.className = 'ex-lsub';
         if (state !== undefined) sub.appendChild(stateDot(state));

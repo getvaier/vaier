@@ -122,8 +122,8 @@ class ServiceCredentialsTest {
             assertThatThrownBy(() -> without.marvinsFor(OPENHAB))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("openhab.example.com has no login for Marvin, so he cannot use it. The operator can "
-                    + "add one on the service's pane under Service credential, after switching it to Social "
-                    + "sign-in if it is not already.");
+                    + "add one on the service's page under Sign people in for it, once only people who sign in "
+                    + "to Vaier can open it.");
         }
     }
 }

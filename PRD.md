@@ -4539,4 +4539,16 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Machine kind** on cards and page heads ("Storage box · Synology", "Computer that stays on", "Phone", "Where Vaier runs") — one table shared with the Topology.
 - **Plain renames**: Send its setup again (Reissue), Give it new keys (Regenerate), Keys and removal, Sign-in for the shell, "Vaier signs in as geir and can only do what geir can", Last seen; Connection details keep the addresses under plain labels.
 
-**Still to come in #377.** 3b: the service page. 3c: Security as sentences and a ~15-term Concepts page.
+**Still to come in #377.** 3c: Security as sentences and a ~15-term Concepts page (3b shipped, §6.73).
+
+### 6.73 Plain words: a published service's page ✅ (part 3b of [#377](https://github.com/getvaier/vaier/issues/377), slice 3 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** A service's page mixed four jobs (access, the credential mapper, Marvin's flag, Launchpad naming) with six route facts and an explainer, and had no link to the service itself. The Websites list showed every route's backend `ip:port` and an "OK" on every row (audit finding F11).
+
+**What.** Words and arrangement only; no endpoint changed and every capability stays reachable.
+- **Head**: the service's name (its Launchpad name when set) and an **Open** button, a plain link to its public `https://` address in a new tab. A stream says where to dial instead.
+- **Four blocks**: **Who can open it** ("Anyone — no sign-in" / "Only people who sign in to Vaier", allowed groups, the open-service warning); **Sign people in for it** (service credentials and Marvin's ask-before-reading flag, folded unless something is set); **On the Launchpad** (shows or not, its name there); **Details** (folded: address, machine, route state, backend, path prefix, image, version, root redirect, version endpoint, direct LAN link, and the three-homes explainer).
+- **Websites list**: one name per row. No backend column and no header; a healthy route paints nothing, and only a route in trouble reads "Not answering" or "Not checked yet".
+- Marvin's refusal when a service has no login for him now points at **Sign people in for it**.
+
+**Backlog.** The Launchpad icon is whatever the service shows for itself; choosing one would need a new setting. 3c remains: Security as sentences and a ~15-term Concepts page.

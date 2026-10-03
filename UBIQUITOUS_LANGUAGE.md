@@ -654,6 +654,11 @@ The one place they may appear on screen is the **Concepts page**, which exists s
 | handshake (on **Add a machine** and a machine's page) | "connects", "last seen" |
 | SSH credential, SSH access | "Sign-in for the shell"; "Let Vaier open a shell on this machine"; "Vaier signs in as ‹user›" |
 | containers, published services, disk (as door names) | **Apps**, **Websites**, **Storage** — the **machine door** names |
+| auth mode (on a published service's page) | "Who can open it": "Anyone — no sign-in" or "Only people who sign in to Vaier" |
+| service credential (on a published service's page) | "Sign people in for it"; the field is "The login Vaier gives it" |
+| launchpad alias, hidden from launchpad | "On the Launchpad": "Show it on the Launchpad", "Its name there" |
+| backend, route state, path prefix, root redirect, version endpoint | only under a published service's **Details** |
+| route state (in the **Websites** list) | nothing while it is `OK`; "Not answering", "Not checked yet" otherwise |
 | LAN anchor | never named; the operator sees only which machine a thing is reached via |
 | scannable LAN | "At ‹site›" — one row per network in the picker, named by the machine it is reached through |
 | LAN CIDR, server LAN CIDR | "the network behind it" — normally the network Vaier read off the machine and offered on it ("‹machine› sits on ‹network›"), typed into a machine's form only for a network Vaier cannot see |
