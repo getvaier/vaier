@@ -4566,7 +4566,7 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 
 **Backlog.** Say the breach mail in the same plain words (knock, country, time left).
 
-### 6.75 One front door, a flatter menu ✅ part 4a (part 4a of [#378](https://github.com/getvaier/vaier/issues/378), slice 4 of [#380](https://github.com/getvaier/vaier/issues/380))
+### 6.75 One front door, a flatter menu ✅ parts 4a, 4b (part 4a of [#378](https://github.com/getvaier/vaier/issues/378), slice 4 of [#380](https://github.com/getvaier/vaier/issues/380))
 
 **Why.** An admin landed on the tiles and had to look for the fleet; the menu carried a Fleet item, jobs grouped under headings, and a Credentials entry that read "Nothing stored" every day (audit findings F6, F7).
 
@@ -4577,4 +4577,10 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 - **Fleet credentials** left the menu for a section in Settings that opens them at `settings/credentials`.
 - **Old addresses**: `#/users` opens People and `#/credentials` opens Fleet credentials, and the address bar shows the new address.
 
-**Still to come in #378.** 4b: People ported natively (users, sign-in providers, people waiting to join), which removes the last iframe. 4c: Settings collapses finished setup to one line per item.
+**What (4b).** People is a native pane; no endpoint changed and no authorization changed.
+- **Waiting to be let in** comes first, and only while someone waits: **Let in**, **Let in as admin**, **Turn away** (asks first). The access-request mail's `#/people` lands on it.
+- **People** lists admins then users, each with email, role and groups; a row's **…** menu makes an admin or a user, changes groups (a chip editor, saved per change) and removes access (asks first). The only admin is offered neither role change nor removal. **Add a person** lets an email in before its first sign-in (the old *Pre-approve*).
+- **Sign-in providers** moved here from Settings, unchanged; it leads the page while the first-run door is open. Settings no longer holds it.
+- Read on arrival (`/access`, `/settings/sign-in`), never polled; every write re-reads People and Needs you. `users.html` is deleted; Concepts is the one page still framed.
+
+**Still to come in #378.** 4c: Settings collapses finished setup to one line per item.

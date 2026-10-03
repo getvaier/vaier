@@ -25,7 +25,7 @@ Each row is the short version. The linked page carries the mechanism, the caveat
 | **Wildcard DNS** | One `*.yourdomain.com` record, made once, covers the console, sign-in, and every service you ever publish. Vaier checks it at every boot. → [Networking](docs/NETWORKING.md#wildcard-dns) |
 | **Reverse proxy & edge hardening** | Traefik terminates HTTPS with Let's Encrypt, enforces a security-header and TLS floor on every route, and shows a branded offline page when a backend is down. CrowdSec blocks malicious traffic at the edge; the Explorer says each block in plain words, and you can lift one (even your own), trust the address, or block one yourself. → [Networking](docs/NETWORKING.md#edge-hardening) |
 | **Service publishing & Your services** | Publish any container's web interface in one click. A port that isn't a website — MQTT, a database — is published as a **stream** on the same HTTPS port. **Your services** shows each visitor only what they may reach. → [Networking](docs/NETWORKING.md#publishing-a-service) |
-| **Access management** | Day one needs no OAuth app: the first-run password in Vaier's log makes the first sign-in the admin. Add Google or GitHub from Settings, with roles and per-service access groups. Vaier can hand a gated service its own login, and flags any service left open to anyone. → [Auth](docs/AUTH.md) |
+| **Access management** | Day one needs no OAuth app: the first-run password in Vaier's log makes the first sign-in the admin. Add Google or GitHub, let people in and give them roles and per-service groups, all from People. Vaier can hand a gated service its own login, and flags any service left open to anyone. → [Auth](docs/AUTH.md) |
 | **The Vaier app** | The only way an Android phone or a Windows computer joins: it makes its own key, shows a four-digit join code, and connects the moment you let it in from any browser you're signed in on. The fleet sees it connect and disconnect at once. → [Networking](docs/NETWORKING.md#enrolment-from-the-vaier-app) |
 | **Explorer** | One address space for the whole fleet: files, containers, services, disks and backup archives, with transfer across machines and a link for every place you stand. Each machine says where it stands and installs its OS updates on your yes. An in-app glossary explains every term. → [Explorer](docs/EXPLORER.md) |
 | **Map** | Every machine plotted honestly: a device's own reported position beats an ISP estimate, a disconnected device with nothing reported draws no marker, and an open marker shows where that device has been over the last 30 days. → [Explorer](docs/EXPLORER.md#map) |
@@ -89,7 +89,7 @@ mkdir -p vaier && cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/install.sh | bash
 ```
 
-It asks three things — your domain, your email and your time zone — and offers to install Docker if it is missing. Sign-in providers and mail are set later, in the console's **Settings**. More in [`docs/ADVANCED.md`](docs/ADVANCED.md#the-installer).
+It asks three things — your domain, your email and your time zone — and offers to install Docker if it is missing. Sign-in providers are set later in the console's **People**, and mail in its **Settings**. More in [`docs/ADVANCED.md`](docs/ADVANCED.md#the-installer).
 
 ### 2. Point your domain at it
 

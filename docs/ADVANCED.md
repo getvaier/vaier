@@ -17,7 +17,7 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 - **Offers to install Docker** with Docker's official script (`get.docker.com`) when it is missing.
 - **Offers to start Vaier**: `docker compose pull`, then `docker compose up -d` — through `sudo` when your user can't reach Docker yet. It waits for Vaier to boot and prints the first-run sign-in from the boot log: the URL, the email and the password. If a sign-in provider is already configured there is no first-run door, and it prints the console URL instead.
 
-It deliberately does **not** ask about sign-in providers or mail. Both are set later, in the console, under **Settings** — Google or GitHub under **Settings → Sign-in** ([AUTH](AUTH.md#registering-google-or-github)) — so nothing about OAuth stands between a bare server and a working console.
+It deliberately does **not** ask about sign-in providers or mail. Both are set later, in the console, in the console — Google or GitHub under **People → Sign-in providers** ([AUTH](AUTH.md#registering-google-or-github)), mail under **Settings** — so nothing about OAuth stands between a bare server and a working console.
 
 **Re-run on an existing install**, it asks nothing and offers **Bring Vaier up to date now?** — the same pull and `up -d`.
 

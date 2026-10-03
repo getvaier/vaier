@@ -182,8 +182,8 @@ class ExplorerShellTest {
         // /fleet (#336) is the fleet root's own read — Needs you, GET /fleet/needs —
         // and has the /fleet-credentials kind of justification: a genuinely new capability whose REST surface
         // and view shipped together, composed at the driving edge from use cases that already existed.
-        // /access widens /access/services: a service credential's person picker reads the access entries the
-        // Users page already lists, and its own /access/services/…/credentials shipped with the pane section.
+        // /access widens /access/services: a service credential's person picker reads the access entries
+        // People already lists, and its own /access/services/…/credentials shipped with the pane section.
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
                                        "/docker-services", "/published-services", "/access",
                                        "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
@@ -378,13 +378,17 @@ class ExplorerShellTest {
     // --- 8. the bridge is temporary, and says so --------------------------------------------------------
 
     @Test
-    void theSectionsNotYetPorted_areBridgedIntoTheShellAndMarkedTransitional() throws IOException {
+    void onlyConcepts_isStillFramed_andTheUsersPageIsGone() throws IOException {
         String js = read("explorer-shell.js");
-        // Only two Vaier-wide globals are still framed: Users and Concepts. Settings is native (no settings.html),
-        // Infrastructure is native (no vpn-peers.html), and Backups is native now too — the last fleet-level
-        // bridge is gone, so backups.html is deleted and no longer framed.
-        for (String page : List.of("users.html", "concepts.html")) {
-            assertThat(js).as("bridge to %s", page).contains(page);
+        // Concepts is the one Vaier-wide global still framed. People is native (#378 4b), so users.html is
+        // deleted and nothing names it — a second UI for who gets in would be a second truth to keep honest.
+        assertThat(js).as("bridge to concepts.html").contains("page: 'concepts.html'");
+        assertThat(Files.exists(STATIC.resolve("users.html"))).isFalse();
+        try (var pages = Files.list(STATIC)) {
+            for (Path page : pages.filter(f -> f.toString().matches(".*\\.(html|js)$")).toList()) {
+                assertThat(Files.readString(page)).as("%s names the old Users page", page.getFileName())
+                    .doesNotContain("users.html");
+            }
         }
         assertThat(js).doesNotContain("settings.html");   // ported to a native entry, not framed
         assertThat(js).doesNotContain("vpn-peers.html");  // Infrastructure is native — the bridge is gone
@@ -4726,5 +4730,47 @@ class ExplorerShellTest {
         assertThat(js.substring(settings, js.indexOf("\n    }\n", settings)))
             .as("Settings is the credentials' door now").contains("go(['settings', 'credentials'])");
         assertThat(js).contains("run: () => go(['people'])").doesNotContain("go(['users'])");
+    }
+
+    // --- People, native (#378 slice 4b) ---------------------------------------------------------------
+
+    @Test
+    void people_isNative_waitingFirst_thenPeople_withSignInProvidersMovedInFromSettings() throws IOException {
+        String js = read("explorer-shell.js");
+        int g = js.indexOf("{ name: 'people'");
+        assertThat(js.substring(g, js.indexOf('}', g))).contains("native: true").doesNotContain("page:");
+        assertThat(js).contains("if (kind === 'people') return renderPeople(pane);");
+
+        int from = js.indexOf("function renderPeople(pane) {");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(body).as("render never fetches").doesNotContain("fetch(").doesNotContain("loadPeople(");
+        // Someone waiting comes first, and only when someone is: a healthy People paints no "0 waiting".
+        assertThat(body).contains("if (waiting.length)");
+        int waiting = body.indexOf("section('Waiting to be let in')");
+        assertThat(waiting).isPositive().isLessThan(body.indexOf("section('People')"));
+        assertThat(body).contains("renderSignInProviders(body)");
+
+        // Read on arrival, never on a clock; the providers come along because they live here now.
+        int load = js.indexOf("async function loadPeople() {");
+        assertThat(js.substring(load, js.indexOf("\n    }\n", load)))
+            .contains("fetch('/access'").contains("fetch('/settings/sign-in'");
+        int route = js.indexOf("function applyRoute(path, at) {");
+        assertThat(js.substring(route, js.indexOf("\n    }\n", route))).contains("loadPeople()");
+
+        // Every write users.html made, on the same endpoints.
+        int act = js.indexOf("async function peopleWrite(");
+        assertThat(js.substring(act, js.indexOf("\n    }\n", act)))
+            .contains("'/access/' + encodeURIComponent(email)").contains("loadNeeds()");
+        for (String write : List.of("'/role', 'PATCH'", "'/groups', 'PATCH'", "'', 'DELETE'")) {
+            assertThat(js).as(write).containsPattern("peopleWrite\\([\\w.]+, " + Pattern.quote(write));
+        }
+        assertThat(js).contains("fetch('/settings/sign-in/' + p.id");
+
+        // Settings no longer holds the providers.
+        int settings = js.indexOf("function renderSettings(pane) {");
+        assertThat(js.substring(settings, js.indexOf("\n    }\n", settings))).doesNotContain("signIn");
+        int loadSettings = js.indexOf("async function loadSettings() {");
+        assertThat(js.substring(loadSettings, js.indexOf("\n    }\n", loadSettings)))
+            .doesNotContain("/settings/sign-in");
     }
 }

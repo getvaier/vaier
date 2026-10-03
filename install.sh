@@ -227,7 +227,7 @@ if $interactive; then
       done
       if [ -n "$first_sign_in" ]; then
         printf '\n%s\n\n%s\n\n%s\n' "$(say "Vaier is up. Your first sign-in:")" "$first_sign_in" \
-          "  That first sign-in becomes the admin. Add Google or GitHub under Settings, Sign-in, to invite anyone else."
+          "  That first sign-in becomes the admin. Add Google or GitHub under People, Sign-in providers, to invite anyone else."
       elif [ "$started" -gt 0 ]; then
         say "Vaier is up: https://vaier.$domain"
       else

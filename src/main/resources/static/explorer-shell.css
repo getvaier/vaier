@@ -862,6 +862,28 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
     position: static; opacity: 1; padding-left: 0; background: none; justify-content: flex-end;
 }
 
+/* People (#378 4b): an avatar, who, the quiet facts, and the row's verbs — the blocked list's shape. */
+.ex-listing.is-people { max-width: 760px; }
+.ex-listing.is-people .ex-lrow {
+    grid-template-columns: 34px minmax(0, 1fr) auto; column-gap: 12px; padding: 9px 4px 9px 10px;
+}
+.ex-listing.is-people .ex-lactions {
+    position: static; opacity: 1; padding-left: 0; background: none; justify-content: flex-end;
+}
+.ex-avatar { position: relative; width: 34px; height: 34px; }
+.ex-mono, .ex-avatar-photo {
+    position: absolute; inset: 0; width: 34px; height: 34px; border-radius: var(--radius-1);
+}
+.ex-mono { display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 600; }
+.ex-avatar-photo { object-fit: cover; background: var(--bg-card); }
+/* The connector they last signed in with: a quiet mark on a dark disc, never a white plate. */
+.ex-provider-glyph {
+    position: absolute; right: -4px; bottom: -4px; display: inline-flex; padding: 1.5px;
+    border-radius: 50%; background: var(--bg); color: var(--text-muted);
+}
+.ex-provider-glyph svg { width: 11px; height: 11px; fill: currentColor; display: block; }
+.ex-people-acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
 /* The address is the coordinate, so it is mono; where it comes from is a human fact, so it is not. */
 .ex-tsource { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ex-tip { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1931,6 +1953,25 @@ select.ex-input { cursor: pointer; }
     .ex-listing.is-trusted .ex-lactions {
         grid-area: acts; display: flex; justify-content: flex-start; margin-top: 6px;
     }
+
+    /* People keeps its verbs on a phone too — there is no selection bar to carry them. Someone waiting
+       has three buttons, so they drop under the name. */
+    .ex-listing.is-people .ex-lrow {
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+        grid-template-areas: "av who acts";
+        padding: 10px 0 10px 10px;
+    }
+    .ex-listing.is-people .ex-avatar { grid-area: av; }
+    .ex-listing.is-people .ex-tsource { grid-area: who; }
+    .ex-listing.is-people .ex-torigin { white-space: normal; overflow-wrap: anywhere; }
+    .ex-listing.is-people .ex-lactions { grid-area: acts; display: flex; }
+    .ex-listing.is-people.is-waiting .ex-lrow {
+        grid-template-columns: 34px minmax(0, 1fr);
+        grid-template-areas: "av who" "av acts";
+        padding: 10px;
+    }
+    .ex-listing.is-people.is-waiting .ex-lactions { justify-content: flex-start; margin-top: 8px; }
+    .ex-listing.is-people.is-waiting .ex-people-acts { justify-content: flex-start; }
 
     /* A filename is a thumb-hostile target at any size, so a folder's whole row opens it: the name button's hit area
        is stretched over the row (it is the row that is positioned, so inset:0 resolves against it). The

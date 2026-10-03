@@ -104,10 +104,10 @@
 
     // Vaier-wide entries that are NOT of the fleet, so they sit at the top level of the address space, outside
     // `fleet`, and are reached from the topbar's Vaier menu. The menu lists what the operator does (#378); the
-    // logo is the way home, and Concepts is a quiet footer. People and Concepts still frame their pages.
+    // logo is the way home, and Concepts is a quiet footer. Concepts is the one page still framed.
     // Fleet credentials live under Settings (settings/credentials), not here.
     const GLOBALS = [
-        { name: 'people',   label: 'People',   icon: 'users',  page: 'users.html' },
+        { name: 'people',   label: 'People',   icon: 'users',  native: true },
         { name: 'security', label: 'Security', icon: 'shield', native: true },
         { name: 'chat',     label: 'Chat',     icon: 'chat',   native: true,
           desc: 'Ask Marvin about your fleet' },
@@ -176,7 +176,9 @@
         publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
         access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
         serviceCredentials: {},          // GET /access/services/credentials — host -> { sharedUsername, marvinsUsername, people }
-        people: [],                      // GET /access — the access entries a personal service credential can name
+        people: [],                      // GET /access — the access entries: People's list, and who a personal service credential can name
+        peopleView: { state: 'idle', photos: {} },   // People's own read of those entries, and each one's avatar photo
+        signIn: null,                    // GET /settings/sign-in — the identity providers and the first-run door, read with People
         ownSignIns: [],                  // GET /published-services/sign-ins — what each route's backend asks for by itself
         containers: new Map(),           // machine identity -> its containers, as Vaier last scraped them
         containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
@@ -1377,6 +1379,7 @@
         if (kind === 'map') return renderMap(pane);
         if (kind === 'topology') return renderTopology(pane);
         if (kind === 'settings') return renderSettings(pane);
+        if (kind === 'people') return renderPeople(pane);
         if (kind === 'chat') return renderChat(pane);
         if (kind === 'security') return renderSecurity(pane);
         if (kind === 'credentials') return renderCredentials(pane);
@@ -7337,10 +7340,17 @@
     // Both verbs let the address in, so they share one quiet menu; blocking points the other way and keeps
     // its own section below (#349).
     function threatMenu(d) {
+        return rowMenu('What to do about ' + d.sourceIp, [
+            ['Lift the block', 'Let it back in now. It is blocked again if it misbehaves again.', () => liftBlock(d)],
+            ['Trust this address', 'Never block it again — for when it was you.', () => trustAddress(d)]]);
+    }
+
+    // A row's quiet "…" menu: each item a verb and the one line that says what it does. One open at a time.
+    function rowMenu(title, items) {
         const wrap = el('div', 'ex-vmenu-wrap ex-tmenu');
         const btn = el('button', 'ex-iconbtn');
         btn.innerHTML = svg('more', 'ex-ico');
-        btn.title = 'What to do about ' + d.sourceIp;
+        btn.title = title;
         btn.setAttribute('aria-label', btn.title);
         btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
         const menu = el('div', 'ex-vmenu'); menu.setAttribute('role', 'menu');
@@ -7353,18 +7363,15 @@
             document.addEventListener('click', close);
         };
         menu.onclick = (e) => e.stopPropagation();
-        const item = (label, desc, run) => {
+        items.forEach(([label, desc, run]) => {
             const b = el('button', 'ex-vmenu-item has-desc'); b.setAttribute('role', 'menuitem');
             const text = el('span', 'ex-vmenu-text');
             const l = el('span'); l.textContent = label;
             const ds = el('span', 'ex-vmenu-desc'); ds.textContent = desc;
             text.append(l, ds); b.appendChild(text);
             b.onclick = () => { close(); run(); };
-            return b;
-        };
-        menu.append(
-            item('Lift the block', 'Let it back in now. It is blocked again if it misbehaves again.', () => liftBlock(d)),
-            item('Trust this address', 'Never block it again — for when it was you.', () => trustAddress(d)));
+            menu.appendChild(b);
+        });
         wrap.append(btn, menu);
         return wrap;
     }
@@ -7765,7 +7772,7 @@
         };
     }
 
-    // A top-level global that is still bridged (Users, Concepts) — its page, framed whole, until it is ported.
+    // A top-level global that is still bridged (Concepts) — its page, framed whole.
     function renderGlobalBridge(pane) {
         const g = GLOBALS.find((x) => x.name === S.path[0]);
         pane.className = 'ex-pane is-bridged';
@@ -7774,6 +7781,405 @@
         frame.src = g.page;
         frame.title = g.label;
         pane.appendChild(frame);
+    }
+
+    // --- People (#378 4b): who gets in ---------------------------------------------------------------
+    //
+    // Ported from the old Users page, the last framed page of its kind: the identities waiting to be let in, the
+    // access entries, and the identity providers they sign in with (moved here from Settings). Read on
+    // arrival, never on a clock — nothing pushes a sign-in; the access-request mail and Needs you do. Every
+    // write re-reads both People and Needs you, whose "waiting to be let in" row counts the same entries.
+    async function loadPeople() {
+        const v = S.peopleView;
+        if (v.state !== 'ready') v.state = 'loading';
+        const [entries, signIn] = await Promise.all([
+            fetch('/access', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+            // Which identity providers exist and where each comes from (#264). Never a secret.
+            fetch('/settings/sign-in', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        ]);
+        if (entries) {
+            // Photo URLs are resolved here (the Gravatar hash is async) so render stays synchronous.
+            const photos = {};
+            await Promise.all(entries.map(async (e) => {
+                try {
+                    photos[e.email] = await VaierAvatar.photoUrl({
+                        provider: e.provider, providerUserId: e.providerUserId, email: e.email, size: 64 });
+                } catch (err) { /* the initials stand */ }
+            }));
+            S.people = entries;
+            v.photos = photos;
+        }
+        S.signIn = signIn;
+        v.state = entries ? 'ready' : 'error';
+        if (kindOf(S.path) === 'people') render();
+    }
+
+    // The names that mirror the role, never a per-service group — AccessEntry.ROLE_MIRRORING_GROUPS.
+    const ROLE_MIRRORING_GROUPS = ['admins', 'users'];
+    const PEOPLE_ORDER = { admin: 0, user: 1, pending: 2 };
+    const personLabel = (e) => (e.name && e.name.trim()) || e.email;
+
+    // Monochrome marks for the connector a person last signed in with, worn on the avatar's corner.
+    const PROVIDER_GLYPHS = {
+        local: { label: 'the first-run password',
+            svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14a3 3 0 1 0 0 .01zM7 10a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm3.5 1.6 8.8-8.8 1.4 1.4-1.4 1.4 2 2-1.4 1.4-2-2-1.1 1.1 2 2-1.4 1.4-2-2-3.5 3.5a5 5 0 0 0-1.4-1.4z"/></svg>' },
+        google: { label: 'Google',
+            svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972a6.033 6.033 0 1 1 0-12.064c1.498 0 2.866.549 3.921 1.453l2.814-2.814A9.969 9.969 0 0 0 12.545 2C7.021 2 2.543 6.477 2.543 12s4.478 10 10.002 10c8.396 0 10.249-7.85 9.426-11.748l-9.426-.013z"/></svg>' },
+        github: { label: 'GitHub',
+            svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222 0 1.606-.014 2.898-.014 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>' },
+    };
+    const providerOf = (e) => PROVIDER_GLYPHS[String(e.provider || '').toLowerCase()] || null;
+
+    function personAvatar(e) {
+        const a = el('div', 'ex-avatar');
+        const mono = el('div', 'ex-mono');
+        // A stable hue per email; someone waiting wears the amber of waiting.
+        let hue = 44;
+        if (e.role !== 'pending') { hue = 0; for (let i = 0; i < e.email.length; i++) hue = (hue * 31 + e.email.charCodeAt(i)) % 360; }
+        mono.style.background = 'hsl(' + hue + ',42%,20%)';
+        mono.style.color = 'hsl(' + hue + ',60%,72%)';
+        const words = personLabel(e).trim().split(/\s+/).filter(Boolean);
+        mono.textContent = (words.length >= 2 ? words[0][0] + words[1][0]
+            : (personLabel(e).replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?')).toUpperCase();
+        a.appendChild(mono);
+        const url = S.peopleView.photos[e.email];
+        if (url) {
+            const img = el('img', 'ex-avatar-photo');
+            img.src = url; img.alt = ''; img.onerror = () => img.remove();
+            a.appendChild(img);
+        }
+        const g = providerOf(e);
+        if (g) {
+            const b = el('span', 'ex-provider-glyph');
+            b.title = 'Signed in with ' + g.label;
+            b.innerHTML = g.svg;   // trusted constant markup
+            a.appendChild(b);
+        }
+        return a;
+    }
+
+    // A person in one row: who, then the quiet facts — address, role, groups — then the row's verbs.
+    function personRow(e, facts, actions) {
+        const row = el('div', 'ex-lrow');
+        row.appendChild(personAvatar(e));
+        const who = el('div', 'ex-tsource');
+        const name = el('span', 'ex-tsay'); name.textContent = personLabel(e);
+        const quiet = el('span', 'ex-torigin'); quiet.textContent = facts.filter(Boolean).join(' · ');
+        who.append(name, quiet);
+        const acts = el('div', 'ex-lactions');
+        if (actions) acts.appendChild(actions);
+        row.append(who, acts);
+        return row;
+    }
+
+    const emailIfNamed = (e) => (e.name && e.name.trim() ? e.email : null);
+
+    function renderPeople(pane) {
+        const v = S.peopleView;
+        const head = paneHead('People', false, '');
+        if (v.state === 'ready') headActions(head, [selVerb('users', 'Add a person', 'ex-btn', addPersonDialog)]);
+        pane.appendChild(head);
+        const body = el('div', 'ex-pane-body');
+        pane.appendChild(body);
+
+        if (v.state === 'idle' || v.state === 'loading') {
+            body.appendChild(note('Reading who can sign in…', false));
+            return;
+        }
+        if (v.state === 'error') {
+            body.appendChild(note('Vaier could not read who can sign in. That is this read failing — nobody was '
+                + 'let in or turned away.', true));
+            return;
+        }
+
+        const byName = (a, b) => personLabel(a).localeCompare(personLabel(b));
+        const waiting = S.people.filter((e) => e.role === 'pending').sort(byName);
+        const approved = S.people.filter((e) => e.role !== 'pending')
+            .sort((a, b) => (PEOPLE_ORDER[a.role] - PEOPLE_ORDER[b.role]) || byName(a, b));
+        const admins = approved.filter((e) => e.role === 'admin').length;
+
+        if (waiting.length) {
+            body.appendChild(section('Waiting to be let in'));
+            const rows = el('div', 'ex-listing is-people is-waiting');
+            waiting.forEach((e) => {
+                const g = providerOf(e);
+                rows.appendChild(personRow(e, [emailIfNamed(e), g ? 'signed in with ' + g.label : 'signed in'],
+                    waitingActions(e)));
+            });
+            body.appendChild(rows);
+        }
+
+        // While the first-run door is open nobody else can sign in yet, so letting anyone in starts with a
+        // provider; afterwards the providers sit last.
+        const doorOpen = !!(S.signIn && S.signIn.firstRunDoorOpen);
+        if (doorOpen) renderSignInProviders(body);
+
+        body.appendChild(section('People'));
+        if (!approved.length) {
+            body.appendChild(note('Nobody is let in yet. People appear here once you let them in — or add '
+                + 'someone before they first sign in.', false));
+        } else {
+            const rows = el('div', 'ex-listing is-people');
+            approved.forEach((e) => {
+                // The console is admin-only, so the last admin can be neither made a user nor removed.
+                const onlyAdmin = e.role === 'admin' && admins === 1;
+                const groups = e.groups || [];
+                rows.appendChild(personRow(e, [emailIfNamed(e), onlyAdmin ? 'the only admin' : e.role,
+                    groups.length ? 'groups: ' + groups.join(', ') : null], personMenu(e, onlyAdmin)));
+            });
+            body.appendChild(rows);
+            body.appendChild(hint('An admin runs Vaier and reaches every service. A user reaches the services '
+                + 'open to anyone signed in, and those whose groups they share.'));
+        }
+
+        if (!doorOpen) renderSignInProviders(body);
+    }
+
+    function waitingActions(e) {
+        const acts = el('div', 'ex-people-acts');
+        const asUser = el('button', 'ex-btn is-accent'); asUser.textContent = 'Let in';
+        asUser.title = 'Let them in as a user';
+        asUser.onclick = () => grantRole(e, 'user');
+        const asAdmin = el('button', 'ex-btn'); asAdmin.textContent = 'Let in as admin';
+        asAdmin.onclick = () => grantRole(e, 'admin');
+        const away = el('button', 'ex-btn is-danger'); away.textContent = 'Turn away';
+        away.onclick = () => removePerson(e, true);
+        acts.append(asUser, asAdmin, away);
+        return acts;
+    }
+
+    function personMenu(e, onlyAdmin) {
+        const items = [];
+        if (!onlyAdmin) {
+            items.push(e.role === 'admin'
+                ? ['Make a user', 'They keep their groups and stop running Vaier.', () => grantRole(e, 'user')]
+                : ['Make an admin', 'They run Vaier and reach every service.', () => grantRole(e, 'admin')]);
+        }
+        items.push(['Change groups', 'Which services open to a group they reach.', () => groupsDialog(e.email)]);
+        if (!onlyAdmin) items.push(['Remove access', 'Their access stops now.', () => removePerson(e, false)]);
+        return rowMenu('What to do about ' + personLabel(e), items);
+    }
+
+    // Every write People makes, on the endpoints the old Users page used. The server’s own words are the error.
+    async function peopleWrite(email, tail, method, payload, failText) {
+        try {
+            const res = await fetch('/access/' + encodeURIComponent(email) + tail, payload
+                ? { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+                : { method: method });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || failText);
+                return false;
+            }
+        } catch (err) {
+            toast(failText);
+            return false;
+        }
+        loadNeeds();
+        await loadPeople();
+        return true;
+    }
+
+    async function grantRole(e, role) {
+        const was = e.role;
+        if (!await peopleWrite(e.email, '/role', 'PATCH', { role: role },
+            'Vaier could not change what ' + personLabel(e) + ' may do.')) return;
+        toast(was === 'pending' ? personLabel(e) + ' is let in as ' + (role === 'admin' ? 'an admin.' : 'a user.')
+            : personLabel(e) + ' is ' + (role === 'admin' ? 'an admin' : 'a user') + ' now.');
+    }
+
+    async function removePerson(e, waiting) {
+        const who = personLabel(e);
+        const ok = await confirmModal(waiting ? 'Turn ' + who + ' away?' : 'Remove access for ' + who + '?',
+            (waiting ? 'They reach nothing.' : 'Their access stops now.')
+                + ' If they sign in again, they wait here to be let in.',
+            waiting ? 'Turn away' : 'Remove access');
+        if (!ok) return;
+        if (!await peopleWrite(e.email, '', 'DELETE', null, 'Vaier could not remove ' + who + '.')) return;
+        toast(waiting ? who + ' was turned away.' : 'Access removed for ' + who + '.');
+    }
+
+    // A person's groups, each change saved as it is made — the same chips a service's allowed groups use.
+    function groupsDialog(email) {
+        const body = el('div', 'ex-dialog-body');
+        const paint = () => {
+            body.textContent = '';
+            const e = S.people.find((p) => p.email === email);
+            if (!e) { body.appendChild(note('They are no longer in People.', false)); return; }
+            const groups = (e.groups || []).slice();
+            const save = (next) => peopleWrite(email, '/groups', 'PATCH', { groups: next },
+                'Vaier could not save the groups.').then(paint);
+            const chips = el('div', 'ex-chips');
+            if (!groups.length) {
+                const empty = el('span', 'ex-chip is-empty');
+                empty.textContent = 'No groups — services open to anyone signed in';
+                chips.appendChild(empty);
+            }
+            groups.forEach((g) => {
+                const chip = el('span', 'ex-chip');
+                const t = el('span'); t.textContent = g; chip.appendChild(t);
+                const x = el('button', 'ex-chip-x'); x.innerHTML = svg('cross', 'ex-ico');
+                x.title = 'Remove ' + g; x.setAttribute('aria-label', x.title);
+                x.onclick = () => save(groups.filter((y) => y !== g));
+                chip.appendChild(x);
+                chips.appendChild(chip);
+            });
+            const row = el('div', 'ex-chip-add');
+            const inp = plainInput('', 'Add a group…');
+            const dl = el('datalist'); dl.id = 'ex-person-groups';
+            const known = new Set(accessGroupSuggestions());
+            S.people.forEach((p) => (p.groups || []).forEach((g) => known.add(g)));
+            Array.from(known).sort().filter((g) => !groups.includes(g)).forEach((g) => {
+                const o = el('option'); o.value = g; dl.appendChild(o);
+            });
+            inp.setAttribute('list', dl.id);
+            const add = () => {
+                const val = inp.value.trim(); inp.value = '';
+                if (!val || groups.some((g) => g.toLowerCase() === val.toLowerCase())) return;
+                if (ROLE_MIRRORING_GROUPS.includes(val.toLowerCase())) {
+                    toast('“' + val + '” is a role, not a group. Make them an admin or a user instead.');
+                    return;
+                }
+                save(groups.concat(val));
+            };
+            inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); add(); } };
+            const btn = el('button', 'ex-btn'); btn.textContent = 'Add'; btn.onclick = add;
+            row.append(inp, dl, btn);
+            body.append(chips, row, hint('A user reaches a service limited to groups when they share one of '
+                + 'them. Admins reach everything.'));
+        };
+        paint();
+        const e = S.people.find((p) => p.email === email);
+        chatDialog('Groups — ' + (e ? personLabel(e) : email), body);
+    }
+
+    // Let someone in before their first sign-in: the role endpoint creates the entry, so they never wait.
+    function addPersonDialog() {
+        const body = el('div', 'ex-dialog-body');
+        const form = el('div', 'ex-form');
+        const email = plainInput('', 'name@example.com');
+        email.type = 'email';
+        const role = el('select', 'ex-input');
+        [['user', 'User'], ['admin', 'Admin']].forEach(([value, text]) => {
+            const o = el('option'); o.value = value; o.textContent = text; role.appendChild(o);
+        });
+        form.append(formField('Email', 'The address they will sign in with, through Google or GitHub.', email),
+            formField('Let them in as', null, role));
+        body.appendChild(form);
+
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog');
+        const h = el('div', 'ex-dialog-title'); h.textContent = 'Add a person';
+        const actions = el('div', 'ex-dialog-actions');
+        const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+        const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Add';
+        actions.append(cancel, ok);
+        dialog.append(h, body, actions);
+        scrim.appendChild(dialog);
+        document.body.appendChild(scrim);
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+        cancel.onclick = close;
+        scrim.onclick = (ev) => { if (ev.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
+        ok.onclick = async () => {
+            const address = email.value.trim().toLowerCase();
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) { toast('Enter an email address.'); return; }
+            ok.disabled = true;
+            const done = await peopleWrite(address, '/role', 'PATCH', { role: role.value },
+                'Vaier could not add ' + address + '.');
+            ok.disabled = false;
+            if (!done) return;
+            close();
+            toast(address + ' is let in as ' + (role.value === 'admin' ? 'an admin' : 'a user')
+                + ' from their first sign-in.');
+        };
+        email.focus();
+    }
+
+    // --- the identity providers people sign in with (#264), moved here from Settings ----------------------
+    //
+    // One redirect URI serves both providers, so it is said once. A provider .env owns is shown and left
+    // alone — .env wins. The secret is write-only: the field starts empty every time. Save waits for the
+    // apply (seconds), so the note ends on what actually happened, never on a promise.
+    function renderSignInProviders(body) {
+        const si = S.signIn;
+        if (!si) return;
+        body.appendChild(section('Sign-in providers'));
+        const form = el('div', 'ex-form');
+        body.appendChild(form);
+        const input = (value, ph, type) => {
+            const i = plainInput(value, ph);
+            if (type) i.type = type;
+            return i;
+        };
+        if (si.firstRunDoorOpen) {
+            form.appendChild(note('The first-run password keeps working until an admin signs in with a '
+                + 'provider added here. Then Vaier closes that door by itself.', false));
+        }
+        const uri = input(si.redirectUri);
+        uri.readOnly = true;
+        const uriRow = el('div', 'ex-set-actions');
+        const copy = el('button', 'ex-btn'); copy.textContent = 'Copy';
+        copy.onclick = () => navigator.clipboard.writeText(si.redirectUri)
+            .then(() => toast('Redirect URI copied.')).catch(() => toast('Could not copy the redirect URI.'));
+        uriRow.appendChild(copy);
+        const uriField = formField('Redirect URI', 'Register this exact address with the provider — both hand back to Vaier here.', uri);
+        uriField.appendChild(uriRow);
+        form.appendChild(uriField);
+
+        (si.providers || []).forEach((p) => {
+            const block = el('div', 'ex-form ex-signin-provider');
+            const head = el('div', 'ex-runline');
+            const state = () => p.source === 'ENVIRONMENT' ? p.name + ' is set in .env (client id ' + p.clientId + ').'
+                : p.source === 'SETTINGS' ? p.name + ' is set here (client id ' + p.clientId + ').'
+                : p.name + ' is not set up.';
+            head.textContent = state();
+            block.appendChild(head);
+            if (p.source === 'ENVIRONMENT') {
+                block.appendChild(hint('.env wins over what is set here, so change it there and run docker compose up -d.'));
+                form.appendChild(block);
+                return;
+            }
+            const how = el('div', 'ex-hint');
+            const link = el('a', 'ex-link');
+            link.href = p.consoleUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
+            link.textContent = p.name === 'GitHub' ? 'GitHub developer settings' : 'Google Cloud console';
+            how.append('Create an OAuth app in the ', link, ' with the redirect URI above, then paste what it gives you.');
+            const id = input(p.clientId, 'Client id');
+            const secret = input('', p.source === 'SETTINGS' ? 'Paste the secret again to change anything' : 'Client secret', 'password');
+            block.append(how, formField('Client id', null, id), formField('Client secret', null, secret));
+            const row = el('div', 'ex-set-actions');
+            const save = el('button', 'ex-btn is-accent'); save.textContent = 'Save ' + p.name;
+            const n = el('span', 'ex-set-note');
+            row.append(save, n);
+            block.appendChild(row);
+            save.onclick = async () => {
+                if (!id.value.trim() || !secret.value.trim()) {
+                    n.className = 'ex-set-note is-err'; n.textContent = 'Paste both the client id and the secret.'; return;
+                }
+                save.disabled = true;
+                n.className = 'ex-set-note';
+                n.textContent = 'Applying — the sign-in page restarts, which takes a few seconds…';
+                try {
+                    const res = await fetch('/settings/sign-in/' + p.id, { method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ clientId: id.value.trim(), clientSecret: secret.value.trim() }) });
+                    const out = await res.json().catch(() => ({}));
+                    if (res.ok && out.applied) {
+                        n.className = 'ex-set-note is-ok'; n.textContent = out.message;
+                        p.source = 'SETTINGS'; p.clientId = id.value.trim(); head.textContent = state();
+                    } else {
+                        n.className = 'ex-set-note is-err'; n.textContent = out.message || 'Could not save.';
+                    }
+                } catch (e) {
+                    n.className = 'ex-set-note is-err'; n.textContent = 'Could not save.';
+                }
+                secret.value = '';
+                save.disabled = false;
+            };
+            form.appendChild(block);
+        });
     }
 
     // --- Settings: Vaier-wide, native, outside the fleet ------------------------------------------------
@@ -8342,21 +8748,18 @@
         if (S.settings.state === 'loading') return;
         S.settings = { ...S.settings, state: 'loading' };
         try {
-            const [cfg, ver, upd, signIn] = await Promise.all([
+            const [cfg, ver, upd] = await Promise.all([
                 fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
                 fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 // Whether a newer Vaier is being served, and how the last update went. Read with the rest of
                 // the page rather than polled: an image going stale is not news that decays in seconds.
                 fetch('/settings/update', { cache: 'no-store' })
                     .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
-                // Which identity providers exist and where each comes from (#264). Never a secret.
-                fetch('/settings/sign-in', { cache: 'no-store' })
-                    .then((r) => (r.ok ? r.json() : null)).catch(() => null),
             ]);
             S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
-                version: (ver || {}).version || '', update: upd || {}, signIn: signIn };
+                version: (ver || {}).version || '', update: upd || {} };
         } catch (e) {
-            S.settings = { state: 'error', config: null, version: '', update: {}, signIn: null };
+            S.settings = { state: 'error', config: null, version: '', update: {} };
         }
         render();
     }
@@ -8524,87 +8927,6 @@
             return noteEl;
         };
 
-        // --- Sign-in (#264): add Google or GitHub without touching .env ---
-        //
-        // One redirect URI serves both providers, so it is said once. A provider .env owns is shown and left
-        // alone — .env wins. The secret is write-only: the field starts empty every time. Save waits for the
-        // apply (seconds), so the note ends on what actually happened, never on a promise.
-        const signInSection = () => {
-            const si = S.settings.signIn;
-            if (!si) return;
-            const form = sectionForm('Sign-in');
-            if (si.firstRunDoorOpen) {
-                form.appendChild(note('The first-run password keeps working until an admin signs in with a '
-                    + 'provider added here. Then Vaier closes that door by itself.', false));
-            }
-            const uri = input(si.redirectUri);
-            uri.readOnly = true;
-            const uriRow = el('div', 'ex-set-actions');
-            const copy = el('button', 'ex-btn'); copy.textContent = 'Copy';
-            copy.onclick = () => navigator.clipboard.writeText(si.redirectUri)
-                .then(() => toast('Redirect URI copied.')).catch(() => toast('Could not copy the redirect URI.'));
-            uriRow.appendChild(copy);
-            const uriField = field('Redirect URI', 'Register this exact address with the provider — both hand back to Vaier here.', uri);
-            uriField.appendChild(uriRow);
-            form.appendChild(uriField);
-
-            (si.providers || []).forEach((p) => {
-                const block = el('div', 'ex-form ex-signin-provider');
-                const head = el('div', 'ex-runline');
-                const state = () => p.source === 'ENVIRONMENT' ? p.name + ' is set in .env (client id ' + p.clientId + ').'
-                    : p.source === 'SETTINGS' ? p.name + ' is set here (client id ' + p.clientId + ').'
-                    : p.name + ' is not set up.';
-                head.textContent = state();
-                block.appendChild(head);
-                if (p.source === 'ENVIRONMENT') {
-                    block.appendChild(hint('.env wins over Settings, so change it there and run docker compose up -d.'));
-                    form.appendChild(block);
-                    return;
-                }
-                const how = el('div', 'ex-hint');
-                const link = el('a', 'ex-link');
-                link.href = p.consoleUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
-                link.textContent = p.name === 'GitHub' ? 'GitHub developer settings' : 'Google Cloud console';
-                how.append('Create an OAuth app in the ', link, ' with the redirect URI above, then paste what it gives you.');
-                const id = input(p.clientId, 'Client id');
-                const secret = input('', p.source === 'SETTINGS' ? 'Paste the secret again to change anything' : 'Client secret', 'password');
-                block.append(how, field('Client id', null, id), field('Client secret', null, secret));
-                const row = el('div', 'ex-set-actions');
-                const save = el('button', 'ex-btn is-accent'); save.textContent = 'Save ' + p.name;
-                const n = el('span', 'ex-set-note');
-                row.append(save, n);
-                block.appendChild(row);
-                save.onclick = async () => {
-                    if (!id.value.trim() || !secret.value.trim()) {
-                        n.className = 'ex-set-note is-err'; n.textContent = 'Paste both the client id and the secret.'; return;
-                    }
-                    save.disabled = true;
-                    n.className = 'ex-set-note';
-                    n.textContent = 'Applying — the sign-in page restarts, which takes a few seconds…';
-                    try {
-                        const res = await fetch('/settings/sign-in/' + p.id, { method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ clientId: id.value.trim(), clientSecret: secret.value.trim() }) });
-                        const out = await res.json().catch(() => ({}));
-                        if (res.ok && out.applied) {
-                            n.className = 'ex-set-note is-ok'; n.textContent = out.message;
-                            p.source = 'SETTINGS'; p.clientId = id.value.trim(); head.textContent = state();
-                        } else {
-                            n.className = 'ex-set-note is-err'; n.textContent = out.message || 'Could not save.';
-                        }
-                    } catch (e) {
-                        n.className = 'ex-set-note is-err'; n.textContent = 'Could not save.';
-                    }
-                    secret.value = '';
-                    save.disabled = false;
-                };
-                form.appendChild(block);
-            });
-        };
-        // While the first-run door is open, inviting anyone starts here; afterwards it sits with the others.
-        const signInFirst = !!(S.settings.signIn && S.settings.signIn.firstRunDoorOpen);
-        if (signInFirst) signInSection();
-
         // --- Nightly backups: the fleet-wide "when" (the one backup knob the operator owns) ---
         const sched = sectionForm('Nightly backups');
         const hour = el('select', 'ex-input');
@@ -8741,8 +9063,6 @@
                 smtpNote, 'Test email sent to ' + test.value.trim() + '.');
         };
         smtp.querySelector('.ex-set-actions').insertBefore(testBtn, smtp.querySelector('.ex-set-note'));
-
-        if (!signInFirst) signInSection();
 
         // --- Chat: your own Anthropic API key, and nothing else about it ---
         const ask = sectionForm('Chat');
@@ -10391,6 +10711,8 @@
         // fleet, so it does not follow the operator around — left on screen it would quietly become a lie,
         // which is the one thing this feature cannot afford. The verdicts it settled are on the rows already.
         if (key(path) !== key(S.path)) _updateCheck = null;
+        // Arriving on People re-reads it: nothing pushes who signed in, so the visit is the moment to ask.
+        if (kindOf(path) === 'people' && kindOf(S.path) !== 'people') loadPeople();
         const timeChanged = (at || null) !== (S.at || null);
         S.path = path;
         S.at = at || null;
@@ -10962,6 +11284,8 @@
         // The address is normalised into the bar even when the visitor arrived with none, so the very first
         // thing in history is a real location and the first Back is not a step out of the app.
         location.replace(location.pathname + location.search + _route);
+        // A link straight to People (the access-request mail's) is an arrival too.
+        if (kindOf(S.path) === 'people') loadPeople();
 
         // The services are awaited because a machine cannot be honest without them: a `services` entry exists
         // only on a machine that actually publishes something, and an entry that grew a moment later would
