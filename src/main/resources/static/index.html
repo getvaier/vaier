@@ -2,9 +2,21 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=/launchpad.html">
+    <title>Vaier</title>
+    <noscript><meta http-equiv="refresh" content="0; url=/launchpad.html"></noscript>
 </head>
 <body>
-    <script>window.location.replace('/launchpad.html');</script>
+    <!-- The front door: an admin goes home to the fleet, everyone else to Your services. Only where each
+         lands is decided here; the admin gate on the Explorer is Traefik's, as ever. -->
+    <script>
+        (async () => {
+            let me = null;
+            try {
+                const res = await fetch('/users/me', { redirect: 'manual', cache: 'no-store' });
+                if (res.ok && res.headers.get('content-type')?.includes('application/json')) me = await res.json();
+            } catch (_) { /* anonymous */ }
+            window.location.replace(me && me.isAdmin ? '/explorer.html' : '/launchpad.html');
+        })();
+    </script>
 </body>
 </html>

@@ -4087,7 +4087,7 @@ class ExplorerShellTest {
     }
 
     @Test
-    void aServicesPage_opensTheService_thenSaysWhoCanOpenIt_signingIn_theLaunchpad_andFoldsTheMechanism()
+    void aServicesPage_opensTheService_thenSaysWhoCanOpenIt_signingIn_yourServices_andFoldsTheMechanism()
             throws IOException {
         // #377: the page mixed four jobs and had no way to the service itself. The head opens it; the blocks
         // follow in the order an operator decides them, and the route's mechanism folds under Details.
@@ -4103,7 +4103,7 @@ class ExplorerShellTest {
 
         int who = body.indexOf("section('Who can open it')");
         int signIn = body.indexOf("disclosure('Sign people in for it')");
-        int pad = body.indexOf("section('On the Launchpad')");
+        int pad = body.indexOf("section('In Your services')");
         int details = body.indexOf("disclosure('Details')");
         assertThat(who).isPositive();
         assertThat(signIn).isGreaterThan(who);
@@ -4663,5 +4663,68 @@ class ExplorerShellTest {
         String paintBody = js.substring(paint, js.indexOf("\n    }", paint));
         assertThat(paintBody).contains("'ex-chat-working'");
         assertThat(js).contains("run_on_machine: 'Marvin is running a command");
+    }
+
+    // --- one front door, a flatter menu (#378 slice 4a) ------------------------------------------------
+
+    @Test
+    void theFrontDoor_sendsAnAdminToTheFleet_andEveryoneElseToYourServices() throws IOException {
+        // F6: an admin landed on tiles and had to find the fleet. The root asks who is here, the same
+        // /users/me the launchpad already reads, and decides nothing else: the admin gate is untouched.
+        String door = read("index.html");
+        assertThat(door).contains("fetch('/users/me'").contains("me.isAdmin")
+            .contains("'/explorer.html'").contains("'/launchpad.html'");
+        assertThat(door.replaceAll("(?s)<noscript>.*?</noscript>", ""))
+            .as("no unconditional jump to the launchpad").doesNotContain("http-equiv=\"refresh\"");
+        assertThat(read("explorer.html")).contains("href=\"/explorer.html#/fleet\" class=\"topbar-brand\"");
+        String pad = read("launchpad.html");
+        assertThat(pad).as("signing in returns to the front door, which decides")
+            .contains("encodeURIComponent(location.origin + '/')")
+            .doesNotContain("encodeURIComponent(location.origin + '/launchpad.html')");
+        assertThat(pad).as("an admin's logo goes home to the fleet").contains("brand.href = '/explorer.html'");
+        assertThat(pad).contains("<title>Your services</title>").contains(">Your services</h1>");
+    }
+
+    @Test
+    void theFleetHead_opensYourServices_inOneTap() throws IOException {
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderFleet(pane) {");
+        String body = js.substring(from, js.indexOf("\n    }\n", from));
+        assertThat(body).contains("headLink('route', 'Your services', '/launchpad.html')");
+        assertThat(body.indexOf("'Your services'")).as("the quiet verb sits before the accented Add")
+            .isLessThan(body.indexOf("'Add machine'"));
+    }
+
+    @Test
+    void theMenu_isWhatTheOperatorDoes_withConceptsAsAQuietFooter() throws IOException {
+        // F7: Fleet is the logo's job, and Credentials read "Nothing stored" from the menu every day.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("const GLOBALS = [");
+        String globals = js.substring(from, js.indexOf("];", from));
+        List<String> order = new ArrayList<>();
+        Matcher m = Pattern.compile("name: '(\\w+)'").matcher(globals);
+        while (m.find()) order.add(m.group(1));
+        assertThat(order).containsExactly("people", "security", "chat", "settings", "concepts");
+        assertThat(globals).contains("label: 'People'").contains("footer: true").doesNotContain("group:");
+
+        int menu = js.indexOf("function renderVMenu() {");
+        String menuBody = js.substring(menu, js.indexOf("\n    }", menu));
+        assertThat(menuBody).doesNotContain("'Fleet'").contains("ex-vmenu-foot");
+        assertThat(read("explorer-shell.css")).contains(".ex-vmenu-foot")
+            .contains("max-width: calc(100vw - 28px);\n    padding: 5px;");
+    }
+
+    @Test
+    void anOldAddress_opensWhereItsEntryMoved() throws IOException {
+        // Bookmarks: #/users is People now, and #/credentials lives under Settings.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("const MOVED = { users: ['people'], credentials: ['settings', 'credentials'] };");
+        int parse = js.indexOf("function parseHash() {");
+        assertThat(js.substring(parse, js.indexOf("\n    }", parse))).contains("MOVED[path[0]]");
+        assertThat(js).contains("if (path[0] === 'settings' && path[1] === 'credentials') return 'credentials';");
+        int settings = js.indexOf("function renderSettings(pane) {");
+        assertThat(js.substring(settings, js.indexOf("\n    }\n", settings)))
+            .as("Settings is the credentials' door now").contains("go(['settings', 'credentials'])");
+        assertThat(js).contains("run: () => go(['people'])").doesNotContain("go(['users'])");
     }
 }

@@ -70,6 +70,7 @@ class FleetNudgeTest {
             assertThat(n.kind()).isEqualTo(FleetNudge.Kind.PUBLISH);
             assertThat(n.title()).isEqualTo("Publish 3 services on Apalveien 5");
             assertThat(n.evidence()).isEqualTo("3 exposed there, none routed through Vaier");
+            assertThat(n.action()).isEqualTo("Give each an HTTPS address and a tile in Your services");
             assertThat(n.value()).isEqualTo(apalveien.id().value());
         });
         // Once anything is published the per-machine nudges carry on; the fleet rung has done its job.

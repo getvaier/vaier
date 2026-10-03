@@ -6,6 +6,16 @@ One address space spanning the whole fleet, at `/explorer.html` — the shape Va
 
 ---
 
+## The front door and the menu
+
+Opening your Vaier's address takes an admin to the **Fleet** root and everyone else to **Your services**, the page of tiles. The address asks who you are with the same identity read the tiles already do, and decides nothing else: the admin gate in front of the Explorer is unchanged. Signing in comes back to the same address, so it decides there too. The Vaier logo is the way home: to the Fleet for an admin, to Your services for anyone else.
+
+**Your services** is one tap from the Fleet's head. It is the page Vaier used to call the Launchpad; its address is still `/launchpad.html`, so bookmarks keep working.
+
+The **Vaier menu** in the topbar lists what you do that is Vaier's own rather than a machine's: **People** (who may sign in and what they may open), **Security**, **Chat** (only while an Anthropic key is stored) and **Settings**. **Concepts**, the in-app glossary, sits quietly at its foot. There is no Fleet item, because the logo goes there. **Fleet credentials** are opened from their own section in Settings, since you set them up once rather than visit them daily. Old addresses still work: `#/users` opens People and `#/credentials` opens Fleet credentials, and the address bar shows the new address.
+
+---
+
 ## Needs you
 
 The top of the **Fleet** root answers "is anything wrong?". **Needs you** is one list, one row per thing that wants the operator, each a plain sentence, its evidence, and at most one button that takes them to the fix. Most urgent first:
@@ -32,7 +42,7 @@ Some machines are off because you turned them off — a media player in a holida
 
 You rarely need that button: the first time Vaier reaches the machine again — its LAN probe answers, or its tunnel handshakes — the mark clears itself, quietly, and watching and backups resume as before. A machine that never comes back stays quiet for good. The mark lives with the machine (its peer config, or `lan-servers.yml`), so a restart keeps it. A phone or laptop is never offered it — it is away, not down — and neither is the Vaier server. **Back up now** stays offered; on a machine that is really off it fails honestly, without a mail.
 
-**What to do next** on a machine's pane keeps the invitations for that machine — publish the services it exposes, back it up, (before any exists) make it the fleet's backup server, let the fleet reach the network it sits on — plus the two kinds of trouble that live there today, a container in trouble and no default route. Each is a single action with its reason shown ("reachable, Vaier holds a credential, nothing backed up yet"), and appears only when it actually applies. A pane's standing verbs, the ones offered whatever its state — **Add machine** on the fleet, **Check the registries now** on a container list, **Publish a service by hand** on a services list, **Back up now** and **Back up more** on a machine's backup, **Add a credential** — sit in the pane's head beside its title.
+**What to do next** on a machine's pane keeps the invitations for that machine — publish the services it exposes, back it up, (before any exists) make it the fleet's backup server, let the fleet reach the network it sits on — plus the two kinds of trouble that live there today, a container in trouble and no default route. Each is a single action with its reason shown ("reachable, Vaier holds a credential, nothing backed up yet"), and appears only when it actually applies. A pane's standing verbs, the ones offered whatever its state — **Your services** and **Add machine** on the fleet, **Check the registries now** on a container list, **Publish a service by hand** on a services list, **Back up now** and **Back up more** on a machine's backup, **Add a credential** — sit in the pane's head beside its title.
 
 ---
 
@@ -95,14 +105,14 @@ A machine's **containers** are the ones Vaier's Docker scrape returns for it —
 
 A machine's **Websites** door lists its published services by the name each answers on, and nothing else while they are healthy: no backend address and no "OK" beside every row. A route Vaier cannot reach reads **Not answering**, and one not yet checked **Not checked yet**. Publishing a *new* service also happens here: a machine's discovered-but-unpublished containers appear under **Ready to publish**, and **Publish a service by hand** covers a LAN app or a device's own page, each with its own **Advanced** fold. See [`docs/NETWORKING.md`](NETWORKING.md) for the publishing flow and auth details.
 
-Opening one gives its name — its Launchpad name when it has one — and an **Open** button, a plain link to its public `https://` address in a new tab. Then four blocks, in the order you decide them:
+Opening one gives its name — its name in Your services when it has one — and an **Open** button, a plain link to its public `https://` address in a new tab. Then four blocks, in the order you decide them:
 
 1. **Who can open it** — *Anyone — no sign-in* or *Only people who sign in to Vaier* (the **auth mode**), its **allowed groups**, and the warning and two ways out when the service is open to anyone.
 2. **Sign people in for it** — the **service credentials** (shared, personal, Marvin's) and **Reading can change things here — Marvin always asks**. Folded unless one of them is already set.
-3. **On the Launchpad** — whether it shows there and the name on its tile. The tile's icon is the one the service shows for itself; Vaier finds it, so there is nothing to set.
+3. **In Your services** — whether it shows there and the name on its tile. The tile's icon is the one the service shows for itself; Vaier finds it, so there is nothing to set.
 4. **Details** (folded) — its address, the machine it runs on, the route state, the backend it points at, its path prefix, image and version; the root redirect, version endpoint and direct-LAN-URL switch; and how the container, the Traefik route and the name make one service.
 
-**Unpublish this service** stays last, behind its warning fold, and takes down the route after a confirmation while leaving the container running. A **stream** has no page to open, so its head says where to dial instead of offering **Open**, and it has no sign-in, no Launchpad tile and none of the web settings.
+**Unpublish this service** stays last, behind its warning fold, and takes down the route after a confirmation while leaving the container running. A **stream** has no page to open, so its head says where to dial instead of offering **Open**, and it has no sign-in, no tile in Your services and none of the web settings.
 
 ### Disk
 
@@ -256,7 +266,7 @@ The run can take many minutes, so the click returns as soon as the machine is ju
 
 The mirror of a host credential, and the distinction is the whole point: a **host credential** is the secret Vaier uses to *reach* one machine, while a **fleet credential** is one secret that has to exist *on* every machine that runs a shell. It has a name, a target path, a file mode and the secret itself, and Vaier is deliberately incurious about what the secret is — it distributes bytes to a path, so what goes in the box is your decision, not Vaier's.
 
-A **Credentials** entry of Vaier's own — beside Settings and Security in the topbar's **Vaier menu**, outside the fleet, since a secret meant for every machine belongs to none of them — lists each one with a **coverage strip**: one cell per machine, coloured by where the credential stands there. Machines that cannot hold it — no SSH access, or no host credential, so a phone or a printer — are **left out of the strip** and named quietly beneath it. That is deliberate: counting them as gaps would make all-green unreachable, and a strip you learn to ignore is worse than no strip at all. Only the exceptions are listed below it, worst first; a wall of green rows is not information.
+**Fleet credentials**, opened from their own section in **Settings** (outside the fleet, since a secret meant for every machine belongs to none of them), list each one with a **coverage strip**: one cell per machine, coloured by where the credential stands there. Machines that cannot hold it — no SSH access, or no host credential, so a phone or a printer — are **left out of the strip** and named quietly beneath it. That is deliberate: counting them as gaps would make all-green unreachable, and a strip you learn to ignore is worse than no strip at all. Only the exceptions are listed below it, worst first; a wall of green rows is not information.
 
 Vaier never shows a secret back to you, because it never can — the content is sealed in the same **credential vault** as host credentials and is write-only over the API. That is why the verb is **Replace secret** rather than *Edit*: you cannot edit what cannot be read, and a save needs the content again every time.
 
@@ -290,12 +300,12 @@ Each machine carries a **device category** (phone, laptop, desktop, server, NAS,
 
 ## Polish
 
-**Inline field help** — Advanced fields (network behind it, path prefix, root redirect, the auth toggle, direct LAN URL, hide-from-launchpad, version endpoint) carry a small "?" you can hover for a one-line plain-language explanation — no need to read the docs to know what a field does.
+**Inline field help** — Advanced fields (network behind it, path prefix, root redirect, the auth toggle, direct LAN URL, show in Your services, version endpoint) carry a small "?" you can hover for a one-line plain-language explanation — no need to read the docs to know what a field does.
 
-**Concepts page** — An in-app **Concepts** glossary in the admin shell explaining the fifteen or so words you actually meet in the UI — machine, the Vaier server, your VPN, the Vaier app, switched off on purpose, Apps, Websites, the Launchpad, sign in, trusted address, the backup server, incomplete backup, back up as root, Needs you and Marvin — each with a short definition and a one-line "why it matters". Mechanism words stay in the docs, not on this page. Each entry is deep-linkable via its anchor (e.g. `concepts.html#back-up-as-root`).
+**Concepts page** — An in-app **Concepts** glossary, at the foot of the Vaier menu, explaining the fifteen or so words you actually meet in the UI — machine, the Vaier server, your VPN, the Vaier app, switched off on purpose, Apps, Websites, Your services, sign in, trusted address, the backup server, incomplete backup, back up as root, Needs you and Marvin — each with a short definition and a one-line "why it matters". Mechanism words stay in the docs, not on this page. Each entry is deep-linkable via its anchor (e.g. `concepts.html#back-up-as-root`).
 
 **Consistent branding** — The oauth2-proxy sign-in and error pages — and the Dex broker's own screens — all share Vaier's dark theme, so the sign-in hand-off (Google or GitHub) feels seamless end to end.
 
 **Version visibility** — The running Vaier version is shown under *Settings → About*, so you always know which build is deployed.
 
-**Quiet by default** — A healthy state paints nothing and reserves no room: no "up to date" line on a container (an update, or *Vaier cannot tell*, is still said), no "running the newest image" sentence in Settings, no green or grey dot on a launchpad tile — only a host that is down earns one. A dialog belongs to the page it was opened over, so moving to another page closes it rather than leaving it stacked over the new one. Monospace is kept for identifiers — paths, addresses, hashes, versions — while names of machines, services and people are set in the body face, and a peer's traffic reads in human units ("148 GB up").
+**Quiet by default** — A healthy state paints nothing and reserves no room: no "up to date" line on a container (an update, or *Vaier cannot tell*, is still said), no "running the newest image" sentence in Settings, no green or grey dot on a tile in Your services — only a host that is down earns one. A dialog belongs to the page it was opened over, so moving to another page closes it rather than leaving it stacked over the new one. Monospace is kept for identifiers — paths, addresses, hashes, versions — while names of machines, services and people are set in the body face, and a peer's traffic reads in human units ("148 GB up").

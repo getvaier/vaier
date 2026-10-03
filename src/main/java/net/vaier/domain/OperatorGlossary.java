@@ -47,17 +47,18 @@ public final class OperatorGlossary {
                     "Vaier tells you when one has an update waiting, and updates it with one click."),
                 Concept.of("Websites",
                     "The apps you have put on the internet at their own address under your domain.",
-                    "Each one can be open to anyone or only to people who sign in, and can show on "
-                        + "the Launchpad."))),
+                    "Each one can be open to anyone or only to people who sign in, and can show in "
+                        + "Your services."))),
 
             new ConceptGroup("Who gets in", List.of(
-                Concept.of("Launchpad",
-                    "The page of tiles linking to all your websites.",
-                    "It is the everyday front door: bookmark it, and everyone sees only what they may open."),
+                Concept.of("Your services",
+                    "The page of tiles linking to all your websites. It is home for everyone you let in; "
+                        + "you reach it from the top of your fleet.",
+                    "Everyone sees only what they may open, so it is the page to hand out and bookmark."),
                 Concept.of("Sign in",
                     "Proving who you are — with Google or GitHub, or the first-run password — before Vaier "
                         + "lets you in.",
-                    "Who may open what is decided after that, on the Users page."),
+                    "Who may open what is decided after that, in People."),
                 Concept.of("Trusted address",
                     "An internet address you told Vaier never to keep out.",
                     "Vaier turns away strangers that misbehave on its own. Trust an address when it was "

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
-    <title>Vaier</title>
+    <title>Your services</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234cc9e6%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234cc9e6%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234cc9e6%22 stroke=%22none%22/></svg>">
     <link rel="stylesheet" href="styles.css">
     <style>
@@ -68,6 +68,13 @@
         }
 
         .install .btn { flex-shrink: 0; }
+
+        .page-title {
+            font-family: var(--display);
+            font-weight: 600;
+            font-size: 1.15rem;
+            margin: 0 0 1.25rem;
+        }
 
 
         /* Peer section — an accent rail + machine name + online count */
@@ -213,7 +220,7 @@
 </head>
 <body>
     <div class="topbar">
-        <a href="/launchpad.html" class="topbar-brand" aria-label="Vaier">
+        <a href="/launchpad.html" class="topbar-brand" id="topbarBrand" aria-label="Vaier">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
                 <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
                 <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
@@ -230,6 +237,7 @@
     </div>
 
     <div class="content">
+        <h1 class="page-title">Your services</h1>
         <div id="grid">
         </div>
         <div id="installCard"></div>
@@ -239,11 +247,6 @@
     <script>
         const ICON_LOGOUT   = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><polyline points="10 11 14 8 10 5"/><line x1="14" y1="8" x2="5" y2="8"/></svg>';
         const ICON_LOGIN    = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3"/><polyline points="6 11 2 8 6 5"/><line x1="2" y1="8" x2="11" y2="8"/></svg>';
-        const ICON_MACHINES ='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="2" width="14" height="10" rx="1"/><line x1="5" y1="15" x2="11" y2="15"/><line x1="8" y1="12" x2="8" y2="15"/></svg>';
-        const ICON_USERS    = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.8"/><path d="M1 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/><path d="M12.5 6.5c1.2.4 2.5 1.7 2.5 3.5"/><circle cx="12" cy="4" r="2"/></svg>';
-        const ICON_SETTINGS = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06"/></svg>';
-        const ICON_EXPLORER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.2a1 1 0 0 1 1-1h3l1.4 1.6h6.6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>';
-        const ICON_BACKUPS  = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="3" rx="0.5"/><path d="M2.5 5.5v7a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-7"/><line x1="6" y1="8.5" x2="10" y2="8.5"/></svg>';
         // The app's own mark: the hub and four spokes the favicon draws, in the app's amber (the colour
         // lives in .install-mark, so it is stated once). A phone glyph would have said "Android", which is
         // the platform, not the product.
@@ -263,13 +266,13 @@
             if (me && me.username) {
                 const name = me.displayname || me.username;
                 const logout = me.logoutUrl || '#';
-                // The console nav is admin-only. A signed-in non-admin viewer still gets their
-                // name and Logout — just no links into pages they can't open.
-                // One console, one link: the Explorer is Vaier's whole UI now — the fleet tree, and Users and
-                // Settings as entries within it — so the launchpad points at it and nothing else.
-                nav.innerHTML = me.isAdmin
-                    ? `<a href="/explorer.html" class="topbar-item">${ICON_EXPLORER}<span class="link-label">Explorer</span></a>`
-                    : '';
+                // An admin's home is the fleet, so their logo goes there; everyone else's home is this page.
+                if (me.isAdmin) {
+                    const brand = document.getElementById('topbarBrand');
+                    brand.href = '/explorer.html';
+                    brand.title = 'Your fleet';
+                }
+                nav.innerHTML = '';
 
                 // Build via the DOM so the photo can carry an onerror fallback and the provider-owned
                 // name is set through .title/.textContent (safe in both attribute and text contexts).
@@ -308,14 +311,14 @@
             } else {
                 // Anonymous: the launchpad root is public now, so a plain link back here wouldn't
                 // force a login. Send the visitor to the branded provider selector (sign_in.html:
-                // Continue with Google / GitHub) and return them to the launchpad once they're in.
+                // Continue with Google / GitHub) and return them to the front door, which sends each where they belong.
                 // Use /oauth2/sign_in, NOT /oauth2/start — /start with no connector_id hands off to
                 // Dex's own unbranded picker; the sign-in page lets the visitor pick, then forwards
                 // connector_id so Dex jumps straight to that provider. rd must be ABSOLUTE —
                 // oauth2-proxy resolves a relative rd against its callback host (oauth2.<domain>),
                 // which would dead-end on its static "Authenticated" page instead of coming back here.
                 nav.innerHTML = '';
-                const signInUrl = '/oauth2/sign_in?rd=' + encodeURIComponent(location.origin + '/launchpad.html');
+                const signInUrl = '/oauth2/sign_in?rd=' + encodeURIComponent(location.origin + '/');
                 user.innerHTML = `
                     <a href="${signInUrl}" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
                 `;
@@ -506,7 +509,7 @@
                 container.innerHTML = '';
                 _hasRendered = true;
                 if (services.length === 0) {
-                    container.innerHTML = '<div class="empty">No services published yet.<br>Use <a href="/explorer.html">Explorer</a> to add services.</div>';
+                    container.innerHTML = '<div class="empty">Nothing is published yet.</div>';
                     return;
                 }
 

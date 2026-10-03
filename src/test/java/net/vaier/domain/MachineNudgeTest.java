@@ -51,6 +51,7 @@ class MachineNudgeTest {
         assertThat(nudge).isPresent();
         assertThat(nudge.get().kind()).isEqualTo(MachineNudge.Kind.PUBLISH);
         assertThat(nudge.get().evidence()).contains("3 services");
+        assertThat(nudge.get().action()).isEqualTo("Give each an HTTPS address and a tile in Your services");
     }
 
     @Test

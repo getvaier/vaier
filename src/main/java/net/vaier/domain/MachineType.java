@@ -19,7 +19,7 @@ public enum MachineType {
     public void requireVaierMintedConfig(String machineName) {
         if (joinsThroughVaierApp()) {
             throw new ConflictException(machineName + " joins through the Vaier app, so Vaier makes no config "
-                + "for it. Install the Vaier app from the launchpad on the device and approve its join code.");
+                + "for it. Install the Vaier app from Your services on the device and approve its join code.");
         }
     }
 

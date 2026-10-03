@@ -173,7 +173,7 @@ public class ReverseProxyRoute {
         AUTH_MODE("a login"),
         ROOT_REDIRECT("a root redirect"),
         DIRECT_URL("a direct LAN link"),
-        LAUNCHPAD("a launchpad tile"),
+        LAUNCHPAD("a tile in Your services"),
         VERSION_PROBE("a version probe"),
         ASK_BEFORE_READING("a rule for Marvin's reads");
 

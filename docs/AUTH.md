@@ -2,7 +2,7 @@
 
 Back to [README](../README.md).
 
-How sign-in is set up, how roles and per-service access rules work, and how the Users page manages identities.
+How sign-in is set up, how roles and per-service access rules work, and how **People** manages identities.
 
 ---
 
@@ -72,7 +72,7 @@ Re-running `install.sh` in place does the same thing and is the simpler answer �
 
 Once `docker compose ps` shows every service as `Up`, open `https://vaier.yourdomain.com` and sign in with the account you set as `VAIER_ADMIN_EMAIL`. Vaier seeds that identity as the first admin, so you land straight in the console. (If you came in through the first-run password, you are already the admin and nothing is seeded.)
 
-Anyone else who signs in for the first time is recorded as a **pending** access request — authenticated but blocked until you approve them on the **Users** page. Promote them to **user** (or **admin**) there.
+Anyone else who signs in for the first time is recorded as a **pending** access request — authenticated but blocked until you approve them in **People**. Promote them to **user** (or **admin**) there.
 
 The oauth2-proxy sign-in and error pages — and the Dex broker's own screens — all share Vaier's dark theme, so the sign-in hand-off (Google or GitHub) feels seamless end to end.
 
@@ -82,7 +82,7 @@ A CrowdSec ban on your own address does not stop you signing in. The console, oa
 
 ## Access management
 
-Manage who can sign in from the **Users** page: each signed-in identity — Google, GitHub, or the first-run account — is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. Each person's card shows their provider photo (GitHub picture, else Gravatar, else a coloured monogram) with a small corner glyph for the connector they last signed in with — Google, GitHub, or the first-run password.
+Manage who can sign in from **People** in the Vaier menu: each signed-in identity — Google, GitHub, or the first-run account — is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. Each person's card shows their provider photo (GitHub picture, else Gravatar, else a coloured monogram) with a small corner glyph for the connector they last signed in with — Google, GitHub, or the first-run password.
 
 When someone signs in for the first time, Vaier records them as a **pending** access request (authenticated but blocked) and denies access until an admin approves them. The moment that pending entry is created, Vaier emails every admin so the request doesn't sit unseen — the mail names the email and links straight to the **Users** page to approve or deny. It reuses the same SMTP configuration as the other alerts, so with SMTP unconfigured (or no admins to notify) it stays silent, and the send is fire-and-forget so it never slows the sign-in check.
 
@@ -90,9 +90,9 @@ Admin-vs-user is decided **only by the role** (pending → user → admin) — p
 
 The console is admin-only, so Vaier keeps a **last-admin protection** invariant: the access store always holds at least one admin. Revoking or demoting the sole remaining admin is refused (the Access page disables those controls with an inline note, and the API answers `409 Conflict`), and on startup the configured administrator (`VAIER_ADMIN_EMAIL`, when one is set) is restored to admin whenever no admin exists — promoting an existing entry in place or creating one — so the console can never be locked out for everyone.
 
-Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it on the **Users** page with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one. The same captured name follows the identity into the Vaier console — which always runs on Social login — greeting them in the topbar with their provider photo when one is available (the same GitHub-picture-else-Gravatar chain as the Users cards), falling back to their name text (or email until a name is known) when no photo loads.
+Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it in **People** with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one. The same captured name follows the identity into the Vaier console — which always runs on Social login — greeting them in the topbar with their provider photo when one is available (the same GitHub-picture-else-Gravatar chain as the Users cards), falling back to their name text (or email until a name is known) when no photo loads.
 
-The **Users** page is this single list of social identities. Vaier no longer manages local password accounts and has no self-service profile page — each identity's name and email are owned by Google and shown read-only; only the role and access groups are edited here.
+**People** is this single list of social identities. Vaier no longer manages local password accounts and has no self-service profile page — each identity's name and email are owned by Google and shown read-only; only the role and access groups are edited here.
 
 Social login is the sole runtime auth gateway: **Authelia has been fully removed** — both the running service and the last of its Java code — and every gated service authenticates via Google or GitHub. There is no `authelia` auth mode; the two modes are Public and Social.
 

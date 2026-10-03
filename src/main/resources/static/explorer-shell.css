@@ -92,7 +92,7 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-crumb-here { color: var(--text); font-weight: 600; padding: 3px 6px; white-space: nowrap; }
 
 /* --- the Vaier menu -------------------------------------------------------------------------------- */
-/* Settings, Users, Security, Concepts: Vaier's own, siblings of the fleet rather than things inside it, so
+/* People, Security, Chat, Settings: Vaier's own, siblings of the fleet rather than things inside it, so
    they live in the chrome and are one reach from any depth on any screen. */
 
 .ex-vmenu-wrap { position: relative; flex: none; }
@@ -122,6 +122,7 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     top: calc(100% + 6px); right: 0;
     z-index: 70;
     min-width: 178px;
+    max-width: calc(100vw - 28px);
     padding: 5px;
     background: var(--bg-panel);
     border: 1px solid var(--border-hi);
@@ -151,15 +152,9 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-vmenu-text { display: flex; flex-direction: column; gap: 2px; text-align: left; }
 .ex-vmenu-desc { font-size: 12px; line-height: 1.4; color: var(--text-dim); white-space: normal; max-width: 250px; }
 .ex-vmenu-item:hover .ex-ico { color: var(--text-muted); }
-/* The menu's groups. A rule between two halves said only "these are not those"; a named group says what
-   each one is FOR, which is the question an operator opening this menu is actually asking. */
-.ex-vmenu-group {
-    padding: 9px 9px 4px;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--text-dim);
-}
-.ex-vmenu-group:first-child { padding-top: 4px; }
+/* Help, quietly: under a rule, smaller and dimmer than the jobs above it. */
+.ex-vmenu-foot { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
+.ex-vmenu-foot .ex-vmenu-item { padding: 5px 9px; font-size: 12.5px; color: var(--text-dim); }
 
 /* --- main ------------------------------------------------------------------------------------------ */
 

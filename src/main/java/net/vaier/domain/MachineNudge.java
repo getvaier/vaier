@@ -88,7 +88,7 @@ public record MachineNudge(String machineName, Kind kind, String title, String e
         return Optional.of(new MachineNudge(machineName, Kind.PUBLISH,
             "Publish " + publishableCount + " service" + plural,
             publishableCount + " service" + plural + " exposed on this machine, none routed through Vaier yet",
-            "Give each an HTTPS address and a launchpad tile"));
+            "Give each an HTTPS address and a tile in Your services"));
     }
 
     /**

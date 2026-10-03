@@ -4565,3 +4565,16 @@ compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does n
 **Left deliberately.** Mechanism stays where the operator configures mechanism: the backup server's setup form (borg, SSH, paths), Settings' `.env` precedence note, the "Copy" firewall text, and error toasts that name the failing component. The breach mail still uses `BlockDecision.label()` with the raw scenario.
 
 **Backlog.** Say the breach mail in the same plain words (knock, country, time left).
+
+### 6.75 One front door, a flatter menu ✅ part 4a (part 4a of [#378](https://github.com/getvaier/vaier/issues/378), slice 4 of [#380](https://github.com/getvaier/vaier/issues/380))
+
+**Why.** An admin landed on the tiles and had to look for the fleet; the menu carried a Fleet item, jobs grouped under headings, and a Credentials entry that read "Nothing stored" every day (audit findings F6, F7).
+
+**What (4a).** No endpoint added and no authorization changed; only where each person lands and what the menu says.
+- **Front door**: `/` reads the same `/users/me` the page already read. An admin goes to the **Fleet** root, everyone else to **Your services**. Signing in returns to `/`, so it decides there too. The logo goes to the Fleet for an admin, and to Your services for anyone else.
+- **Your services** is the Launchpad's UI name everywhere: the page title and heading, a **Your services** link in the Fleet head, a service's *In Your services* block, the publish nudges, the Concepts entry and the glossary. Code, URLs and compound developer terms keep `launchpad`.
+- **Menu**: People (the Users page, renamed), Security, Chat, Settings, and Concepts as a quiet footer. No Fleet item.
+- **Fleet credentials** left the menu for a section in Settings that opens them at `settings/credentials`.
+- **Old addresses**: `#/users` opens People and `#/credentials` opens Fleet credentials, and the address bar shows the new address.
+
+**Still to come in #378.** 4b: People ported natively (users, sign-in providers, people waiting to join), which removes the last iframe. 4c: Settings collapses finished setup to one line per item.

@@ -149,7 +149,7 @@ public record FleetNudge(Kind kind, String title, String evidence, String action
         return Optional.of(of(Kind.PUBLISH,
             "Publish " + n + " service" + plural + " on " + target.get().name(),
             n + " exposed there, none routed through Vaier",
-            "Give each an HTTPS address and a launchpad tile", target.get().id().value()));
+            "Give each an HTTPS address and a tile in Your services", target.get().id().value()));
     }
 
     /**

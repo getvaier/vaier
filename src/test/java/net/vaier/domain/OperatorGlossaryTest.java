@@ -44,7 +44,7 @@ class OperatorGlossaryTest {
         assertThat(OperatorGlossary.groups()).flatExtracting(ConceptGroup::concepts).extracting(Concept::term)
             .containsExactly("Machine", "Vaier server", "VPN", "Vaier app", "Switched off on purpose",
                 "Apps", "Websites",
-                "Launchpad", "Sign in", "Trusted address",
+                "Your services", "Sign in", "Trusted address",
                 "Backup server", "Incomplete backup", "Back up as root",
                 "Needs you", "Marvin");
     }

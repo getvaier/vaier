@@ -102,25 +102,17 @@
             + 'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + ICON[name] + '</svg>';
     }
 
-    // Vaier-wide entries that are NOT of the fleet — they belong to Vaier, not to any machine — so they sit at
-    // the top level of the address space, outside `fleet`. Settings is native now; Users and Concepts still
-    // bridge their pages (framed whole, via renderGlobalBridge) until they are ported. They are reached from
-    // the topbar's Vaier menu, never from inside the fleet. Fleet-level bridges are all gone: Infrastructure and Backups are native entries now (#323).
-    // Each carries the group it belongs to, because five flat siblings said nothing about what any of them
-    // was for — an operator asking "who can reach my things?" needs Users and Security, which sat apart with
-    // three unrelated entries between them, while Credentials (a secret placed on every machine) read as a
-    // Vaier setting rather than as the fleet-wide act it is. Three jobs, named:
-    //   the fleet   — what Vaier does TO the machines
-    //   who gets in — who may reach Vaier and what it publishes
-    //   Vaier       — the thing itself, and the words it uses
+    // Vaier-wide entries that are NOT of the fleet, so they sit at the top level of the address space, outside
+    // `fleet`, and are reached from the topbar's Vaier menu. The menu lists what the operator does (#378); the
+    // logo is the way home, and Concepts is a quiet footer. People and Concepts still frame their pages.
+    // Fleet credentials live under Settings (settings/credentials), not here.
     const GLOBALS = [
-        { name: 'credentials', label: 'Credentials', icon: 'key', native: true, group: 'Your fleet' },
-        { name: 'users',    label: 'Users',    icon: 'users',  page: 'users.html', group: 'Who gets in' },
-        { name: 'security', label: 'Security', icon: 'shield', native: true,      group: 'Who gets in' },
-        { name: 'chat',     label: 'Chat',     icon: 'chat',   native: true,      group: 'Vaier',
+        { name: 'people',   label: 'People',   icon: 'users',  page: 'users.html' },
+        { name: 'security', label: 'Security', icon: 'shield', native: true },
+        { name: 'chat',     label: 'Chat',     icon: 'chat',   native: true,
           desc: 'Ask Marvin about your fleet' },
-        { name: 'settings', label: 'Settings', icon: 'gear',   native: true,      group: 'Vaier' },
-        { name: 'concepts', label: 'Concepts', icon: 'book',   page: 'concepts.html', group: 'Vaier' },
+        { name: 'settings', label: 'Settings', icon: 'gear',   native: true },
+        { name: 'concepts', label: 'Concepts', icon: 'book',   page: 'concepts.html', footer: true },
     ];
 
     // What a machine is, in everyday words: one table, so a card, a machine's page and the topology agree.
@@ -277,6 +269,7 @@
             return 'fleet';
         }
         if (path.length === 2) {
+            if (path[0] === 'settings' && path[1] === 'credentials') return 'credentials';
             if (path[1] === 'map') return 'map';
             if (path[1] === 'topology') return 'topology';
             return 'machine';
@@ -805,7 +798,7 @@
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
                        containers: 'box', container: 'box', services: 'route',
                        service: 'route', disk: 'disk', backup: 'archive', repo: 'box', map: 'map',
-                       topology: 'topology' };
+                       topology: 'topology', credentials: 'key' };
 
     // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
     // read off its device category. A category with no icon (or a machine not yet loaded) falls back to the
@@ -1150,6 +1143,8 @@
                 text = nameOf(seg);
             } else if (i === 2 && S.path[0] === 'fleet') {
                 text = DOOR[seg] || seg;
+            } else if (i === 1 && S.path[0] === 'settings' && seg === 'credentials') {
+                text = 'Fleet credentials';
             }
             if (i === S.path.length - 1) {
                 const here = document.createElement('span');
@@ -1402,8 +1397,9 @@
         const head = paneHead('Fleet', false,
             S.machines.length + (S.machines.length === 1 ? ' machine · ' : ' machines · ') + online
             + ' online');
-        // Adding a machine is a fleet-level act, so it lives on the fleet's own head.
-        headActions(head, [selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine())]);
+        // Adding a machine is a fleet-level act, so it lives on the fleet's own head; Your services is one tap away.
+        headActions(head, [headLink('route', 'Your services', '/launchpad.html'),
+            selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine())]);
         pane.appendChild(head);
 
         const body = document.createElement('div');
@@ -2556,7 +2552,7 @@
             : { icon: 'nas' }),
         // The fleet's own rungs. Each routes into the flow that satisfies it and nothing else.
         ADD_MACHINE:             () => ({ icon: 'machine', label: 'Add a machine',    run: addMachine }),
-        LET_PEOPLE_IN:           () => ({ icon: 'users',   label: 'Review them',      run: () => go(['users']) }),
+        LET_PEOPLE_IN:           () => ({ icon: 'users',   label: 'Review them',      run: () => go(['people']) }),
         WRITE_SURVIVAL_KIT:      () => ({ icon: 'key',     label: 'Write the kit',    run: () => go(['settings']) }),
         CONFIGURE_SMTP:          () => ({ icon: 'gear',    label: 'Set up mail',      run: () => go(['settings']) }),
         // The only nudge whose answer changes what Vaier's login on that machine is allowed to do, so it is
@@ -5099,12 +5095,12 @@
             body.appendChild(signIn);
         }
 
-        // 3. On the Launchpad. A stream has no link, so it has no tile.
+        // 3. In Your services. A stream has no link, so it has no tile.
         if (!s.stream) {
-            body.appendChild(section('On the Launchpad'));
-            body.appendChild(checkRow('Show it on the Launchpad', !s.hiddenFromLaunchpad,
+            body.appendChild(section('In Your services'));
+            body.appendChild(checkRow('Show it in Your services', !s.hiddenFromLaunchpad,
                 (checked) => patchService(s, { hiddenFromLaunchpad: !checked },
-                    'Could not update whether it shows on the Launchpad.')));
+                    'Could not update whether it shows in Your services.')));
             body.appendChild(formField('Its name there', 'Leave empty to use ' + serviceName(s) + '. Its icon is '
                 + 'the one the service shows for itself.',
                 blurInput(s.launchpadAlias || '', serviceName(s),
@@ -7508,7 +7504,7 @@
             ? (c.list.length ? c.list.length + (c.list.length === 1 ? ' credential' : ' credentials')
                              : 'Nothing stored')
             : '';
-        const head = paneHead('Credentials', false, stored);
+        const head = paneHead('Fleet credentials', false, stored);
         // The empty state carries its own accented Add, so the head offers it only beside a list.
         if (c.state === 'ready' && c.list.length) {
             headActions(head, [selVerb('key', 'Add a credential', 'ex-btn', () => credentialFileDialog(null))]);
@@ -8787,6 +8783,14 @@
             saveSetting('/settings/disk-monitor', 'PUT', { diskMonitorThresholdPercent: t }, n, 'Threshold saved.');
         });
 
+        // --- Fleet credentials: one file kept the same on every machine (moved here from the menu, #378) ---
+        body.appendChild(section('Fleet credentials'));
+        const credRow = el('div', 'ex-set-actions');
+        const credLine = el('span', 'ex-set-note');
+        credLine.textContent = 'One file, such as a token or a licence, that Vaier keeps the same on every machine.';
+        credRow.append(selVerb('key', 'Open', 'ex-btn', () => go(['settings', 'credentials'])), credLine);
+        body.appendChild(credRow);
+
         // --- Updating Vaier itself ---
         //
         // The one image Vaier may replace is its own, and only because a person pressed this. Everything else
@@ -9310,6 +9314,17 @@
         clear.onclick = () => { S.sel = []; render(); };
         actions.appendChild(clear);
         return actions;
+    }
+
+    // A head verb that leaves the shell for another page: a real link, so it opens in a new tab on request.
+    function headLink(icon, text, href) {
+        const a = el('a', 'ex-btn');
+        a.href = href;
+        a.innerHTML = svg(icon, 'ex-ico');
+        const s = el('span');
+        s.textContent = text;
+        a.appendChild(s);
+        return a;
     }
 
     function selVerb(icon, text, cls, onclick) {
@@ -10305,6 +10320,8 @@
     // Segments are percent-encoded, so a file called "report Q1?.pdf" survives the round trip: the only bare
     // "/" is a separator and the only bare "?" opens the query.
     const ROUTE_DEFAULT = ['fleet'];
+    // Where a renamed or moved entry went, so an old bookmark still opens it (#378).
+    const MOVED = { users: ['people'], credentials: ['settings', 'credentials'] };
 
     function hrefFor(path, at) {
         return '#/' + path.map(encodeURIComponent).join('/')
@@ -10316,7 +10333,8 @@
         const cut = raw.indexOf('?');
         const body = cut < 0 ? raw : raw.slice(0, cut);
         const at = cut < 0 ? null : new URLSearchParams(raw.slice(cut + 1)).get('at');
-        const path = body.split('/').filter((s) => s !== '').map(decodeURIComponent);
+        let path = body.split('/').filter((s) => s !== '').map(decodeURIComponent);
+        if (MOVED[path[0]]) path = MOVED[path[0]].concat(path.slice(1));
         return { path: path.length ? path : ROUTE_DEFAULT.slice(), at: at || null };
     }
 
@@ -10360,6 +10378,7 @@
         const href = hrefFor(r.path, r.at);
         if (href === _route) return;   // our own write, already painted
         _route = href;
+        if (location.hash !== href) history.replaceState(null, '', href);   // an old address, said anew
         applyRoute(r.path, r.at);
     });
 
@@ -10863,9 +10882,8 @@
 
     // --- the Vaier menu ---------------------------------------------------------------------------------
     //
-    // Settings, Users, Security and Concepts are Vaier's, not the fleet's — siblings of the fleet root rather
-    // than things inside it. Listing them in the fleet pane would say they are part of the fleet, so they sit
-    // in the chrome, where they are one reach away from any depth on any screen.
+    // What the operator does that is Vaier's, not the fleet's — siblings of the fleet root, so they sit in the
+    // chrome, one reach away from any depth on any screen. Home is the logo, not an item.
 
     function setVMenu(open) {
         $('exVMenuBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -10893,34 +10911,19 @@
     function renderVMenu() {
         const menu = $('exVMenu');
         menu.textContent = '';
-        // Everything that is not a machine, grouped by the job it belongs to rather than listed flat. Fleet
-        // has to be here: a global's crumb bar is one segment long ("Settings" is not inside anything), so
-        // without this, standing on Settings left no way back to the fleet at all.
-        // It heads its own group, with the fleet-wide acts under it.
-        let group = null;
+        // Help is there when wanted, and quiet when not: below a rule, smaller than the jobs above it.
+        const foot = el('div', 'ex-vmenu-foot');
         GLOBALS.forEach((g) => {
             if (!offered(g)) return;
-            if (g.group !== group) {
-                group = g.group;
-                menu.appendChild(vMenuGroup(group));
-                if (group === 'Your fleet') {
-                    menu.appendChild(vMenuItem('fleet', 'Fleet', ROUTE_DEFAULT.slice()));
-                }
-            }
-            menu.appendChild(vMenuItem(g.icon, g.label, [g.name], g.desc));
+            (g.footer ? foot : menu).appendChild(vMenuItem(g.icon, g.label, [g.name], g.desc));
         });
+        menu.appendChild(foot);
     }
 
     // Chat is in the menu only while an Anthropic API key is stored: without one there is nothing to ask,
     // and an entry that opens onto "go to Settings first" is a door painted on a wall.
     function offered(g) {
         return g.name !== 'chat' || S.chatAvailable;
-    }
-
-    function vMenuGroup(text) {
-        const g = el('div', 'ex-vmenu-group');
-        g.textContent = text;
-        return g;
     }
 
     $('exVMenuBtn').onclick = (e) => {

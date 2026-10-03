@@ -72,7 +72,7 @@ class MachineTypeTest {
                     .as(row.type().name())
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("Geir's phone")
-                    .hasMessageContaining("Vaier app");
+                    .hasMessageContaining("Install the Vaier app from Your services");
             } else {
                 assertThatCode(() -> row.type().requireVaierMintedConfig("nas")).doesNotThrowAnyException();
             }

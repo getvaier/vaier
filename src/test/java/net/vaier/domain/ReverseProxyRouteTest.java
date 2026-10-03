@@ -1627,6 +1627,8 @@ class ReverseProxyRouteTest {
             .hasMessageContaining("root redirect");
         assertThatThrownBy(() -> streamRoute().validateUpdate(Set.of(RouteSetting.AUTH_MODE)))
             .hasMessageContaining("login");
+        assertThatThrownBy(() -> streamRoute().validateUpdate(Set.of(RouteSetting.LAUNCHPAD)))
+            .hasMessageContaining("a tile in Your services");
     }
 
     @Test
